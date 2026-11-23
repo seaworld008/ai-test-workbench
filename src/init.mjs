@@ -1,7 +1,9 @@
+// @ts-check
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspectBrowserCache } from './doctor.mjs';
+import { ensureInitialGovernanceLock } from './governance.mjs';
 import { runNpm, runPlaywright, runProcess } from './proc.mjs';
 import { syncOfficialAgents } from './agents.mjs';
 
@@ -15,6 +17,7 @@ const SKIP_COPY_NAMES = new Set([
   'playwright-report',
   'test-results',
   'reports',
+  '.aitest',
   '.env',
   '.gitignore',
 ]);
@@ -366,6 +369,9 @@ export async function runInit(options = {}) {
       fs.writeFileSync(step.dest, step.content, 'utf8');
     }
   }
+
+  // Create initial .aitest/governance.lock ONLY if not already present (never overwrites existing human lock!)
+  ensureInitialGovernanceLock(qaDir);
 
   if (bridgeRoot) {
     applyRootMcpBridge(target, qaFolderName, { dryRun: false, force });

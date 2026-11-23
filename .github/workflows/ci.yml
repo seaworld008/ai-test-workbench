@@ -9,7 +9,33 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
-  verify-workbench:
+  unit-and-typecheck-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node-version: ['22', '24', '26']
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Verify Bilingual Docs, Claims Mapping & Desensitization Hygiene
+        run: npm run lint:docs
+
+      - name: Run CLI, Adversarial & Governance Unit Tests
+        run: npm test
+
+      - name: Run Fast North-Star Gate Benchmark (FGER / Triage / Redaction / MisHeal)
+        run: node scripts/run-bench.mjs --fast
+
+  verify-e2e-and-seeded-benchmark:
     strategy:
       fail-fast: false
       matrix:
@@ -25,23 +51,26 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Verify Bilingual Docs & Desensitization Hygiene
-        run: npm run lint:docs
-
-      - name: Run CLI & Guard Unit/Integration Tests
-        run: npm test
-
       - name: Install QA Template Locked Dependencies & Chromium
         working-directory: templates/playwright-qa
         run: |
           npm ci --no-audit --no-fund
           npx playwright install chromium
 
-      - name: Run Offline Smoke + 3-Layer Quality Gate
+      - name: Run TypeScript checkJs across src/**/*.mjs & Gate Kernel
+        run: npm run typecheck
+
+      - name: Run Unit & Live Browser LCP Regression Tests
+        run: npm test
+
+      - name: Run Offline Smoke + 4-Layer Quality Gate
         run: npm run smoke
 
-      - name: Run Full-Stack Local Demo E2E + API Concurrency Verification
+      - name: Run Full-Stack Local Demo E2E + One-Call Verify Change + Web Vitals
         run: npm run demo:verify
+
+      - name: Run Live Seeded-Defect & Anti-Fake-Green Benchmark (SDDR + FGER)
+        run: npm run bench
 
       - name: Verify npm Package Tarball Hygiene
         run: npm pack --dry-run

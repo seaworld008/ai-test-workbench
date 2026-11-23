@@ -23,6 +23,11 @@ if (isTestRun && requestedOnlineProject && !baseURL) {
 
 export default defineConfig({
   testDir: './tests',
+  metadata: {
+    runId: process.env.AITEST_RUN_ID || undefined,
+    suite: process.env.AITEST_ACTIVE_SUITE || undefined,
+    generatedBy: 'ai-test-workbench',
+  },
   timeout: 30_000,
   expect: { timeout: 10_000 },
   globalTimeout: 45 * 60_000,

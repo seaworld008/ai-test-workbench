@@ -2,9 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /**
- * Single source of truth for target URL allowlist/denylist, production blocking,
- * dangerous endpoint blocking, and .env loading (using Node native process.loadEnvFile).
- * Zero external dependencies. Shared by playwright.config.ts, tests/fixtures/base.ts, and CLI.
+ * Single source of truth for target URL allowlist/denylist, outbound egress allowlist (`TEST_EGRESS_MODE=allowlist`),
+ * production blocking, dangerous endpoint blocking, GraphQL mutation blocking, and .env loading.
+ * Zero external dependencies. Shared by playwright.config.ts, tests/fixtures/base.ts, explore.mjs, and CLI.
  */
 
 export function parseCsvList(value) {
@@ -19,10 +19,6 @@ export function parseLowerCsvList(value) {
   return parseCsvList(value).map((s) => s.toLowerCase());
 }
 
-/**
- * Loads a .env file into process.env using Node >=22.12 built-in process.loadEnvFile if present,
- * without overriding already-set environment variables.
- */
 export function loadEnvFileIfPresent(envFilePath) {
   if (!envFilePath || !fs.existsSync(envFilePath)) return {};
   const raw = fs.readFileSync(envFilePath, 'utf8');
@@ -36,6 +32,7 @@ export function loadEnvFileIfPresent(envFilePath) {
 }
 
 export function parseEnvText(content) {
+  /** @type {Record<string, string>} */
   const out = {};
   if (!content || typeof content !== 'string') return out;
   for (const rawLine of content.split(/\r?\n/)) {
@@ -46,10 +43,7 @@ export function parseEnvText(content) {
     if (eqIndex <= 0) continue;
     const key = cleaned.slice(0, eqIndex).trim();
     let val = cleaned.slice(eqIndex + 1).trim();
-    if (
-      (val.startsWith('"') && val.endsWith('"')) ||
-      (val.startsWith("'") && val.endsWith("'"))
-    ) {
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
       val = val.slice(1, -1);
     }
     out[key] = val;
@@ -85,9 +79,6 @@ export function parseSafeHttpUrl(rawUrl) {
   return parsed;
 }
 
-/**
- * Evaluates target environment safety at config load or CLI preflight.
- */
 export function evaluateTargetSafety(envInput = {}) {
   const testEnv = (envInput.TEST_ENV || 'local').trim().toLowerCase();
   const baseUrl = (envInput.TEST_BASE_URL || '').trim();
@@ -95,6 +86,8 @@ export function evaluateTargetSafety(envInput = {}) {
   const allowedHosts = parseLowerCsvList(envInput.TEST_ALLOWED_HOSTS ?? 'localhost,127.0.0.1');
   const allowedOrigins = parseLowerCsvList(envInput.TEST_ALLOWED_ORIGINS ?? '');
   const deniedOrigins = parseLowerCsvList(envInput.TEST_DENIED_ORIGINS ?? '');
+  const extraEgressHosts = parseLowerCsvList(envInput.TEST_EGRESS_EXTRA_HOSTS ?? '');
+  const egressMode = (envInput.TEST_EGRESS_MODE || 'allowlist').trim().toLowerCase();
 
   const errors = [];
 
@@ -104,6 +97,7 @@ export function evaluateTargetSafety(envInput = {}) {
 
   errors.push(...validateAllowlistEntries(allowedHosts));
   errors.push(...validateAllowlistEntries(allowedOrigins));
+  errors.push(...validateAllowlistEntries(extraEgressHosts));
 
   if (requireTarget && !baseUrl) {
     errors.push('REQUIRE_TEST_TARGET=1 is set, but TEST_BASE_URL is empty.');
@@ -123,6 +117,8 @@ export function evaluateTargetSafety(envInput = {}) {
         allowedHosts,
         allowedOrigins,
         deniedOrigins,
+        extraEgressHosts,
+        egressMode,
         allowMutation: envInput.TEST_ALLOW_MUTATION === '1' || envInput.TEST_ALLOW_MUTATION === 'true',
       };
     }
@@ -159,13 +155,12 @@ export function evaluateTargetSafety(envInput = {}) {
     allowedHosts,
     allowedOrigins,
     deniedOrigins,
+    extraEgressHosts,
+    egressMode,
     allowMutation: envInput.TEST_ALLOW_MUTATION === '1' || envInput.TEST_ALLOW_MUTATION === 'true',
   };
 }
 
-/**
- * Throws a descriptive Error if target safety checks fail.
- */
 export function assertTargetSafety(envInput = {}) {
   const result = evaluateTargetSafety(envInput);
   if (!result.ok) {
@@ -179,12 +174,13 @@ function globToRegExp(globPattern) {
   return new RegExp(`^${escaped}$`, 'i');
 }
 
-/**
- * Parses TEST_BLOCKED_ENDPOINTS rules such as:
- * "POST /api/pay*,POST /api/sms*,DELETE /api/users/*"
- */
 export const DEFAULT_BLOCKED_ENDPOINTS =
   'POST /api/pay*,POST /api/payment*,POST /api/sms*,POST /api/notify/real*,DELETE /api/prod*';
+
+/**
+ * Default safe write paths in `TEST_STRICT_READONLY=1` mode (`S-02`: `/graphql` removed from default!).
+ */
+export const DEFAULT_SAFE_WRITE_PATHS = '/api/login,/api/auth/login,/__test__/reset';
 
 export function compileBlockedEndpointRules(rawRules = DEFAULT_BLOCKED_ENDPOINTS) {
   const entries = parseCsvList(rawRules);
@@ -203,8 +199,42 @@ export function compileBlockedEndpointRules(rawRules = DEFAULT_BLOCKED_ENDPOINTS
 }
 
 /**
- * Checks whether an outgoing HTTP request matches denied origins, blocked endpoint rules,
- * or strict read-only mode. Used by both browser `page.route` and wrapped `request` APIRequestContext.
+ * Inspects a GraphQL HTTP payload (`application/json` or `application/graphql`) to detect mutations (`S-01`, `S-02`).
+ * @param {string | undefined | null} postData
+ */
+export function inspectGraphqlPayload(postData) {
+  if (!postData || typeof postData !== 'string') {
+    return { isGraphql: false, hasMutation: false, isPureQuery: false, operationName: null };
+  }
+  let queryText = postData;
+  let operationName = null;
+  try {
+    const parsed = JSON.parse(postData);
+    if (Array.isArray(parsed)) {
+      const combined = parsed.map((p) => String(p?.query || '')).join('\n');
+      queryText = combined;
+      operationName = parsed[0]?.operationName || null;
+    } else if (parsed && typeof parsed === 'object') {
+      queryText = String(parsed.query || '');
+      operationName = typeof parsed.operationName === 'string' ? parsed.operationName : null;
+    }
+  } catch {
+    // raw graphql body
+  }
+
+  // Strip # comments before checking operation keywords
+  const stripped = queryText.replace(/#[^\r\n]*/g, '').trim();
+  if (!stripped) {
+    return { isGraphql: false, hasMutation: false, isPureQuery: false, operationName };
+  }
+  const hasMutation = /\b(?:mutation|subscription)\b/i.test(stripped);
+  const isPureQuery = !hasMutation && (/^\s*(?:query\b|\{)/i.test(stripped) || Boolean(operationName));
+  return { isGraphql: true, hasMutation, isPureQuery, operationName };
+}
+
+/**
+ * Checks whether an outgoing HTTP request violates outbound egress allowlist, denied origins,
+ * blocked endpoint rules, GraphQL mutation guards, or strict read-only mode (`S-02`, `S-03`).
  */
 export function checkOutgoingRequestSafety(method, rawUrl, options = {}) {
   const upperMethod = (method || 'GET').toUpperCase();
@@ -232,6 +262,39 @@ export function checkOutgoingRequestSafety(method, rawUrl, options = {}) {
     };
   }
 
+  // Outbound Egress Allowlist (`TEST_EGRESS_MODE=allowlist`, `S-03`)
+  if (options.egressMode === 'allowlist') {
+    const allowedHosts = options.allowedHosts || ['localhost', '127.0.0.1'];
+    const allowedOrigins = options.allowedOrigins || [];
+    const extraHosts = options.extraEgressHosts || [];
+    let baseHost = null;
+    let baseOrigin = null;
+    if (options.baseURL) {
+      try {
+        const bp = new URL(options.baseURL);
+        baseHost = bp.hostname.toLowerCase();
+        baseOrigin = bp.origin.toLowerCase();
+      } catch {
+        // ignore
+      }
+    }
+    const hostPermitted =
+      allowedHosts.includes(hostname) ||
+      allowedHosts.includes(hostWithPort) ||
+      extraHosts.includes(hostname) ||
+      extraHosts.includes(hostWithPort) ||
+      allowedOrigins.includes(origin) ||
+      (baseHost && hostname === baseHost) ||
+      (baseOrigin && origin === baseOrigin);
+
+    if (!hostPermitted) {
+      return {
+        blocked: true,
+        reason: `Blocked outbound request to non-allowlisted host "${parsed.origin}" (${upperMethod} ${pathname}) under TEST_EGRESS_MODE=allowlist`,
+      };
+    }
+  }
+
   const rules = options.blockedRules || [];
   for (const rule of rules) {
     const methodMatch = rule.method === '*' || rule.method === upperMethod;
@@ -246,7 +309,21 @@ export function checkOutgoingRequestSafety(method, rawUrl, options = {}) {
   if (options.strictReadonly) {
     const readMethods = new Set(['GET', 'HEAD', 'OPTIONS']);
     if (!readMethods.has(upperMethod)) {
-      const safeWritePaths = options.safeWritePaths || ['/api/login', '/api/auth/login', '/graphql'];
+      // GraphQL mutation inspection even if /graphql was manually added to safeWritePaths
+      if (/\/graphql\b/i.test(pathname)) {
+        const gql = inspectGraphqlPayload(options.postData);
+        if (gql.hasMutation) {
+          return {
+            blocked: true,
+            reason: `TEST_STRICT_READONLY=1 blocked GraphQL mutation on ${pathname}`,
+          };
+        }
+        if (options.allowGraphqlQuery && gql.isPureQuery) {
+          return { blocked: false, reason: null };
+        }
+      }
+
+      const safeWritePaths = options.safeWritePaths || parseCsvList(DEFAULT_SAFE_WRITE_PATHS);
       const isSafeException = safeWritePaths.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
       if (!isSafeException) {
         return {
@@ -258,4 +335,57 @@ export function checkOutgoingRequestSafety(method, rawUrl, options = {}) {
   }
 
   return { blocked: false, reason: null };
+}
+
+/**
+ * Strict Zero-Mutation Request Firewall for 0->1 Exploration (`S-01`, `E-05`).
+ * Reuses `checkOutgoingRequestSafety` (egress allowlist + denied origins + blocked endpoints)
+ * AND default-denies ALL non-GET/HEAD/OPTIONS requests unless explicitly allowlisted via `safePostPaths`
+ * or verified as a pure read-only GraphQL `query` (never `mutation`).
+ */
+export function evaluateExploreRequestSafety(method, rawUrl, postData, guardConfig = {}) {
+  const upperMethod = (method || 'GET').toUpperCase();
+  const baseCheck = checkOutgoingRequestSafety(upperMethod, rawUrl, {
+    ...guardConfig,
+    postData,
+    egressMode: guardConfig.egressMode || 'allowlist',
+  });
+  if (baseCheck.blocked) return baseCheck;
+
+  if (upperMethod === 'GET' || upperMethod === 'HEAD' || upperMethod === 'OPTIONS') {
+    return { blocked: false, reason: null };
+  }
+
+  let pathname = '/';
+  try {
+    pathname = new URL(rawUrl, guardConfig.baseURL || 'http://localhost').pathname;
+  } catch {
+    pathname = '/';
+  }
+
+  if (upperMethod === 'POST' && /\/graphql\b/i.test(pathname)) {
+    const gql = inspectGraphqlPayload(postData);
+    if (gql.hasMutation) {
+      return {
+        blocked: true,
+        reason: `[Explore Read-Only Firewall] Blocked GraphQL mutation on ${pathname}`,
+      };
+    }
+    if (guardConfig.allowGraphqlQuery !== false && gql.isPureQuery) {
+      return { blocked: false, reason: null };
+    }
+  }
+
+  const safePostPaths = guardConfig.safePostPaths || [];
+  if (
+    upperMethod === 'POST' &&
+    safePostPaths.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
+  ) {
+    return { blocked: false, reason: null };
+  }
+
+  return {
+    blocked: true,
+    reason: `[Explore Read-Only Firewall] Default-deny blocked non-read request ${upperMethod} ${pathname}`,
+  };
 }

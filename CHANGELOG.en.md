@@ -1,38 +1,52 @@
 # Changelog
 
-> [简体中文 (默认)](./CHANGELOG.md) · [English README](./README.en.md)
+> [简体中文 (默认)](./CHANGELOG.md) · [English README](./README.en.md) · [v5.0 Verification Scorecard](./docs/review/v5-verification-scorecard.en.md)
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [5.0.0] - 2026-11-24
+
+### Added
+- **4-Layer Anti-Fake-Green Gate Kernel v2 (`templates/playwright-qa/support/gate-kernel.mjs`)**:
+  - Introduced the **`S0–S5` Assertion Strength Lattice** and full-workspace Semantic Diff Guard (`AITEST-G101..G113`), blocking equal-count assertion downgrades, `expect(true).toBe(true)`, `test.fail()`, `.catch(() => null)`, inflated `retries`, `expect.soft()`, `testIgnore`, disabled ESLint rules, conditional `if (...) { expect(...) }`, and `200 -> 500` status flips (**`0.0%` Fake-Green Escape Rate across `26/26` cheating patches**).
+- **Governance Tamper Lock & Human Approval Protocol (`src/governance.mjs` & `aitest governance`)**:
+  - Maintains SHA-256 digests for 11 protected files in `.aitest/governance.lock` plus append-only `.aitest/governance-audit.jsonl`; `governance approve` is restricted to human local CLI execution and hard-blocks MCP child processes and bot identities.
+- **Run Ledger Binding & Flaky Auto-Quarantine (`src/ledger.mjs` & `src/flaky.mjs`)**:
+  - Binds each execution to a Crockford Base32 ULID `runId` and workspace input hash (`.aitest/runs/<runId>/manifest.json`), invalidating stale `results.json` files after edits; tracks rolling flaky rates with `<= 7d` TTL quarantine (`.aitest/quarantine.json`).
+- **One-Call Change Verdict, Stateful Healer & Requirement Traceability (`src/verdict.mjs`, `src/heal.mjs`, `src/traceability.mjs`)**:
+  - Added `aitest verify-change` / `aitest_verify_change` emitting `attestation.json`, `verdict-summary.md`, and `verdict.sarif.json`.
+  - Added `aitest heal begin|attempt|conclude`: tool-enforces `0.0%` mis-heal rate on Class B/C/D failures and generates W3C `Trace-ID` defect tickets (`reports/defects/*.md`) for Class C bugs.
+  - Added `aitest trace-matrix` / `aitest_trace_matrix` mapping `REQ-xxx` IDs across specs, tests, and run results.
+- **MCP Execution Model v2 & Child-Process Job Runner (`src/jobs.mjs` & `src/mcp-server.mjs`)**:
+  - Expanded to **21 typed MCP tools**; eliminated `globalThis.console` hijacking; added lock-free read concurrency, per-workspace write locks, `syncBudgetMs` async background jobs, `_meta.progressToken` heartbeats, and `notifications/cancelled` cross-platform process-tree termination (`killProcessTree`). Documented in [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md).
+- **Zero-Dep JSON Schema / OpenAPI 3.x Validator & Seeded-Defect Benchmark (`support/schema-validator.mjs` & `scripts/run-bench.mjs`)**:
+  - Added `npm run bench` verifying `7/7 (100%)` seeded full-stack defects and `26/26 (100%)` blocked cheating patches (`bench/scorecard.json`), plus `npm run typecheck` and `docs/claims.json` verification in `lint:docs`.
+
+### Improved & Security Fixed
+- **Fixed Real CDP Web Vitals & WCAG 2.1 (`src/perf.mjs` & `base.ts`)**: Switched to pre-injected buffered `PerformanceObserver` for real non-null `LCP`, `CLS`, and `INP` (median & P75); added `wcag21a` and `wcag21aa` to `expectAccessible`.
+- **Multi-Surface Security & Redaction v2 (`target-guard.mjs`, `explore.mjs`, `proc.mjs`, `mcp-hub.mjs`)**:
+  - Default-denied non-`GET/HEAD/OPTIONS` requests and blocked `sendBeacon` in `explore` while writing redacted `specs/pages/*.md` ARIA snapshots; removed `/graphql` from safe writes and blocked GraphQL `mutation` payloads; added `TEST_EGRESS_MODE=allowlist` and wrapped `page.request` / `context.request`.
+  - Upgraded `redactSecrets` to 100% recall across 35 secret patterns (JSON passwords, JWTs, cloud tokens, PEM keys, DB URLs); exact-pinned all external MCP presets (`@bytebase/dbhub@0.15.0 --readonly`) and added `.aitest/mcp.lock` hash & prompt-poisoning checks.
+  - Hardened Streamable HTTP (`initialize`-only session creation, `404` on unknown session, TTL + `maxSessions`, `crypto.timingSafeEqual` Bearer auth, protocol-aware batching).
+- **Living Code Map v4, Import-Graph Impact v2 & Structured Triage (`codemap.mjs`, `impact.mjs`, `diagnose.mjs`)**:
+  - Preserved `:id`/`[id]` dynamic routes, pruned deleted routes, converged defects, built static reverse `import` graphs with `why` provenance, achieved `45/45 (100%)` triage accuracy, and enabled strict CLI flag parsing with typo suggestions.
 
 ## [4.0.0] - 2026-11-23
 
 ### Added
-- **AI-Agent-First Native Multi-Protocol MCP Server (`src/mcp-server.mjs` & `aitest mcp-serve`)**:
-  - Zero-dependency MCP server supporting revisions **`2025-11-25`**, **`2025-06-18`**, **`2025-03-26`**, and **`2024-11-05`** across **`stdio`**, **Streamable HTTP (`/mcp`)**, and **Legacy HTTP+SSE (`/sse` + `/messages`)**.
-  - Exposes **12 strongly typed tools** (with JSON Schema `inputSchema`, `outputSchema`, `ToolAnnotations`, and `structuredContent` + `nextRecommendedActions`), static & dynamic **Resources / Templates**, bilingual **Prompts**, `ping`, and `logging/setLevel`.
-  - Enforces HTTP `Origin` DNS-rebinding guards (`403`), mandatory Bearer authentication on non-loopback binds (`401`), and `AITEST_MCP_CAPTURED_STDIO=1` subprocess stdout isolation.
-- **AI-Agent Discovery & Chinese-Default / Paired-English Docs**:
-  - Added `AGENTS.md`/`.en.md`, `CLAUDE.md`, `llms.txt`, `docs/ai-agent-quickstart.md`/`.en.md`, `prompts/first-time-ai-agent.md`/`.en.md`, `skills/ai-test-workbench/references/mcp-server-protocol.md`, and `docs/architecture-and-prompts-blueprint.en.md`.
-  - Converted all `.md` files to Chinese by default with paired `.en.md` counterparts verified automatically in CI via `scripts/check-docs-and-hygiene.mjs` (`npm run lint:docs`).
-- **7th MCP Pillar (`orchestrator`)**: Registered `ai-test-workbench` itself as a built-in preset across all `mcp-hub` profiles.
-
-### Improved & Fixed
-- Added `--json` output to `src/diagnose.mjs` and `src/skill-install.mjs`; added `.gemini/skills/` (`gemini`) and `.github/skills/` (`copilot`) skill destinations; validated SQL table identifiers in `diagnose.mjs`; expanded `src/report.mjs` to index `SYSTEM_MAP.md`, `code-map.json`, `system-overview.md`, and perf summaries.
+- Native Multi-Protocol MCP Server (`stdio`, `/mcp`, `/sse`) with 12 tools and bilingual Chinese-default / `.en.md` docs.
 
 ## [3.0.0] - 2026-11-23
 
 ### Added
-- **Self-Evolving Living Code Map (`aitest map` / `src/codemap.mjs`)**: Indexes host routes (including broken lazy imports), backend controllers, and Prisma/SQL/ORM tables, incrementally fusing runtime exploration, test results, and perf baselines into `knowledge/SYSTEM_MAP.md`.
-- **6-Pillar Read-Only System MCP Hub (`aitest mcp` / `src/mcp-hub.mjs`)**: Generates & audits `.mcp.json` / `.codex/config.toml` across Playwright, Chrome DevTools, Grafana (`--disable-write`), Prometheus, Loki, Sentry, read-only PostgreSQL/MySQL, Redis (`--readonly`), k6, and OpenAPI.
-- **CDP Web Vitals & Concurrent GET API SLO Engine (`aitest perf` / `src/perf.mjs`)**.
-- **Distributed Trace-ID RCA Correlation (`base.ts` + `src/diagnose.mjs`)**.
+- Self-Evolving Living Code Map (`aitest map`), 6-Pillar Read-Only MCP Hub (`aitest mcp`), Perf Engine (`aitest perf`), and Trace-ID correlation.
 
 ## [2.1.0] - 2026-11-23
 
 ### Added
-- **Zero-to-One Read-Only Explorer (`aitest explore` / `src/explore.mjs`)** generating `reports/system-topology.json` and `specs/system-overview.md`.
+- Zero-to-One Read-Only Explorer (`aitest explore`).
 
 ## [2.0.0] - 2026-11-23
 
 ### Added
-- Initial open-source release with isolated `<repo>/qa/`, official Playwright Test Agents manifest management, 3-layer anti-fake-green gate, 4-layer base fixtures, interactive `auth-login`, Diff-Impact (`impact`), and local Smart Campus demo server.
+- Initial open-source release with `<repo>/qa/` isolation, Playwright Test Agents manifest sync, 3-layer gate, `auth-login`, and `demo-campus` target.

@@ -1,20 +1,129 @@
+// @ts-check
 import { parseArgs } from 'node:util';
 import { runUpdateAgents } from './agents.mjs';
 import { runAuditCommand } from './audit.mjs';
 import { runAuthLoginCommand } from './auth-login.mjs';
+import { runMapCommand } from './codemap.mjs';
 import { runDiagnoseCommand } from './diagnose.mjs';
 import { runDoctor } from './doctor.mjs';
 import { runExploreCommand } from './explore.mjs';
+import { runFlakyCommand } from './flaky.mjs';
+import { runGovernanceCommand } from './governance.mjs';
+import { runHealCommand } from './heal.mjs';
 import { detectLang, t } from './i18n.mjs';
 import { runImpactCommand } from './impact.mjs';
 import { runInit } from './init.mjs';
-import { runMapCommand } from './codemap.mjs';
 import { runMcpCommand } from './mcp-hub.mjs';
 import { runMcpServeCommand } from './mcp-server.mjs';
 import { runPerfCommand } from './perf.mjs';
 import { runReportCommand } from './report.mjs';
 import { runSuiteCommand } from './runner.mjs';
 import { runSkillInstallCommand } from './skill-install.mjs';
+import { runTraceMatrixCommand } from './traceability.mjs';
+import { runVerifyChangeCommand } from './verdict.mjs';
+
+const CLI_OPTION_DEFS = {
+  help: { type: /** @type {'boolean'} */ ('boolean'), short: 'h' },
+  lang: { type: /** @type {'string'} */ ('string') },
+  target: { type: /** @type {'string'} */ ('string') },
+  name: { type: /** @type {'string'} */ ('string') },
+  'qa-dir': { type: /** @type {'string'} */ ('string') },
+  preset: { type: /** @type {'string'} */ ('string') },
+  suite: { type: /** @type {'string'} */ ('string') },
+  'base-url': { type: /** @type {'string'} */ ('string') },
+  'entry-path': { type: /** @type {'string'} */ ('string') },
+  'max-pages': { type: /** @type {'string'} */ ('string') },
+  repo: { type: /** @type {'string'} */ ('string') },
+  profile: { type: /** @type {'string'} */ ('string') },
+  servers: { type: /** @type {'string'} */ ('string') },
+  action: { type: /** @type {'string'} */ ('string') },
+  transport: { type: /** @type {'string'} */ ('string') },
+  port: { type: /** @type {'string'} */ ('string') },
+  host: { type: /** @type {'string'} */ ('string') },
+  'auth-token': { type: /** @type {'string'} */ ('string') },
+  'workspace-root': { type: /** @type {'string'} */ ('string') },
+  routes: { type: /** @type {'string'} */ ('string') },
+  endpoint: { type: /** @type {'string'} */ ('string') },
+  concurrency: { type: /** @type {'string'} */ ('string') },
+  iterations: { type: /** @type {'string'} */ ('string') },
+  samples: { type: /** @type {'string'} */ ('string') },
+  mode: { type: /** @type {'string'} */ ('string') },
+  'no-sync-impact': { type: /** @type {'boolean'} */ ('boolean') },
+  'enforce-budget': { type: /** @type {'boolean'} */ ('boolean') },
+  throttle: { type: /** @type {'boolean'} */ ('boolean') },
+  'check-regression': { type: /** @type {'boolean'} */ ('boolean') },
+  account: { type: /** @type {'string'} */ ('string') },
+  'login-path': { type: /** @type {'string'} */ ('string') },
+  timeout: { type: /** @type {'string'} */ ('string') },
+  'budget-ms': { type: /** @type {'string'} */ ('string') },
+  workers: { type: /** @type {'string'} */ ('string') },
+  retries: { type: /** @type {'string'} */ ('string') },
+  loop: { type: /** @type {'string'} */ ('string') },
+  grep: { type: /** @type {'string'} */ ('string') },
+  base: { type: /** @type {'string'} */ ('string') },
+  files: { type: /** @type {'string'} */ ('string') },
+  results: { type: /** @type {'string'} */ ('string') },
+  waivers: { type: /** @type {'string'} */ ('string') },
+  output: { type: /** @type {'string'} */ ('string') },
+  'diff-base': { type: /** @type {'string'} */ ('string') },
+  'max-flaky': { type: /** @type {'string'} */ ('string') },
+  'max-skipped': { type: /** @type {'string'} */ ('string') },
+  client: { type: /** @type {'string'} */ ('string') },
+  by: { type: /** @type {'string'} */ ('string') },
+  reason: { type: /** @type {'string'} */ ('string') },
+  'test-id': { type: /** @type {'string'} */ ('string') },
+  'session-id': { type: /** @type {'string'} */ ('string') },
+  outcome: { type: /** @type {'string'} */ ('string') },
+  summary: { type: /** @type {'string'} */ ('string') },
+  verbosity: { type: /** @type {'string'} */ ('string') },
+  lock: { type: /** @type {'boolean'} */ ('boolean') },
+  'sync-quarantine': { type: /** @type {'boolean'} */ ('boolean') },
+  'skip-run': { type: /** @type {'boolean'} */ ('boolean') },
+  'allow-unbound-results': { type: /** @type {'boolean'} */ ('boolean') },
+  'allow-mutation': { type: /** @type {'boolean'} */ ('boolean') },
+  'dry-run': { type: /** @type {'boolean'} */ ('boolean') },
+  'skip-install': { type: /** @type {'boolean'} */ ('boolean') },
+  'skip-browser': { type: /** @type {'boolean'} */ ('boolean') },
+  'bridge-root': { type: /** @type {'boolean'} */ ('boolean') },
+  force: { type: /** @type {'boolean'} */ ('boolean') },
+  json: { type: /** @type {'boolean'} */ ('boolean') },
+  audit: { type: /** @type {'boolean'} */ ('boolean') },
+  'check-specs': { type: /** @type {'boolean'} */ ('boolean') },
+  'require-e2e': { type: /** @type {'boolean'} */ ('boolean') },
+  'static-only': { type: /** @type {'boolean'} */ ('boolean') },
+  'last-failed': { type: /** @type {'boolean'} */ ('boolean') },
+  'fail-on-flaky': { type: /** @type {'boolean'} */ ('boolean') },
+  headed: { type: /** @type {'boolean'} */ ('boolean') },
+  ui: { type: /** @type {'boolean'} */ ('boolean') },
+  debug: { type: /** @type {'boolean'} */ ('boolean') },
+};
+
+function levenshtein(a, b) {
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j += 1) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i += 1) {
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+function suggestClosestFlag(unknownArg) {
+  const bare = String(unknownArg || '').replace(/^-+/, '').split('=')[0];
+  if (!bare) return null;
+  let best = null;
+  let bestDist = Infinity;
+  for (const candidate of Object.keys(CLI_OPTION_DEFS)) {
+    const dist = levenshtein(bare, candidate);
+    if (dist < bestDist && dist <= 3) {
+      bestDist = dist;
+      best = `--${candidate}`;
+    }
+  }
+  return best;
+}
 
 function printHelp(lang) {
   const commands = [
@@ -30,6 +139,11 @@ function printHelp(lang) {
     'impact',
     'audit',
     'diagnose',
+    'verify-change',
+    'heal',
+    'flaky',
+    'trace-matrix',
+    'governance',
     'report',
     'update-agents',
     'skill-install',
@@ -41,51 +155,19 @@ function printHelp(lang) {
   console.log('  node tools/aitest.mjs <command> [options]\n');
   console.log(`${t(lang, 'commandsHeader')}:`);
   for (const cmd of commands) {
-    console.log(`  ${cmd.padEnd(16)} ${t(lang, 'helpSummary')[cmd]}`);
+    console.log(`  ${cmd.padEnd(16)} ${t(lang, 'helpSummary')[cmd] || ''}`);
   }
   console.log(`\n${t(lang, 'optionsHeader')}:`);
-  console.log('  --target <path>       Target business repository or QA directory');
-  console.log('  --name <slug>         Project name for package.json / lockfile during init');
-  console.log('  --qa-dir <dir>        QA subdirectory name inside target repo (default: qa)');
-  console.log('  --preset <name>       Template preset during init: generic (default) | demo-campus');
-  console.log('  --suite <name>        Suite for run: smoke | e2e | api | a11y | critical | seed | impact | all');
-  console.log('  --base-url <url>      Override TEST_BASE_URL for run, explore, perf, or auth-login (allowlisted only)');
-  console.log('  --entry-path <path>   Starting route path for explore (default: /)');
-  console.log('  --max-pages <n>       Maximum routes to visit during explore (default: 25)');
-  console.log('  --repo <path>         Host source repository root for "map" static indexing (default: parent of qa)');
-  console.log('  --no-sync-impact      Skip auto-updating impact-map.json during "map"');
-  console.log('  --profile <name>      MCP preset profile: minimal | observability | data-verify | perf | full-link');
-  console.log('  --servers <csv>       Comma-separated MCP preset names for "mcp add"');
-  console.log('  --transport <type>    MCP server transport for "mcp-serve": stdio (default) | http | sse');
-  console.log('  --port <n>            HTTP port for "mcp-serve --transport http|sse" (default: 3847)');
-  console.log('  --host <addr>         Bind host for MCP HTTP server (default: 127.0.0.1)');
-  console.log('  --auth-token <token>  Bearer auth token for MCP HTTP server (mandatory if non-loopback)');
-  console.log('  --routes <csv>        Comma-separated routes for "perf" CDP profiling');
-  console.log('  --endpoint <path>     Read-only GET endpoint for "perf" concurrency benchmark');
-  console.log('  --concurrency <n>     Concurrent virtual workers for "perf" API benchmark (default: 4, max: 20)');
-  console.log('  --iterations <n>      Total GET requests for "perf" API benchmark (default: 12, max: 200)');
-  console.log('  --mode <mode>         "perf" mode: all | browser | api');
-  console.log('  --enforce-budget      Exit non-zero in "perf" when perf-budget.json thresholds are exceeded');
-  console.log('  --account <user>      Optional phone/username to pre-fill in auth-login');
-  console.log('  --login-path <path>   Optional login route path for auth-login (default: /)');
-  console.log('  --timeout <sec>       Timeout seconds for interactive auth-login (default: 600)');
-  console.log('  --allow-mutation      Enable @mutation tests for this run (isolated test env only)');
-  console.log('  --workers <n>         Override Playwright worker count');
-  console.log('  --retries <n>         Override Playwright retry count');
-  console.log('  --loop <loops>        Agent loops: codex | claude | vscode | opencode | copilot | none');
-  console.log('  --audit               Run 3-layer quality gate immediately after "run"');
-  console.log('  --check-specs         Run tsc --noEmit + ESLint (with regex fallback) during "audit"');
-  console.log('  --require-e2e         Fail "audit" if 0 online E2E specs executed');
-  console.log('  --diff-base <ref>     Run Healer diff guard against <ref> during "audit"');
-  console.log('  --base <ref>          Git base ref for "impact" (default: HEAD~1)');
-  console.log('  --bridge-root         Opt-in: write root .mcp.json pointing to qa/ run-test-mcp-server');
-  console.log('  --skip-install        Skip npm dependency install during "init"');
-  console.log('  --skip-browser        Skip Chromium install check during "init"');
-  console.log('  --dry-run             Preview planned file operations without writing to disk');
-  console.log('  --force               Force update on agent/skill conflicts');
-  console.log('  --json                Output machine-readable JSON');
-  console.log('  --lang <zh|en>        Override CLI output language');
-  console.log('  -h, --help            Show help\n');
+  console.log('  --target <path>         Target business repository or QA directory');
+  console.log('  --suite <name>          Suite for run: smoke | e2e | api | a11y | critical | seed | impact | all');
+  console.log('  --base-url <url>        Override TEST_BASE_URL (allowlisted non-production only)');
+  console.log('  --workspace-root <csv>  Allowed workspace root boundary for MCP server');
+  console.log('  --diff-base <ref>       Run Semantic AST Diff Guard against <ref> during audit');
+  console.log('  --by <human>            Human reviewer attribution for "governance approve"');
+  console.log('  --reason <text>         Approval reason for "governance approve"');
+  console.log('  --json                  Output machine-readable JSON');
+  console.log('  --lang <zh|en>          Override output language');
+  console.log('  -h, --help              Show help\n');
 }
 
 export async function runCli(argv = process.argv.slice(2)) {
@@ -94,69 +176,18 @@ export async function runCli(argv = process.argv.slice(2)) {
     parsed = parseArgs({
       args: argv,
       allowPositionals: true,
-      strict: false,
-      options: {
-        help: { type: 'boolean', short: 'h' },
-        lang: { type: 'string' },
-        target: { type: 'string' },
-        name: { type: 'string' },
-        'qa-dir': { type: 'string' },
-        preset: { type: 'string' },
-        suite: { type: 'string' },
-        'base-url': { type: 'string' },
-        'entry-path': { type: 'string' },
-        'max-pages': { type: 'string' },
-        repo: { type: 'string' },
-        profile: { type: 'string' },
-        servers: { type: 'string' },
-        action: { type: 'string' },
-        transport: { type: 'string' },
-        port: { type: 'string' },
-        host: { type: 'string' },
-        'auth-token': { type: 'string' },
-        routes: { type: 'string' },
-        endpoint: { type: 'string' },
-        concurrency: { type: 'string' },
-        iterations: { type: 'string' },
-        mode: { type: 'string' },
-        'no-sync-impact': { type: 'boolean' },
-        'enforce-budget': { type: 'boolean' },
-        account: { type: 'string' },
-        'login-path': { type: 'string' },
-        timeout: { type: 'string' },
-        workers: { type: 'string' },
-        retries: { type: 'string' },
-        loop: { type: 'string' },
-        grep: { type: 'string' },
-        base: { type: 'string' },
-        files: { type: 'string' },
-        results: { type: 'string' },
-        waivers: { type: 'string' },
-        output: { type: 'string' },
-        'diff-base': { type: 'string' },
-        'max-flaky': { type: 'string' },
-        'max-skipped': { type: 'string' },
-        client: { type: 'string' },
-        'allow-mutation': { type: 'boolean' },
-        'dry-run': { type: 'boolean' },
-        'skip-install': { type: 'boolean' },
-        'skip-browser': { type: 'boolean' },
-        'bridge-root': { type: 'boolean' },
-        force: { type: 'boolean' },
-        json: { type: 'boolean' },
-        audit: { type: 'boolean' },
-        'check-specs': { type: 'boolean' },
-        'require-e2e': { type: 'boolean' },
-        'static-only': { type: 'boolean' },
-        'last-failed': { type: 'boolean' },
-        'fail-on-flaky': { type: 'boolean' },
-        headed: { type: 'boolean' },
-        ui: { type: 'boolean' },
-        debug: { type: 'boolean' },
-      },
+      strict: true,
+      options: CLI_OPTION_DEFS,
     });
   } catch (err) {
-    console.error(err.message);
+    const rawMsg = String(err?.message || err);
+    const unkMatch = /Unknown option '([^']+)'/.exec(rawMsg);
+    if (unkMatch) {
+      const hint = suggestClosestFlag(unkMatch[1]);
+      console.error(`[CLI Option Error] ${rawMsg}${hint ? ` Did you mean "${hint}"?` : ''}`);
+    } else {
+      console.error(`[CLI Option Error] ${rawMsg}`);
+    }
     return 1;
   }
 
@@ -206,6 +237,7 @@ export async function runCli(argv = process.argv.slice(2)) {
           baseUrl: v['base-url'],
           entryPath: v['entry-path'],
           maxPages: v['max-pages'] ? Number(v['max-pages']) : undefined,
+          noSyncImpact: Boolean(v['no-sync-impact']),
         });
       case 'map':
         return await runMapCommand({
@@ -219,10 +251,12 @@ export async function runCli(argv = process.argv.slice(2)) {
           action: v.action || parsed.positionals[1] || 'presets',
           profile: v.profile,
           servers: v.servers,
+          lock: Boolean(v.lock),
           transport: v.transport,
           port: v.port !== undefined ? Number(v.port) : undefined,
           host: v.host,
           authToken: v['auth-token'],
+          workspaceRoots: v['workspace-root'],
         });
       case 'mcp-serve':
         return await runMcpServeCommand({
@@ -231,6 +265,7 @@ export async function runCli(argv = process.argv.slice(2)) {
           port: v.port !== undefined ? Number(v.port) : undefined,
           host: v.host,
           authToken: v['auth-token'],
+          workspaceRoots: v['workspace-root'],
         });
       case 'perf':
         return await runPerfCommand({
@@ -240,7 +275,10 @@ export async function runCli(argv = process.argv.slice(2)) {
           endpoint: v.endpoint,
           concurrency: v.concurrency ? Number(v.concurrency) : undefined,
           iterations: v.iterations ? Number(v.iterations) : undefined,
+          samples: v.samples ? Number(v.samples) : undefined,
           mode: v.mode,
+          throttle: Boolean(v.throttle),
+          checkRegression: Boolean(v['check-regression']),
           enforceBudget: Boolean(v['enforce-budget']),
         });
       case 'run':
@@ -259,6 +297,7 @@ export async function runCli(argv = process.argv.slice(2)) {
           headed: Boolean(v.headed),
           ui: Boolean(v.ui),
           debug: Boolean(v.debug),
+          verbosity: v.verbosity,
         });
       case 'impact':
         return await runImpactCommand({
@@ -274,6 +313,7 @@ export async function runCli(argv = process.argv.slice(2)) {
           checkSpecs: Boolean(v['check-specs']),
           requireE2e: Boolean(v['require-e2e']),
           staticOnly: Boolean(v['static-only']),
+          allowUnboundResults: Boolean(v['allow-unbound-results']),
           diffBase: v['diff-base'],
           maxFlaky: v['max-flaky'] !== undefined ? Number(v['max-flaky']) : undefined,
           maxSkipped: v['max-skipped'] !== undefined ? Number(v['max-skipped']) : undefined,
@@ -283,6 +323,39 @@ export async function runCli(argv = process.argv.slice(2)) {
           ...common,
           results: v.results,
           output: v.output,
+        });
+      case 'verify-change':
+        return await runVerifyChangeCommand({
+          ...common,
+          baseUrl: v['base-url'],
+          base: v.base,
+          mode: v.mode,
+          budgetMs: v['budget-ms'] ? Number(v['budget-ms']) : undefined,
+        });
+      case 'heal':
+        return await runHealCommand({
+          ...common,
+          action: v.action || parsed.positionals[1] || 'begin',
+          testId: v['test-id'],
+          sessionId: v['session-id'],
+          outcome: v.outcome,
+          summary: v.summary,
+          results: v.results,
+          skipRun: Boolean(v['skip-run']),
+        });
+      case 'flaky':
+        return await runFlakyCommand({
+          ...common,
+          syncQuarantine: Boolean(v['sync-quarantine']),
+        });
+      case 'trace-matrix':
+        return await runTraceMatrixCommand(common);
+      case 'governance':
+        return await runGovernanceCommand({
+          ...common,
+          action: v.action || parsed.positionals[1] || 'verify',
+          by: v.by,
+          reason: v.reason,
         });
       case 'report':
         return await runReportCommand(common);

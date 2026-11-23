@@ -1,37 +1,39 @@
-# 架构设计与安全边界 (`ai-test-workbench` v4.0)
+# 架构设计与可信安全边界 (`ai-test-workbench` v5.0)
 
-> [English Version](./ARCHITECTURE.en.md) · [简体中文主文档](./README.md) · [AGENTS.md](./AGENTS.md)
+> [English Version](./ARCHITECTURE.en.md) · [四层门禁与治理指南](./docs/governance.md) · [ADR-0001 MCP 内核决策](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) · [简体中文主文档](./README.md)
 
-## 1. 两阶段执行模型：AI Agent 创作期 vs 确定性回归期
+## 1. 核心定位：AI 编码 Agent 的独立可信验证内核
 
-`ai-test-workbench` 严格隔离**测试创作/自愈阶段**与**确定性回归阶段**：
+`ai-test-workbench v5.0` 严格隔离**AI Agent 探索/创作/受控自愈期**与**确定性可信验证期**：
 
-1. **创作与修复阶段（AI Agent 优先 + MCP 协议驱动）**：
-   - 通过原生 **`ai-test-workbench mcp-serve`**（兼容 `stdio` / `Streamable HTTP (/mcp)` / `Legacy SSE (/sse)`，支持 MCP `2024-11-05` 至 `2025-11-25+`）与 Playwright 内置 `run-test-mcp-server` 协同 Claude Code、Codex CLI、Cursor、Copilot、Gemini CLI、Antigravity。
-   - **12 个强类型 MCP 工具**均声明 `outputSchema` 与 `ToolAnnotations`，向 Agent 返回 `{ ok, exitCode, tool, summary, data, nextRecommendedActions }`；在 `stdio` 模式下通过 `AITEST_MCP_CAPTURED_STDIO=1` + 异步控制台互斥锁严格屏蔽子进程与日志对标准输出 FD 1 的干扰。
-2. **确定性回归阶段（Deterministic Runner）**：
-   - 本地提交前、PR、GitHub Actions、Jenkins 与 GitLab CI 直接执行静态 TypeScript 测试。
-   - 回归阶段**零大模型调用、零模型 API 密钥依赖**，测试结果可确定性复现。
+1. **创作与受控治理层（MCP 执行模型 v2：`src/mcp-server.mjs` + `src/jobs.mjs`）**：
+   - 原生支持 `stdio`、`Streamable HTTP (/mcp)` 与 `Legacy HTTP+SSE (/sse)`，兼容 MCP `2024-11-05` 至 `2025-11-25+`，根包保持**零外部运行时依赖**（详见 [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md)）。
+   - 暴露 **21 个强类型 MCP 工具**。只读工具全并发无锁；写操作与长任务在独立子进程（`AITEST_MCP_CHILD=1`）中按工作区互斥锁运行，支持 `_meta.progressToken` 进度通知、`notifications/cancelled` 进程树级强杀与 `syncBudgetMs` 异步后台作业切换。
+   - **特权物理隔离**：重签治理锁的 `aitest governance approve` 仅限人类在本地终端调用，永不注册为 MCP 工具且拒绝 MCP 子进程调用。
+2. **确定性回归与一键终审层（Deterministic Runner + `verifyChangeCore`）**：
+   - 本地提交前、PR 与 CI 直接运行静态 TypeScript 测试与 `aitest verify-change`，**零大模型调用、零模型 API 密钥依赖**，产出绑定 ULID `runId` 的 `attestation.json` 与 `verdict.sarif.json`。
 
 ## 2. 跨项目物理隔离 (`<repo>/qa/`)
 
-每个业务仓库（Next.js、Vue/H5、React、Java/Spring Cloud、PHP/ThinkPHP）获得完全独立的 `<repo>/qa/` 子工程，拥有独立的 `package.json`、`package-lock.json`、`.env`（已忽略）、`playwright/.auth/`、`specs/`、`tests/`、`knowledge/`、`impact-map.json`、`waivers.json` 与 `reports/`，并在 `init` 时探测宿主工程 `tsconfig.json` / `eslint.config.*` 通配重叠风险。
+每个业务仓库获得完全独立的 `<repo>/qa/` 子工程，拥有精确锁版本的依赖、`.aitest/governance.lock`、`.aitest/runs/` 运行账本、`.aitest/quarantine.json`、`specs/`、`tests/`、`knowledge/`、`impact-map.json`、`waivers.json` 与 `reports/`，绝不污染宿主构建脚本。
 
-## 3. 单一真源双端安全守卫 (`support/target-guard.mjs`)
+## 3. 全平面默认拒绝安全守卫 (`support/target-guard.mjs` + `base.ts`)
 
-1. **环境与目标域名硬阻断**：`playwright.config.ts`、`tests/fixtures/base.ts` 与 CLI（`src/origin-guard.mjs`）共用同一套零依赖守卫，拒绝 `TEST_ENV=production|prod|live|online` 与通配符域名，强制 `TEST_ALLOWED_HOSTS` / `TEST_DENIED_ORIGINS`。
-2. **浏览器 + API + Service Worker 三重接口拦截**：`TEST_BLOCKED_ENDPOINTS` 同时拦截 `page.route` 与 `Proxy` 包装后的 `APIRequestContext`，并设置 `serviceWorkers: 'block'`。
-3. **写操作隔离策略 (`@mutation`)**：默认 `TEST_ALLOW_MUTATION=0` 时自动 `--grep-invert=@mutation` 排除并在 `audit-results.mjs` 单独列明 `policyExcludedMutation`，绝不混入 `passed`。
-4. **MCP HTTP 安全边界**：Streamable HTTP 与 Legacy SSE 服务端默认仅监听 `127.0.0.1`、强制校验 `Origin`（非允许 Origin 返回 `403` 防 DNS 重绑定），绑定非回环网卡时强制要求 `--auth-token` / `AITEST_MCP_TOKEN`（`401`）。
+1. **目标环境与出站白名单硬阻断**：拒绝 `TEST_ENV=production|prod|live|online` 与通配符域名，强制 `TEST_ALLOWED_HOSTS` / `TEST_DENIED_ORIGINS`，支持 `TEST_EGRESS_MODE=allowlist` 严格出站白名单。
+2. **全通道请求拦截**：在 `tests/fixtures/base.ts` 同时包装 `context.route`、`APIRequestContext`、`context.request` 与 `page.request`，设置 `serviceWorkers: 'block'`，并通过 ESLint 禁止裸调 `request.newContext()`；拦截 GraphQL `mutation` 载荷。
+3. **默认禁写探索器（`src/explore.mjs`）**：`explore` 默认拒绝一切非 `GET/HEAD/OPTIONS` 请求并禁用 `navigator.sendBeacon`，移除 `/graphql` 默认写豁免。
+4. **凭据脱敏 v2 与供应链锁（`src/proc.mjs` + `src/mcp-hub.mjs`）**：自动擦除 JSON 密码/令牌、JWT、云厂商密钥、PEM 私钥与连接串（35/35 对抗语料召回率 `100%`）；7 大支柱外部 MCP 预设全量精确锁版本并支持 `.aitest/mcp.lock` 漂移与投毒审计。
+5. **MCP HTTP 安全边界**：默认监听 `127.0.0.1`、严格校验 `Origin`（`403`）、仅允许 `initialize` 创建会话、未知会话返回 `404`、采用 `crypto.timingSafeEqual` 校验 Bearer Token 并限制 `--allowed-root` 工作区根目录。
 
-## 4. 三层防假绿质量门禁 (`scripts/audit-results.mjs`)
+## 4. 四层防假绿质量门禁内核 (`support/gate-kernel.mjs`)
 
-- **静态门禁**：`tsc --noEmit` + `eslint-plugin-playwright`（强制 `expect-expect`、`no-skipped-test`、`no-focused-test`、`no-wait-for-timeout`、`no-force-option`、`prefer-web-first-assertions`、`no-conditional-in-test`）。
-- **运行时门禁**：严拆 `passed`、`failed`、`flaky`、`skipped`、`policyExcludedMutation`，校验证照过期的 `waivers.json`（含 `owner` / `reason` / `expiresAt`），支持 `--require-e2e` 与零用例失败保护。
-- **Healer Diff 守卫 (`--diff-base`)**：禁止修复提交中出现净断言数下降、新增 `skip/fixme/only`、`{ force: true }`、空 `.catch(() => {})` 或膨胀超时（`>= 60000ms`）。
+- **Layer 0 治理防篡改锁**：校验 11 个受保护治理与配置脚本的 `.aitest/governance.lock` SHA-256 指纹。
+- **Layer 1 静态门禁**：`tsc --noEmit` + `eslint-plugin-playwright`（禁跳过、禁 `.only`、禁硬等待、禁 `{ force: true }`、禁 `test.fail()`、禁裸 `request.newContext()`）。
+- **Layer 2 运行账本与豁免门禁**：通过 `src/ledger.mjs` 校验 `results.json` 与当前工作区源码输入指纹一致，防重放陈旧绿灯；按 `file:line` 去重 `@mutation`；强制人类审批、单号绑定、`<= 5` 上限与 `<= 14 天` TTL 的 `waivers.json`。
+- **Layer 3 `S0–S5` 断言强度格与语义 Diff 守卫**：扫描整个 `qa/`（含未跟踪文件），拦截 `AITEST-G101..G113` 全部语义弱化补丁（26/26 作弊补丁拦截率 `100%`，`FGER = 0%`）。
 
-## 5. 活体代码地图、7 大支柱 MCP 中枢与全链路性能/RCA (v4.0)
+## 5. 智能图谱 v4、反向依赖精选、状态机自愈与真实 Web Vitals
 
-- **活体代码与系统知识地图（`src/codemap.mjs` → `knowledge/code-map.json` + `SYSTEM_MAP.md`）**：融合源码路由/懒加载断链/Controller/SQL 与 Prisma 表 + 运行态探索 + 测试结果 + 性能报告，非破坏式刷新 `impact-map.json`。
-- **7 大支柱全链路 MCP 中枢（`src/mcp-hub.mjs`）**：编排自研服务（`orchestrator`）、浏览器/CDP（`browser`）、可观测与崩溃（`observability`：`grafana --disable-write`、`prometheus`、`loki`、`sentry`）、数据库（`database`：`postgres-readonly`、`mysql-readonly`）、中间件（`middleware`：`redis-readonly --readonly`）、性能（`performance`：`k6`）与契约（`api-contract`：`openapi-contract`），并由 `aitest mcp doctor` 强制审计只读开关与环境变量占位符。
-- **Trace-ID 根因定位与性能 SLO（`src/perf.mjs` / `base.ts` / `src/diagnose.mjs`）**：捕获分布式链路头（`traceparent`、`x-trace-id`、`x-request-id`、`sw8`、`eagleeye-traceid`），结合 `perf-budget.json` 校验浏览器 CDP Web Vitals 与并发 GET API `P50/P90/P95/P99/RPS`，对 DB 表名做正则校验后输出可直接执行的排障查询语句。
+- **活体代码地图 v4 & 反向依赖精选（`src/codemap.mjs` + `src/impact.mjs`）**：保留 `:id` / `[id]` 动态路由、自动清理已删路由、收敛历史缺陷；通过静态 `import` 反向依赖图计算传递受影响测试并给出 `why` 证据链。
+- **有状态自愈与需求追溯（`src/heal.mjs` + `src/traceability.mjs`）**：B/C/D 类在工具层硬阻断改测试（误修率 `0%`），C 类自动产出含 W3C `Trace-ID` 的缺陷工单；构建 `REQ-xxx` 双向追溯矩阵。
+- **真实 `PerformanceObserver` Web Vitals 与契约校验（`src/perf.mjs` + `schema-validator.mjs`）**：预注入缓冲观察器采集真实 `LCP / CLS / INP` 中位数与 P75，配套零依赖 JSON Schema / OpenAPI 3.x 响应校验与 WCAG 2.0/2.1/2.2 AA 扫描。

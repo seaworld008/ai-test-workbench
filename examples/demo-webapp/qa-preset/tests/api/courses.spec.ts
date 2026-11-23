@@ -10,24 +10,40 @@ interface CoursesResponse {
   courses: CourseItem[];
 }
 
+const COURSES_RESPONSE_SCHEMA = {
+  type: 'object',
+  required: ['courses'],
+  additionalProperties: false,
+  properties: {
+    courses: {
+      type: 'array',
+      minItems: 3,
+      items: {
+        type: 'object',
+        required: ['id', 'title', 'instructor', 'seatsLeft'],
+        properties: {
+          id: { type: 'string', minLength: 1 },
+          title: { type: 'string', minLength: 1 },
+          instructor: { type: 'string', minLength: 1 },
+          seatsLeft: { type: 'integer', minimum: 0 },
+        },
+      },
+    },
+  },
+};
+
 test.describe('Smart Campus Courses & Enrollment API Contracts', () => {
-  test('GET /api/courses matches contract and includes boundary seat items @critical', async ({ request }) => {
+  test('[REQ-CATALOG-001] GET /api/courses matches JSON Schema contract and includes boundary seat items @critical', async ({ request }) => {
     const response = await request.get('/api/courses');
-    const data = await expectApiContract<CoursesResponse>(response, 200, (body) => {
-      expect(Array.isArray(body.courses)).toBe(true);
-      expect(body.courses.length).toBeGreaterThanOrEqual(3);
-      for (const course of body.courses) {
-        expect(typeof course.id).toBe('string');
-        expect(typeof course.title).toBe('string');
-        expect(typeof course.seatsLeft).toBe('number');
-      }
+    const data = await expectApiContract<CoursesResponse>(response, 200, {
+      schema: COURSES_RESPONSE_SCHEMA,
     });
 
     const soldOut = data.courses.find((c) => c.seatsLeft === 0);
     expect(soldOut).toBeDefined();
   });
 
-  test('GET /api/admin/audit enforces 403 RBAC for student token @critical', async ({ request }) => {
+  test('[REQ-RBAC-001] GET /api/admin/audit enforces 403 RBAC for student token @critical', async ({ request }) => {
     const loginRes = await request.post('/api/login', {
       data: { username: 'student_rbac_check', password: 'qa-pass-123' },
     });
@@ -39,7 +55,7 @@ test.describe('Smart Campus Courses & Enrollment API Contracts', () => {
     expect(adminRes.status()).toBe(403);
   });
 
-  test('duplicate enrollment returns 409 and concurrent 1-seat race yields exact 201 + 409 @mutation', async ({
+  test('[REQ-ENROLL-001] duplicate enrollment returns 409 and concurrent 1-seat race yields exact 201 + 409 @mutation', async ({
     request,
   }, testInfo) => {
     const resetRes = await request.post('/__test__/reset');

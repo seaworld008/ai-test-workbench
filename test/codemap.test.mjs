@@ -121,6 +121,76 @@ test('mergeLivingCodeMap evolves across revisions and syncImpactMapFromCodeMap p
   }
 });
 
+test('CodeMap v2 preserves dynamic routes (:id / [id]), prunes deleted routes, and converges defects without seenCount inflation', async () => {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aitest-codemap-v2-'));
+  try {
+    fs.mkdirSync(path.join(repoDir, 'src', 'app', 'users', '[id]'), { recursive: true });
+    fs.writeFileSync(path.join(repoDir, 'src', 'app', 'users', '[id]', 'page.tsx'), 'export default function User() {}', 'utf8');
+    fs.writeFileSync(
+      path.join(repoDir, 'src', 'router.ts'),
+      `export const routes = [{ path: '/courses/:courseId', component: () => import('./app/users/[id]/page') }, { path: '/temp-old', component: () => import('./app/users/[id]/page') }];`,
+      'utf8'
+    );
+
+    await runCli(['init', '--name', 'cm-v2', '--target', repoDir, '--skip-install', '--loop', 'none']);
+    const qaDir = path.join(repoDir, 'qa');
+    fs.mkdirSync(path.join(qaDir, 'reports'), { recursive: true });
+
+    // Snapshot #1 with console error on /courses/course-open-101 (maps to /courses/:courseId!)
+    fs.writeFileSync(
+      path.join(qaDir, 'reports', 'system-topology.json'),
+      JSON.stringify({
+        snapshotId: 'snap_001',
+        pages: [{ route: '/courses/course-open-101', title: 'Course Detail' }],
+        consoleErrors: [{ route: '/courses/course-open-101', message: 'TypeError: boom' }],
+      }),
+      'utf8'
+    );
+
+    const s1 = syncLivingCodeMap(qaDir, { repoDir });
+    const m1 = JSON.parse(fs.readFileSync(s1.codeMapPath, 'utf8'));
+    assert.equal(m1.schemaVersion, 4);
+    assert.ok(m1.routes['/users/:id']);
+    assert.ok(m1.routes['/courses/:courseId']);
+    assert.equal(m1.routes['/courses/:courseId'].title, 'Course Detail');
+    assert.equal(m1.defects[0].seenCount, 1);
+
+    // Re-syncing 5x with the SAME snapshot + skipWriteIfUnchanged -> seenCount stays 1 and revision stays unchanged!
+    for (let i = 0; i < 5; i += 1) {
+      const repeat = syncLivingCodeMap(qaDir, { repoDir, skipWriteIfUnchanged: true });
+      assert.equal(repeat.unchanged, true);
+      assert.equal(repeat.revision, s1.revision);
+    }
+
+    // Delete /temp-old from router.ts and deliver 2 clean snapshots -> /temp-old pruned & defect closes!
+    fs.writeFileSync(
+      path.join(repoDir, 'src', 'router.ts'),
+      `export const routes = [{ path: '/courses/:courseId', component: () => import('./app/users/[id]/page') }];`,
+      'utf8'
+    );
+    fs.writeFileSync(
+      path.join(qaDir, 'reports', 'system-topology.json'),
+      JSON.stringify({ snapshotId: 'snap_002', pages: [{ route: '/courses/course-open-101' }], consoleErrors: [] }),
+      'utf8'
+    );
+    const s2 = syncLivingCodeMap(qaDir, { repoDir });
+    const m2 = JSON.parse(fs.readFileSync(s2.codeMapPath, 'utf8'));
+    assert.equal(Boolean(m2.routes['/temp-old']), false, 'Deleted static route must be pruned');
+    assert.equal(m2.defects[0].status, 'resolved-candidate');
+
+    fs.writeFileSync(
+      path.join(qaDir, 'reports', 'system-topology.json'),
+      JSON.stringify({ snapshotId: 'snap_003', pages: [{ route: '/courses/course-open-101' }], consoleErrors: [] }),
+      'utf8'
+    );
+    const s3 = syncLivingCodeMap(qaDir, { repoDir });
+    const m3 = JSON.parse(fs.readFileSync(s3.codeMapPath, 'utf8'));
+    assert.equal(m3.defects[0].status, 'closed');
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
 test('generateDiagnosticsMarkdown correlates CodeMap source files and captured traceIds', () => {
   const qaDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aitest-diag-link-'));
   try {

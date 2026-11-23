@@ -1,8 +1,10 @@
+// @ts-check
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { probeToolVersion, redactSecrets, runNpm, resolvePlaywrightCli, runPlaywright } from './proc.mjs';
+import { GATE_KERNEL_VERSION } from '../templates/playwright-qa/support/gate-kernel.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKBENCH_ROOT = path.resolve(__dirname, '..');
@@ -188,9 +190,10 @@ export async function runDoctor(options = {}) {
     );
   }
 
-  // 9. Optional target QA check
+  // 9. Optional target QA check & Gate Kernel drift check (A-03)
   if (targetDir) {
-    const targetPwCli = resolvePlaywrightCli(targetDir) || resolvePlaywrightCli(path.join(targetDir, 'qa'));
+    const candidateQa = fs.existsSync(path.join(targetDir, 'playwright.config.ts')) ? targetDir : path.join(targetDir, 'qa');
+    const targetPwCli = resolvePlaywrightCli(targetDir) || resolvePlaywrightCli(candidateQa);
     const hasDir = fs.existsSync(targetDir);
     add(
       hasDir ? (targetPwCli ? 'OK' : 'WARN') : 'FAIL',
@@ -201,6 +204,24 @@ export async function runDoctor(options = {}) {
           : `Directory exists, Playwright not initialized yet (${targetDir})`
         : `Target directory does not exist: ${targetDir}`
     );
+
+    const hostKernelPath = path.join(candidateQa, 'support', 'gate-kernel.mjs');
+    if (fs.existsSync(candidateQa) && fs.existsSync(path.join(candidateQa, 'playwright.config.ts'))) {
+      if (!fs.existsSync(hostKernelPath)) {
+        add('WARN', 'Gate Kernel Drift', `Host QA directory predates Gate Kernel v${GATE_KERNEL_VERSION}; update support/gate-kernel.mjs.`);
+      } else {
+        const hostSrc = fs.readFileSync(hostKernelPath, 'utf8');
+        const m = /GATE_KERNEL_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(hostSrc);
+        const hostVer = m ? m[1] : 'unknown';
+        add(
+          hostVer === GATE_KERNEL_VERSION ? 'OK' : 'WARN',
+          'Gate Kernel Version',
+          hostVer === GATE_KERNEL_VERSION
+            ? `v${hostVer} matches workbench`
+            : `Host QA kernel v${hostVer} != workbench v${GATE_KERNEL_VERSION}`
+        );
+      }
+    }
   }
 
   const failCount = checks.filter((c) => c.status === 'FAIL').length;
