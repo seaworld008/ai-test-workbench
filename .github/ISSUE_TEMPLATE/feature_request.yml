@@ -1,0 +1,18 @@
+name: Feature Request / 功能建议
+description: Propose an improvement for Playwright Test Agents, quality gates, or stack adapters
+title: "[Feat]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Bottleneck / 解决的痛点
+      description: Describe the testing workflow bottleneck or missing capability.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution / 建议方案
+    validations:
+      required: true

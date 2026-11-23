@@ -1,0 +1,58 @@
+// Example Declarative Jenkins Pipeline (Stage 2/3 Reference Template)
+// Container tag MUST match the exact @playwright/test version locked in qa/package-lock.json (1.65.1).
+pipeline {
+    agent {
+        docker {
+            image 'mcr.microsoft.com/playwright:v1.65.1-noble'
+            args '--ipc=host'
+        }
+    }
+    environment {
+        CI = 'true'
+        TEST_ENV = 'staging'
+        TEST_BASE_URL = 'https://staging.example.internal'
+        TEST_ALLOWED_HOSTS = 'staging.example.internal'
+        TEST_DENIED_ORIGINS = 'https://example.com,https://www.example.com'
+        REQUIRE_TEST_TARGET = '1'
+        TEST_ALLOW_MUTATION = '0'
+    }
+    stages {
+        stage('QA Dependencies') {
+            steps {
+                dir('qa') {
+                    sh 'npm ci --no-audit --no-fund'
+                }
+            }
+        }
+        stage('Static Anti-Fake-Green Gate') {
+            steps {
+                dir('qa') {
+                    sh 'npm run typecheck'
+                    sh 'npm run lint'
+                }
+            }
+        }
+        stage('Deterministic Smoke, E2E & API') {
+            steps {
+                dir('qa') {
+                    sh 'npx playwright test --project=smoke --project=e2e --project=api --grep-invert=@mutation --fail-on-flaky-tests'
+                }
+            }
+        }
+        stage('QA Policy Audit') {
+            steps {
+                dir('qa') {
+                    sh 'node scripts/audit-results.mjs reports/results.json --check-specs --require-e2e'
+                }
+            }
+        }
+    }
+    post {
+        always {
+            junit allowEmptyResults: false, testResults: 'qa/reports/junit.xml'
+            // Restrict artifact visibility & retention per internal security policy (traces/videos may contain session data)
+            archiveArtifacts allowEmptyArchive: true,
+                artifacts: 'qa/playwright-report/**,qa/test-results/**,qa/reports/**'
+        }
+    }
+}

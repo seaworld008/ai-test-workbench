@@ -1,0 +1,33 @@
+# Dependencies & Build
+node_modules/
+**/node_modules/
+!templates/playwright-qa/package-lock.json
+
+# Local sandbox & verification workspaces
+.sandbox/
+*.tmp
+*.log
+
+# Secrets & Environment
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Playwright auth & execution artifacts
+playwright/.auth/
+**/playwright/.auth/
+playwright-report/
+**/playwright-report/
+test-results/
+**/test-results/
+reports/
+**/reports/
+blob-report/
+**/blob-report/
+
+# OS / IDE clutter
+.DS_Store
+Thumbs.db

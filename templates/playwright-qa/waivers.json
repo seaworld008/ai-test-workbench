@@ -1,0 +1,4 @@
+{
+  "description": "Time-bounded, owner-attributed temporary exemptions. Expired waivers automatically fail the quality gate.",
+  "waivers": []
+}

@@ -1,0 +1,19 @@
+{
+  "description": "Maps changed repository files to targeted Playwright spec files for fast local/PR feedback. Unmapped or shared infra changes automatically fall back to the full regression suite.",
+  "rules": [
+    {
+      "match": [
+        "src/app/page.*",
+        "src/views/home/**",
+        "src/pages/index.*",
+        "src/components/Navbar.*",
+        "src/components/Header.*"
+      ],
+      "specs": ["tests/e2e/home.spec.ts"]
+    },
+    {
+      "match": ["src/app/api/**", "src/api/**", "backend/**"],
+      "specs": ["tests/api/health.spec.ts"]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "name": "ai-test-workbench-qa",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test --project=smoke --project=e2e --project=api",
+    "test:smoke": "playwright test --project=smoke",
+    "test:e2e": "playwright test --project=e2e",
+    "test:api": "playwright test --project=api",
+    "test:seed": "playwright test --project=seed",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint tests",
+    "audit": "node scripts/audit-results.mjs reports/results.json --check-specs",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.65.1",
+    "@types/node": "26.6.6",
+    "eslint": "10.15.0",
+    "eslint-plugin-playwright": "2.12.2",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.73.0"
+  }
+}

@@ -1,0 +1,32 @@
+# Example GitLab CI Pipeline (Reference Template)
+# Image version must match exact @playwright/test version in qa/package-lock.json (1.65.1).
+
+stages:
+  - qa
+
+playwright_qa_gate:
+  stage: qa
+  image: mcr.microsoft.com/playwright:v1.65.1-noble
+  variables:
+    CI: "true"
+    TEST_ENV: "staging"
+    TEST_BASE_URL: "https://staging.example.internal"
+    TEST_ALLOWED_HOSTS: "staging.example.internal"
+    REQUIRE_TEST_TARGET: "1"
+    TEST_ALLOW_MUTATION: "0"
+  script:
+    - cd qa
+    - npm ci --no-audit --no-fund
+    - npm run typecheck
+    - npm run lint
+    - npx playwright test --project=smoke --project=e2e --project=api --grep-invert=@mutation --fail-on-flaky-tests
+    - node scripts/audit-results.mjs reports/results.json --check-specs --require-e2e
+  artifacts:
+    when: always
+    expire_in: 7 days
+    reports:
+      junit: qa/reports/junit.xml
+    paths:
+      - qa/playwright-report/
+      - qa/reports/
+      - qa/test-results/

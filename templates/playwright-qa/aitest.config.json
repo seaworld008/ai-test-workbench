@@ -1,0 +1,12 @@
+{
+  "assertFunctionNames": [
+    "expect*",
+    "assert*",
+    "verify*"
+  ],
+  "criticalTags": [
+    "@critical",
+    "@smoke"
+  ],
+  "maxFlaky": 0
+}
