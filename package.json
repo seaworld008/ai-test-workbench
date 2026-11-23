@@ -1,7 +1,7 @@
 {
   "name": "ai-test-workbench",
-  "version": "3.0.0",
-  "description": "Reusable AI-driven full-link testing workbench & Agent Skill: Zero-to-One Explorer, Self-Evolving Living Code Map, 6-Pillar Read-Only System MCP Hub (Grafana/Prometheus/Loki/Sentry/DB/Redis/k6), CDP/API Perf Budgets, and 3-Layer Anti-Fake-Green Gates.",
+  "version": "4.0.0",
+  "description": "AI-Agent-First multi-protocol MCP Server & reusable QA workbench: stdio / Streamable HTTP / SSE MCP server, Zero-to-One Explorer, Self-Evolving Living Code Map, 7-Pillar Read-Only System MCP Hub, CDP/API Perf Budgets, and 3-Layer Anti-Fake-Green Gates.",
   "license": "MIT",
   "author": "seaworld008",
   "homepage": "https://github.com/seaworld008/ai-test-workbench#readme",
@@ -22,7 +22,9 @@
   },
   "scripts": {
     "test": "node scripts/run-unit-tests.mjs",
+    "lint:docs": "node scripts/check-docs-and-hygiene.mjs",
     "doctor": "node tools/aitest.mjs doctor",
+    "mcp:serve": "node tools/aitest.mjs mcp-serve",
     "smoke": "node tools/aitest.mjs run --target templates/playwright-qa --suite smoke --audit",
     "demo:app": "node examples/demo-webapp/server.mjs",
     "demo:verify": "node scripts/verify-demo.mjs",
@@ -39,7 +41,10 @@
     "accessibility",
     "axe-core",
     "quality-gate",
-    "mcp"
+    "mcp",
+    "mcp-server",
+    "streamable-http",
+    "living-code-map"
   ],
   "files": [
     "tools/",
@@ -68,12 +73,22 @@
     "docs/",
     "README.md",
     "README.en.md",
+    "AGENTS.md",
+    "AGENTS.en.md",
+    "CLAUDE.md",
+    "llms.txt",
     "ARCHITECTURE.md",
+    "ARCHITECTURE.en.md",
     "CHANGELOG.md",
+    "CHANGELOG.en.md",
     "CODE_OF_CONDUCT.md",
+    "CODE_OF_CONDUCT.en.md",
     "CONTRIBUTING.md",
+    "CONTRIBUTING.en.md",
     "VERSION.md",
+    "VERSION.en.md",
     "LICENSE",
-    "SECURITY.md"
+    "SECURITY.md",
+    "SECURITY.en.md"
   ]
 }

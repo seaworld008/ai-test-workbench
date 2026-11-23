@@ -1,80 +1,24 @@
-# Empirical Probe Report: `@playwright/test@1.65.1` Test Agents & CLI Capabilities
+# 实测探针报告：`@playwright/test@1.65.1` Test Agents 与 CLI 能力核验
 
-> **Date**: 2026-11-23  
-> **Environment**: Windows (`pwsh`), Node.js `v26.11.0`, npm `11.20.0`, `@playwright/test@1.65.1`  
-> **Probe Sandbox**: `.sandbox/agent-probe/` (gitignored)
+> [English Version](./agents-probe-1.65.1.en.md) · **验证日期**：2026-11-23 · **实测环境**：Windows (`pwsh`), Node.js `v26.11.0`, npm `11.20.0`, `@playwright/test@1.65.1` · **探针沙箱**：`.sandbox/agent-probe/`（Git 已忽略）
 
-This document records the exact empirical behavior of `@playwright/test@1.65.1` before implementing agent synchronization, project configuration, and quality gates.
+本文档记录在实现 Agent 同步、配置与防假绿门禁前，对 `@playwright/test@1.65.1` 官方命令真实行为的实测结论。
 
----
-
-## 1. `playwright init-agents --help`
+## 1. `playwright init-agents --help` 行为实测
 
 ```text
 Usage: npx playwright init-agents [options]
-
-Initialize repository agents
-
-Options:
-  --loop <loop>        Agentic loop provider (choices: "claude", "codex",
-                       "copilot", "opencode", "vscode", "vscode-legacy")
-  -c, --config <file>  Configuration file to find a project to use for seed test
-  --project <project>  Project to use for seed test
-  --prompts            Whether to include prompts in the agent initialization
-  -h, --help           display help for command
+  --loop <loop>        "claude", "codex", "copilot", "opencode", "vscode", "vscode-legacy"
+  -c, --config <file>  指定 seed 配置
+  --project <project>  指定 seed 项目
 ```
 
-### Key Behavioral Findings
-1. **Working Directory (`cwd`) Resolution**: `init-agents` writes `.codex/`, `.claude/`, `.mcp.json`, and `specs/README.md` relative to **`process.cwd()`**. Invoking `cli.js` from a parent directory causes files to land in the parent directory. `agents.mjs` must always set `cwd` to the target `qa/` (or isolated staging directory).
-2. **`--project=seed` Selection**: Passing `-c playwright.config.ts --project=seed` outputs `🎭 Using project "seed" as a primary project` and places `seed.spec.ts` in the `seed` project's `testDir` (`./tests/seed.spec.ts`).
-3. **Existing `seed.spec.ts` Preservation**: When `tests/seed.spec.ts` already exists, `init-agents` does **not** overwrite it; however, it **does** unconditionally overwrite `.codex/agents/*.toml`, `.claude/agents/*.md`, and `.mcp.json` on every run.
-4. **Generated File Inventory & Overlap**:
-   - `--loop=codex`:
-     - `.codex/agents/playwright_test_planner.toml`
-     - `.codex/agents/playwright_test_generator.toml`
-     - `.codex/agents/playwright_test_healer.toml`
-     - `specs/README.md` (if absent)
-     - `tests/seed.spec.ts` (if absent)
-   - `--loop=claude`:
-     - `.claude/agents/playwright-test-planner.md`
-     - `.claude/agents/playwright-test-generator.md`
-     - `.claude/agents/playwright-test-planner.md`
-     - `.mcp.json`
-     - `specs/README.md` & `tests/seed.spec.ts` (if absent)
-   - `codex` and `claude` agent files live in disjoint directories, so sequential initialization does not collide on agent definitions, **provided** user edits to existing agent files are guarded by a SHA-256 manifest (`qa/.aitest/agents-manifest.json`).
-5. **Absolute Path Check**: None of the generated `.toml`, `.md`, or `.mcp.json` files embed absolute paths (`hasAbsPath=False`). On Windows, Playwright writes `command = "cmd"` with `args = ["/c", "npx", "playwright", "run-test-mcp-server"]`. Nevertheless, staging-to-target path sanitization (`tempDir` -> `qaDir` for both `/` and `\`) and post-copy assertion (`!content.includes('aitest-agents-')`) are enforced as defense-in-depth.
-6. **Built-in Healer `test.fixme()` Risk**: Official `.codex/agents/playwright_test_healer.toml` contains the instruction:
-   > *"If the error persists and you have high level of confidence that the test is correct, mark this test as test.fixme() so that it is skipped during the execution."*
-   This confirms why independent CI gates (`eslint-plugin-playwright` `no-skipped-test`, `audit-results.mjs` critical-skip blocking, and `aitest audit --diff-base` Healer diff guard) are mandatory.
+1. **工作目录解析 (`cwd`)**：`init-agents` 按 `process.cwd()` 输出 `.codex/`、`.claude/`、`.mcp.json` 与 `specs/README.md`，因此 `src/agents.mjs` 必须在隔离暂存目录或目标 `qa/` 内运行。
+2. **保留 `seed.spec.ts` vs 覆盖 Agent 文件**：已有 `tests/seed.spec.ts` 不会被覆盖，但重跑会无条件覆盖 `.codex/agents/*.toml`、`.claude/agents/*.md` 与 `.mcp.json`，因此我们引入 `qa/.aitest/agents-manifest.json` SHA-256 指纹保护与 `*.aitest-new` 冲突侧车。
+3. **跨引擎不冲突**：`codex` 与 `claude` 的代理定义分属不同目录，连续初始化互不覆盖；并执行路径脱敏确保不残留临时沙箱绝对路径。
+4. **内置 Healer 默认加 `test.fixme()` 隐患**：官方 `.codex/agents/playwright_test_healer.toml` 明确写有 *"mark this test as test.fixme() so that it is skipped"*，实证了独立三层防假绿门禁（ESLint + `audit-results.mjs` + `--diff-base`）的必要性。
 
----
+## 2. `playwright run-test-mcp-server` 与 `playwright test` 实测结论
 
-## 2. `playwright run-test-mcp-server --help`
-
-```text
-Usage: npx playwright run-test-mcp-server [options]
-
-Interact with the test runner over MCP
-
-Options:
-  --headless           run browser in headless mode, headed by default
-  -c, --config <file>  Configuration file, or a test directory with optional
-                       "playwright.config.{m,c}?{js,ts}"
-  --host <host>        host to bind server to. Default is localhost. Use 0.0.0.0
-                       to bind to all interfaces.
-  --port <port>        port to listen on for SSE transport.
-  -h, --help           display help for command
-```
-
-- **Conclusion**: `-c, --config <file>` is officially supported. Default workflow starts the coding agent inside `<repo>/qa/`. Optional `--bridge-root` (with `--dry-run` support) can safely wire `<repo>/.mcp.json` using `node` + `qa/node_modules/@playwright/test/cli.js run-test-mcp-server --config qa/playwright.config.ts` (never `npx` from root).
-
----
-
-## 3. `playwright test --help` Verified Flags
-
-All five candidate flags were verified present in `@playwright/test@1.65.1`:
-- `--only-changed [ref]` — Supported (used for `qa/` internal test dependency diffing).
-- `--last-failed` & `--last-failed-file <file>` — Supported.
-- `--fail-on-flaky-tests` — Supported (wired into strict CI/audit runs alongside `--max-flaky`).
-- `-G, --grep-invert <grep>` — Supported (used to exclude `@mutation` when `TEST_ALLOW_MUTATION=0`).
-- `--tsconfig <path>` — Supported.
+- `@playwright/test` 已自带 `run-test-mcp-server`（支持 `-c, --config <file>`、`--headless`），无需单独安装 `@playwright/mcp`。
+- `playwright test` 实测原生支持 `--only-changed [ref]`、`--last-failed`、`--fail-on-flaky-tests`、`--grep-invert <grep>` 与 `--tsconfig <path>`，由 `runner.mjs` 直接复用。

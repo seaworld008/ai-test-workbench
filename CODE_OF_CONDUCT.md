@@ -1,21 +1,22 @@
-# Contributor Covenant Code of Conduct
+# 社区行为准则 (Code of Conduct)
 
-## Our Pledge
+> [English Version](./CODE_OF_CONDUCT.en.md)
 
-We as members, contributors, and leaders pledge to make participation in our community a harassment-free experience for everyone, regardless of age, body size, visible or invisible disability, ethnicity, sex characteristics, gender identity and expression, level of experience, education, socio-economic status, nationality, personal appearance, race, caste, color, religion, or sexual identity and orientation.
+## 我们的承诺
 
-## Our Standards
+我们致力于为所有参与者营造开放、友善、无骚扰的协作社区，无论年龄、背景、经验水平、地域、性别认同、宗教或身份差异。
 
-Examples of behavior that contributes to a positive environment include:
-- Demonstrating empathy and kindness toward other people
-- Giving and gracefully accepting constructive feedback
-- Focusing on reproducible evidence, test determinism, and user safety
+## 行为标准
 
-Examples of unacceptable behavior include:
-- Harassment, trolling, insulting comments, or personal attacks
-- Publishing others' private information or test credentials without permission
-- Submitting intentionally weakened tests (`test.skip`/`test.fixme`) to bypass quality gates
+鼓励行为：
+- 友善沟通与建设性技术反馈；
+- 聚焦可复现的工程证据、测试确定性与用户数据安全。
 
-## Enforcement
+不可接受的行为：
+- 人身攻击、骚扰或恶意贬损；
+- 未经授权公开他人隐私信息、测试凭据或内部业务系统数据；
+- 故意提交 `test.skip` / `test.fixme` 等“假绿”代码绕过质量门禁。
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the repository maintainers via GitHub Security Advisories or project issue contacts. All complaints will be reviewed and investigated promptly and fairly.
+## 执行方式
+
+如发现违反行为准则的情况，可通过 GitHub Security Advisories 或项目维护者渠道反馈，我们将公正核实与处理。

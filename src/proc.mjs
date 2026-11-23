@@ -104,13 +104,17 @@ export function runProcess(command, args = [], options = {}) {
     windowsHide = true,
   } = options;
 
+  // Inside stdio MCP server, child processes MUST NEVER write raw text to OS stdout FD 1
+  const capturedStdioMode = inheritStdio && process.env.AITEST_MCP_CAPTURED_STDIO === '1';
+  const effectiveInherit = inheritStdio && !capturedStdioMode;
+
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
       env,
       shell: false,
       windowsHide,
-      stdio: inheritStdio ? 'inherit' : ['ignore', 'pipe', 'pipe'],
+      stdio: effectiveInherit ? 'inherit' : ['ignore', 'pipe', 'pipe'],
     });
 
     let stdout = '';
@@ -125,12 +129,22 @@ export function runProcess(command, args = [], options = {}) {
       }, timeoutMs);
     }
 
-    if (!inheritStdio && capture) {
+    if (!effectiveInherit && (capture || capturedStdioMode)) {
       child.stdout?.on('data', (chunk) => {
-        stdout += chunk.toString();
+        const text = chunk.toString();
+        stdout += text;
+        if (capturedStdioMode) {
+          const trimmed = text.replace(/\r?\n$/, '');
+          if (trimmed) console.log(trimmed);
+        }
       });
       child.stderr?.on('data', (chunk) => {
-        stderr += chunk.toString();
+        const text = chunk.toString();
+        stderr += text;
+        if (capturedStdioMode) {
+          const trimmed = text.replace(/\r?\n$/, '');
+          if (trimmed) console.error(trimmed);
+        }
       });
     }
 

@@ -1,0 +1,23 @@
+# AI Test Workbench (`ai-test-workbench` v4.0.0)
+
+> AI-Agent-First reusable Playwright Test Agents workbench & native multi-protocol MCP Server (`stdio`, Streamable HTTP `/mcp`, Legacy HTTP+SSE `/sse`). Supports Chinese-default docs with paired English `.en.md` docs.
+
+## Core Capabilities
+- **Native Multi-Protocol MCP Server (`src/mcp-server.mjs`)**: Supports MCP `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05` with 12 typed tools (`structuredContent` + `outputSchema` + `ToolAnnotations`), Resources, Resource Templates (`aitest://project/{target}/*`), and bilingual Prompts.
+- **Zero-to-One System Explorer (`src/explore.mjs`)**: Read-only crawler with write guards (`DELETE`/`PUT`/`PATCH` & mutating `POST` blocked), multi-portal workspace switcher detection, PII/secret URL redaction, and API waterfall detection.
+- **Self-Evolving Living Code Map (`src/codemap.mjs`)**: Fuses host repo routes, broken lazy imports, Spring/Node/Python/PHP controllers, and DB tables with runtime topology, test results, and perf baselines into `knowledge/SYSTEM_MAP.md`.
+- **7-Pillar Read-Only MCP Hub (`src/mcp-hub.mjs`)**: Configures and audits Playwright Test Agents, Chrome DevTools, Grafana (`--disable-write`), Prometheus, Loki, Sentry, PostgreSQL/MySQL (read-only), Redis (`--readonly`), k6, and OpenAPI.
+- **Perf SLO Engine & Trace-Correlated Diagnostics (`src/perf.mjs`, `src/diagnose.mjs`)**: Chromium CDP Web Vitals (`TTFB`, `FCP`, `LCP`, `CLS`, `DOMNodes`, `JSHeap`) + concurrent GET API `P50/P95/P99/RPS` + Trace-ID RCA playbooks.
+- **3-Layer Anti-Fake-Green Gate (`templates/playwright-qa/scripts/audit-results.mjs`)**: `tsc` + `eslint-plugin-playwright`, runtime `results.json` / `waivers.json`, and `--diff-base` Healer diff guard.
+
+## Documentation & Entrypoints
+- [README (Chinese Default)](./README.md)
+- [README (English)](./README.en.md)
+- [AI Agent Guide (Chinese)](./AGENTS.md)
+- [AI Agent Guide (English)](./AGENTS.en.md)
+- [AI Agent Quickstart & First-Time Prompts (Chinese)](./docs/ai-agent-quickstart.md)
+- [AI Agent Quickstart & First-Time Prompts (English)](./docs/ai-agent-quickstart.en.md)
+- [Architecture & Security Boundaries (Chinese)](./ARCHITECTURE.md)
+- [Architecture & Security Boundaries (English)](./ARCHITECTURE.en.md)
+- [MCP Server Protocol Reference](./skills/ai-test-workbench/references/mcp-server-protocol.md)
+- [Agent Skill Definition](./skills/ai-test-workbench/SKILL.md)

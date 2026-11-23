@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startDemoServer } from '../examples/demo-webapp/server.mjs';
 import { runCli } from '../src/cli.mjs';
+import { handleMcpJsonRpcMessage } from '../src/mcp-server.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKBENCH_ROOT = path.resolve(__dirname, '..');
@@ -82,6 +83,14 @@ try {
     '--enforce-budget',
   ]);
 
+  const mcpReportReply = await handleMcpJsonRpcMessage({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: { name: 'aitest_report', arguments: { target: tempWorkspace } },
+  });
+  const mcpOk = mcpReportReply?.result?.structuredContent?.ok === true;
+
   exitCode =
     seedCode === 0 &&
     allCode === 0 &&
@@ -90,7 +99,8 @@ try {
     mapCode === 0 &&
     mcpAddCode === 0 &&
     mcpDocCode === 0 &&
-    perfCode === 0
+    perfCode === 0 &&
+    mcpOk
       ? 0
       : 1;
 } finally {

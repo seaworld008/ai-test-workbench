@@ -1,35 +1,21 @@
-# Healer Governance & Anti-Fake-Green Protocol
+# Healer 自愈治理与零假绿协议 (`healer-governance.md`)
 
-> **Critical Override**: Playwright's default generated healer prompt suggests marking persistent failures with `test.fixme()`. **In `ai-test-workbench`, adding `test.fixme()` or `test.skip()` without an approved, time-bounded entry in `waivers.json` is strictly forbidden and blocked by CI.**
+> [English Version](./healer-governance.en.md) · [SKILL.md](../SKILL.md)
 
-## 1. Mandatory 4-Way Failure Classification
+> **关键覆盖条款**：Playwright 官方默认生成的 Healer 提示词中写有“若持续失败则改标 `test.fixme()`”。**在本工作台中，未经 `waivers.json` 有效期豁免而擅自添加 `test.fixme()` 或 `test.skip()` 将被 CI 严格阻断！**
 
-Before modifying any file in `tests/**`, classify every failing spec using `reports/ai-diagnostics.md`, `error-context.md` (ARIA snapshot), and Trace evidence:
+## 1. 强制四分定责 (A / B / C / D)
 
-| Class | Root Cause | Allowed Action | Forbidden Action |
+修改任何 `tests/**` 文件之前，务必结合 `reports/ai-diagnostics.md`、`error-context.md`（ARIA 快照）与 Trace 证据逐条分类：
+
+| 分类 | 根因性质 | 允许动作 | 禁止动作 |
 |---|---|---|---|
-| **A** | Test locator drift after intentional UI update, or missing web-first synchronization | Update locator/wait in `tests/**`; verify via `aitest run` + `aitest audit --check-specs --diff-base HEAD` | Deleting `expect()`, adding `{ force: true }`, adding `waitForTimeout()` |
-| **B** | Unreachable `TEST_BASE_URL`, expired credentials, dirty environment state, or allowlist mismatch | Report exact environment fix needed; keep test red | Changing `TEST_BASE_URL` to production or mocking away real integration targets |
-| **C** | Application regression (`5xx`, uncaught `pageerror`, wrong calculation, broken RBAC, overselling) | Output structured Bug Report (steps, expected vs actual, Trace path) for application fix | Rewriting test expectations to match buggy output, or marking `test.fixme()` / `test.skip()` |
-| **D** | Requirement or acceptance criteria unclear | Stop and ask the user for clarification | Guessing business rules |
+| **A** | UI 合法调整导致的定位器漂移或等待同步问题 | 修复测试定位器/Web-First 断言后重跑 `aitest_run` 与 `aitest_audit(diffBase="HEAD")` | 删除 `expect()`、加 `{ force: true }` 或加 `waitForTimeout()` |
+| **B** | 目标环境不可达、凭据失效、状态未初始化或域名未进白名单 | 保留红灯，明确输出环境/鉴权修复指令 | 把目标改为生产环境或绕过真实测试服 |
+| **C** | 业务功能或后端回归缺陷（`5xx`、未捕获 `pageerror`、算错数、RBAC 失效、超卖） | 产出含复现步骤、Trace 路径与 Trace-ID 的缺陷报告交研发修业务代码 | 改写断言迎合错误结果，或标 `test.fixme()` / `test.skip()` |
+| **D** | 需求或验收标准不明确 | 暂停修改，请人工澄清预期行为 | 凭空猜测业务规则 |
 
-## 2. Three-Attempt Circuit Breaker
+## 2. 单用例最多 3 轮自愈熔断与 Diff 守卫 (`--diff-base`)
 
-- Maximum **3 repair iterations** per failing test in a single session.
-- Record the diff and failure reason for each attempt.
-- If still failing after 3 attempts, revert speculative test hacks and escalate to human review with `reports/ai-diagnostics.md`.
-
-## 3. Healer Diff Guard (`--diff-base`)
-
-Every automated test repair must pass:
-
-```bash
-npx ai-test-workbench audit --target <repo> --check-specs --diff-base HEAD
-```
-
-The diff guard fails automatically if a repair patch:
-1. Reduces the total number of assertion calls (`expect*`, `assert*`, `verify*`) in a spec file;
-2. Introduces `test.skip(`, `test.fixme(`, or `.only(`;
-3. Introduces `{ force: true }` to bypass actionability checks;
-4. Swallows errors via `.catch(() => {})`;
-5. Inflates timeouts to `>= 60000` ms to mask performance hangs.
+- 单个失败用例最多修复 **3 轮**；超过 3 轮仍失败则回退猜测性改动并升级人工处理。
+- 每次脚本修复必须通过 `npx ai-test-workbench audit --target <repo> --check-specs --diff-base HEAD`：拦截净断言减少、新增 `skip/fixme/only`、`{ force: true }`、空 `.catch(() => {})` 与 `>= 60000ms` 超时注水。

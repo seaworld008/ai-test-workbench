@@ -1,37 +1,33 @@
-# Contributing to AI Test Workbench
+# 参与贡献指南 (`CONTRIBUTING.md`)
 
-Thank you for helping build an open, reliable, AI-native testing foundation!
+> [English Version](./CONTRIBUTING.en.md) · [行为准则](./CODE_OF_CONDUCT.md) · [安全策略](./SECURITY.md)
 
-## Core Engineering Principles
+感谢你共同建设 AI Agent 优先、确定性可信赖的自动化测试基础设施！
 
-1. **Deterministic Foundation, AI Acceleration**: Never trade away test determinism for AI magic. Generated tests must rely on semantic locators (`getByRole`, `getByLabel`, `getByTestId`), web-first assertions, and strict data isolation.
-2. **Zero Fake-Green Tolerance**:
-   - Never use `test.skip`, `test.fixme`, or weakened assertions to mask product regressions.
-   - All specs must contain real assertions and pass `aitest audit --check-specs`.
-3. **Cross-Platform Safe Execution**:
-   - All CLI modules use pure Node.js ESM (`>=20`) with zero external runtime dependencies at the CLI layer.
-   - Never use `shell: true` or command string interpolation when spawning child processes. Support Windows (`pwsh`/PowerShell), macOS, and Linux natively.
-4. **Protect Existing Repositories**:
-   - `init` and `update-agents` must remain idempotent, support `--dry-run`, and never silently overwrite existing files or business configurations.
+## 核心工程准则
 
-## Local Development & Verification
+1. **确定性底座优先，AI 负责加速**：绝不为了“让 AI 跑通”牺牲测试确定性。用例必须采用语义定位器（`getByRole`、`getByLabel`、`getByTestId`）、Web-First 断言与严格数据隔离。
+2. **零假绿容忍**：
+   - 严禁使用 `test.skip`、`test.fixme` 或削弱断言掩盖真实产品回归。
+   - 所有用例必须包含真实断言，并通过 `aitest audit --check-specs` 与 `--diff-base` 门禁。
+3. **跨平台零壳安全执行**：
+   - CLI 与 MCP 服务端模块使用纯 Node.js ESM（`>=22.12`），主包保持零第三方运行时依赖。
+   - 禁止在子进程中使用 `shell: true` 或拼接命令字符串；在 `stdio` MCP 模式下严禁向系统 FD 1 (`stdout`) 输出非 JSON-RPC 内容。
+4. **文档双语同步与去敏**：
+   - 本仓库默认文档为简体中文 `.md`，所有核心说明文档须同时维护对应的 `.en.md` 英文版，且严禁提交任何内网域名、凭据、手机号或本机绝对路径。
+
+## 本地开发与自检命令
 
 ```bash
-# 1. Check local environment
 node tools/aitest.mjs doctor
-
-# 2. Run unit & CLI integration tests
+npm run lint:docs
 npm test
-
-# 3. Verify template dependencies & offline smoke
-cd templates/playwright-qa
-npm ci
-npx playwright test tests/smoke --project=chromium
+npm run smoke
+npm run demo:verify
 ```
 
-## Pull Request Checklist
+## Pull Request 检查清单
 
-- [ ] `npm test` passes with 0 failures.
-- [ ] New CLI flags/commands update `--help`, `src/i18n.mjs` (both `zh` and `en`), and documentation.
-- [ ] No hardcoded paths, real credentials, or `.env` files are committed.
-- [ ] Static & runtime quality gates (`aitest audit --check-specs`) pass on all template specs.
+- [ ] `npm run lint:docs`、`npm test`、`npm run smoke` 全部零错误通过。
+- [ ] 新增 CLI / MCP 参数同步更新 `--help`、`src/i18n.mjs`（`zh` 与 `en`）及对应中英文档。
+- [ ] 不含任何硬编码本机路径、真实凭据、内网测试环境信息或 `.env` 文件。
