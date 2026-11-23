@@ -217,6 +217,7 @@ await browser.close();
     const res = await runProcess(process.execPath, [scriptPath], {
       cwd: qaDir,
       inheritStdio: true,
+      windowsHide: false,
       timeoutMs: (timeoutSec + 15) * 1000,
     });
     return res.code;

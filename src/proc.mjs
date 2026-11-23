@@ -101,6 +101,7 @@ export function runProcess(command, args = [], options = {}) {
     inheritStdio = false,
     capture = true,
     timeoutMs = 0,
+    windowsHide = true,
   } = options;
 
   return new Promise((resolve, reject) => {
@@ -108,7 +109,7 @@ export function runProcess(command, args = [], options = {}) {
       cwd,
       env,
       shell: false,
-      windowsHide: true,
+      windowsHide,
       stdio: inheritStdio ? 'inherit' : ['ignore', 'pipe', 'pipe'],
     });
 

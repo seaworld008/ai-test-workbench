@@ -21,7 +21,7 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "test": "node --test test/",
+    "test": "node scripts/run-unit-tests.mjs",
     "doctor": "node tools/aitest.mjs doctor",
     "smoke": "node tools/aitest.mjs run --target templates/playwright-qa --suite smoke --audit",
     "demo:app": "node examples/demo-webapp/server.mjs",
