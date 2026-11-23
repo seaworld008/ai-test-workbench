@@ -1,30 +1,24 @@
-# Locator, Assertion, Accessibility & Contract Standards
+# 定位器、断言、无障碍与契约编写规范 (`locator-and-assertion-rules.md`)
 
-## 1. Always Extend the Base Fixture
+> [English Version](./locator-and-assertion-rules.en.md) · [SKILL.md](../SKILL.md)
 
-Import `test`, `expect`, `expectAccessible`, and `expectApiContract` from `../fixtures/base` instead of `@playwright/test` directly:
+## 1. 一律继承扩展基础 Fixture (`../fixtures/base`)
 
 ```ts
-import { test, expect, expectAccessible, expectApiContract } from '../fixtures/base';
+import { test, expect, expectAccessible, expectApiContract, expectPerformanceBudget } from '../fixtures/base';
 ```
 
-This automatically activates:
-- Same-origin `>= 500` response detection (`failOnServerError`, overridable via `test.use({ failOnServerError: false })`);
-- Uncaught JS `pageerror` detection (`failOnPageError`, overridable via `test.use({ failOnPageError: false })`);
-- Browser `page.route` AND `request` (`APIRequestContext`) blocking for `TEST_DENIED_ORIGINS` and `TEST_BLOCKED_ENDPOINTS`.
+继承后自动开启：同源 `>= 500` 接口阻断、未捕获 `pageerror` 阻断、`TEST_DENIED_ORIGINS` / `TEST_BLOCKED_ENDPOINTS` 双通道拦截，以及失败时分布式 Trace-ID 被动收集。
 
-## 2. Resilient Locator Priority
+## 2. 高稳定性语义定位器优先级
 
-1. `page.getByRole('button', { name: 'Enroll' })` — accessible role + name first.
-2. `page.getByLabel('Search courses')` — form controls via explicit labels.
-3. `page.getByTestId('course-row-101')` — stable `data-testid` for non-semantic or repeated widgets.
-4. **Avoid**: deep CSS chains (`.app > div:nth-child(3) > button`), auto-generated utility classes, or XPath.
+1. `page.getByRole('button', { name: 'Enroll' })` —— 首选无障碍角色与可访问名称。
+2. `page.getByLabel('Search courses')` —— 表单输入统一按关联 Label 定位。
+3. `page.getByTestId('course-row-101')` —— 无语义或重复表格行使用稳定的 `data-testid`。
+4. **避免**：深层 CSS 选择器链（`.app > div:nth-child(3) > button`）、随机 utility 类名或脆弱 XPath。
 
-## 3. Structural ARIA Snapshots & Automated Axe Scans
+## 3. 结构化 ARIA 快照、自动化无障碍与自定义断言命名
 
-- Prefer `await expect(page.getByRole('navigation')).toMatchAriaSnapshot(...)` over brittle pixel screenshots when verifying component hierarchy and accessible structure.
-- Call `await expectAccessible(page)` on primary user-journey views to catch machine-detectable WCAG 2.0/2.1/2.2 Level A & AA regressions early. Remember that automated `axe-core` checks cover only a subset of WCAG criteria and complement—not replace—manual accessibility testing.
-
-## 4. Custom Page-Object Assertions & ESLint Compatibility
-
-When encapsulating assertions inside helper functions or Page Objects, prefix function names with `expect`, `assert`, or `verify` (e.g., `expectOrderConfirmed()`, `verifyCartTotal()`), or add custom patterns to `qa/aitest.config.json` under `"assertFunctionNames"` so `eslint-plugin-playwright` (`playwright/expect-expect`) recognizes them cleanly.
+- 优先用 `toMatchAriaSnapshot(...)` 校验组件可访问树结构，替代易碎像素截图。
+- 关键业务页面调用 `await expectAccessible(page)` 扫描机器可检 WCAG 2.2 A/AA 问题（注：自动化扫描不等同于完整人工合规认证）。
+- Page Object 中的断言封装函数以 `expect`、`assert` 或 `verify` 开头命名（或在 `qa/aitest.config.json` 登记），以通过 `eslint-plugin-playwright`（`playwright/expect-expect`）静态门禁。

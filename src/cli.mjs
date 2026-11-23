@@ -10,6 +10,7 @@ import { runImpactCommand } from './impact.mjs';
 import { runInit } from './init.mjs';
 import { runMapCommand } from './codemap.mjs';
 import { runMcpCommand } from './mcp-hub.mjs';
+import { runMcpServeCommand } from './mcp-server.mjs';
 import { runPerfCommand } from './perf.mjs';
 import { runReportCommand } from './report.mjs';
 import { runSuiteCommand } from './runner.mjs';
@@ -23,6 +24,7 @@ function printHelp(lang) {
     'explore',
     'map',
     'mcp',
+    'mcp-serve',
     'perf',
     'run',
     'impact',
@@ -54,6 +56,10 @@ function printHelp(lang) {
   console.log('  --no-sync-impact      Skip auto-updating impact-map.json during "map"');
   console.log('  --profile <name>      MCP preset profile: minimal | observability | data-verify | perf | full-link');
   console.log('  --servers <csv>       Comma-separated MCP preset names for "mcp add"');
+  console.log('  --transport <type>    MCP server transport for "mcp-serve": stdio (default) | http | sse');
+  console.log('  --port <n>            HTTP port for "mcp-serve --transport http|sse" (default: 3847)');
+  console.log('  --host <addr>         Bind host for MCP HTTP server (default: 127.0.0.1)');
+  console.log('  --auth-token <token>  Bearer auth token for MCP HTTP server (mandatory if non-loopback)');
   console.log('  --routes <csv>        Comma-separated routes for "perf" CDP profiling');
   console.log('  --endpoint <path>     Read-only GET endpoint for "perf" concurrency benchmark');
   console.log('  --concurrency <n>     Concurrent virtual workers for "perf" API benchmark (default: 4, max: 20)');
@@ -104,6 +110,10 @@ export async function runCli(argv = process.argv.slice(2)) {
         profile: { type: 'string' },
         servers: { type: 'string' },
         action: { type: 'string' },
+        transport: { type: 'string' },
+        port: { type: 'string' },
+        host: { type: 'string' },
+        'auth-token': { type: 'string' },
         routes: { type: 'string' },
         endpoint: { type: 'string' },
         concurrency: { type: 'string' },
@@ -209,6 +219,18 @@ export async function runCli(argv = process.argv.slice(2)) {
           action: v.action || parsed.positionals[1] || 'presets',
           profile: v.profile,
           servers: v.servers,
+          transport: v.transport,
+          port: v.port !== undefined ? Number(v.port) : undefined,
+          host: v.host,
+          authToken: v['auth-token'],
+        });
+      case 'mcp-serve':
+        return await runMcpServeCommand({
+          ...common,
+          transport: v.transport,
+          port: v.port !== undefined ? Number(v.port) : undefined,
+          host: v.host,
+          authToken: v['auth-token'],
         });
       case 'perf':
         return await runPerfCommand({

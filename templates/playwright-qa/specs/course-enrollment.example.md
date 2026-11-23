@@ -1,36 +1,29 @@
-# Test Plan Example: Smart Campus Course Enrollment
+# 测试计划示例：智慧校园选课系统 (`course-enrollment.example.md`)
 
-- **Project**: `__PROJECT_NAME__`
-- **Target**: Allowlisted local/staging environment (`TEST_BASE_URL`)
-- **Seed**: `tests/seed.spec.ts` (`--project=seed`)
+> [English Version](./course-enrollment.example.en.md)
 
-## Scenarios
+- **项目**：`__PROJECT_NAME__`
+- **目标**：白名单本地或测试服环境（`TEST_BASE_URL`）
+- **Seed 用例**：`tests/seed.spec.ts`（`--project=seed`）
 
-### 1. Course Catalog Search & Accessibility (`@critical @a11y`, Read-Only)
-- **Role**: Authenticated Student (`storageState` from `auth.setup.ts`)
-- **Steps**:
-  1. Navigate to `/`.
-  2. Run `expectAccessible(page)` for automated WCAG 2.2 Level A/AA checks.
-  3. Filter courses by `"Playwright"` using the `"Search courses"` input.
-  4. Filter courses by `"Sold Out"`.
-- **Expected**:
-  - Matching course card is visible.
-  - Sold-out course button renders disabled (`toBeDisabled()`).
-  - Zero uncaught `pageerror` or same-origin `5xx` responses.
+## 测试场景
 
-### 2. Student vs Admin RBAC Isolation (`@critical`, Read-Only)
-- **Role**: Student
-- **Steps**:
-  1. Navigate to `/admin` in browser and request `GET /api/admin/audit` with student Bearer token.
-- **Expected**:
-  - Both return HTTP `403` and render `403 Forbidden` without leaking admin records.
+### 1. 课程目录搜索与自动化无障碍扫描 (`@critical @a11y`，只读)
+- **角色**：已认证学生（复用 `auth.setup.ts` 生成的 `storageState`）
+- **步骤**：
+  1. 导航至 `/`。
+  2. 调用 `expectAccessible(page)` 执行 WCAG 2.2 A/AA 机器可检规则扫描。
+  3. 在 `"Search courses"` 输入 `"Playwright"` 与 `"Sold Out"` 过滤课程。
+- **预期结果**：
+  - 匹配课程卡片可见；已售罄课程按钮呈现禁用态（`toBeDisabled()`）。
+  - 零未捕获 `pageerror` 与同源 `5xx` 响应。
 
-### 3. Duplicate & Last-Seat Concurrent Enrollment (`@mutation`, Write-Enabled Staging Only)
-- **Precondition**: `TEST_ALLOW_MUTATION=1` on isolated test environment.
-- **Steps**:
-  1. Reset isolated test fixture state and create two unique worker-scoped QA student tokens.
-  2. Submit enrollment twice for the same user on `course-open-101`.
-  3. Concurrently submit two `POST /api/enroll` requests via `Promise.all` against 1-seat `course-last-seat`.
-- **Expected**:
-  - Duplicate submission returns `409`.
-  - Concurrent race returns `[201, 409]` sorted — zero overselling.
+### 2. 学生 vs 管理员 RBAC 权限隔离 (`@critical`，只读)
+- **角色**：学生
+- **步骤**：浏览器访问 `/admin`，并用学生 Bearer Token 请求 `GET /api/admin/audit`。
+- **预期结果**：均严格返回 HTTP `403`（`403 Forbidden`）且不泄露任何管理员数据。
+
+### 3. 重复选课与最后 1 名额并发竞态 (`@mutation`，仅限开启写权限的隔离测试服)
+- **前置条件**：`TEST_ALLOW_MUTATION=1`。
+- **步骤**：重置隔离夹具，同账号连续提交两次报名；并用 `Promise.all` 并发请求 1 名额课程 `course-last-seat`。
+- **预期结果**：重复提交返回 `409`；并发竞态严格返回排序 `[201, 409]`，零超卖。

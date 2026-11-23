@@ -12,8 +12,11 @@ import {
   mergeMcpServersIntoJson,
 } from '../src/mcp-hub.mjs';
 
-test('MCP_PRESETS covers all 6 observability, browser, db, middleware, perf, and contract pillars cleanly', () => {
+test('MCP_PRESETS covers all 7 pillars including built-in ai-test-workbench orchestrator', () => {
   const pillarsFound = new Set(Object.values(MCP_PRESETS).map((p) => p.pillar));
+  assert.ok(MCP_PILLARS.includes('orchestrator'));
+  assert.ok(MCP_PRESETS['ai-test-workbench']);
+  assert.deepEqual(MCP_PRESETS['ai-test-workbench'].args, ['-y', 'ai-test-workbench', 'mcp-serve']);
   for (const pillar of MCP_PILLARS) {
     assert.equal(pillarsFound.has(pillar), true, `Missing MCP pillar: ${pillar}`);
   }

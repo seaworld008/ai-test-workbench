@@ -212,7 +212,7 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
         `- **Prometheus MCP Query**: \`sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))\``,
         `- **Sentry MCP**: filter unresolved issues within \`${timeWindow?.startedAt || 'last 15m'}\` to \`${timeWindow?.finishedAt || 'now'}\``
       );
-      if (codeCorr?.dbTables?.length > 0) {
+      if (codeCorr?.dbTables?.length > 0 && /^[A-Za-z_][A-Za-z0-9_.]*$/.test(codeCorr.dbTables[0])) {
         lines.push(`- **Read-Only DB MCP Check**: \`SELECT COUNT(*) FROM ${codeCorr.dbTables[0]} LIMIT 1;\``);
       }
     }
@@ -261,6 +261,11 @@ export async function runDiagnoseCommand(options = {}) {
   const { failureCount, markdown } = generateDiagnosticsMarkdown(qaDir, resultsPath);
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, markdown, 'utf8');
+
+  if (options.json) {
+    console.log(JSON.stringify({ ok: true, failureCount, resultsPath, outputPath: outPath }, null, 2));
+    return 0;
+  }
 
   console.log(
     lang === 'zh'

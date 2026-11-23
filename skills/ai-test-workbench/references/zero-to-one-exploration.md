@@ -1,32 +1,20 @@
-# Zero-to-One System Exploration Protocol (0 → 1 Atlas Before Testing)
+# 从 0 到 1 系统探索协议 (`zero-to-one-exploration.md`)
 
-Follow this 4-stage workflow whenever onboarding a complex or multi-tenant web application (such as an enterprise SaaS console, ERP, or campus platform):
+> [English Version](./zero-to-one-exploration.en.md) · [SKILL.md](../SKILL.md)
 
-## Stage 1: Authenticate Safely (`auth-login` or Password Setup)
-- Never bypass CAPTCHAs or SMS gates.
-- For interactive SMS/SSO/QR systems, run `aitest auth-login --target <repo> --base-url <url>` to persist `playwright/.auth/user.json` and `session.json`.
-- For dedicated QA password accounts, configure `E2E_USERNAME`, `E2E_PASSWORD`, and `E2E_AUTH_LOGIN_PATH` in `<repo>/qa/.env`.
+接入复杂或多租户 Web / SaaS 应用时，按以下 4 阶段标准闭环推进：
 
-## Stage 2: Read-Only 0 → 1 Full System Exploration (`aitest explore`)
-- Execute `aitest explore --target <repo> --base-url <url> --max-pages 30`.
-- Strict safety rules during exploration:
-  - Block all `DELETE`/`PUT`/`PATCH` requests and mutating `POST` routes (`create/add/save/update/delete/import/pay/sms/approve/submit`).
-  - Only trigger UI controls classified as **read-only** (`搜索`, `查询`, `重置`, `查看`, `详情`, tab switches, pagination). Never click `新增`, `编辑`, `删除`, `审核`, `导出写入`, or status switches.
-  - **Multi-Portal / Multi-Tenant Switcher Check (Critical for SaaS!)**: Do not stop at the default landing portal (often a high-level Platform Admin view). Actively inspect top navbars, sidebars, drawers, and router/store state for **Tenant / Organization / Workspace switchers**. Switch into daily operational portals and explore their domain menus as well.
-  - Redact tokens, query secrets, phones, ID cards, and personal names before writing `reports/system-topology.json` and `specs/system-overview.md`.
+## 第一阶段：安全建态 (`auth-login` 或密码环境变量)
+- **绝不绕过验证码或短信门禁**；交互式系统运行 `aitest auth-login --target <repo> --base-url <url>` 持久化 `user.json` + `session.json`。
 
-## Stage 3: Summarize System Panorama -> Deep Functional Plan (`specs/*.md`)
-- Review `specs/system-overview.md` with stakeholders or the Planner agent to confirm:
-  1. All user roles and operational portals (`Platform` vs `Tenant/Workspace`).
-  2. Core business workflows (`crud-table`, `form-config`, `dashboard`, `auth-portal`).
-  3. Pre-existing runtime errors (Vue/React warnings, 5xx APIs, missing landmarks, unlabeled controls).
-- Write structured deep test plans in `specs/` covering:
-  - **Search + 0-Row Empty Boundary + Reset Restoration**
-  - **Pagination State Consistency (Page 1 -> Page 2 -> Page 1)**
-  - **Multi-Tab Business Filter Views**
-  - **Read-Only Detail Drill-Down & Safe Back Navigation**
-  - **Cross-Tenant Data Isolation & Unauthenticated Redirect Guards**
+## 第二阶段：严格只读 0→1 全站巡检 (`aitest explore` / `aitest_explore`)
+- 阻断所有 `DELETE`/`PUT`/`PATCH` 与写操作 `POST`（`create/add/save/update/delete/import/pay/sms/approve/submit`）。
+- 仅点击只读控件（`搜索`、`查询`、`重置`、`详情`、标签页切换、分页），绝不点击新增/编辑/删除/审核写入。
+- **多端 / 多租户切换器检查**：主动探测导航栏、抽屉、Vuex/Redux 中的 `Tenant / Organization / Workspace` 切换器，深入日常业务子工作台而非仅停留在总览端。
+- 输出 `reports/system-topology.json`、`specs/system-overview.md` 并同步 `knowledge/SYSTEM_MAP.md`。
 
-## Stage 4: Deterministic Generation, Execution & 3-Layer Audit
-- Generate typed TypeScript specs in `tests/e2e/` and `tests/api/`. Keep conditional/loop helpers in `tests/fixtures/` so spec files comply with `eslint-plugin-playwright` (`no-conditional-in-test`).
-- Run `aitest run --target <repo> --suite all --workers 1 --audit` and `aitest audit --target <repo> --check-specs --require-e2e`.
+## 第三阶段：全景评审 -> 深度功能计划 (`specs/*.md`)
+- 重点覆盖：**空态 0-1 检索 + 重置还原**、**分页状态一致性**、**多 Tab 业务筛选**、**只读详情下钻返回**、**跨租户隔离与未登录重定向守卫**。
+
+## 第四阶段：确定性生成、执行与三层门禁
+- 在 `tests/fixtures/` 封装循环助手以满足 `no-conditional-in-test`；执行 `aitest run --suite all --audit` 与 `aitest audit --check-specs --require-e2e`。

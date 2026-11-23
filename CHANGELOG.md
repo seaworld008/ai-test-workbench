@@ -1,37 +1,39 @@
-# Changelog
+# 更新日志 (Changelog)
 
-All notable changes to `ai-test-workbench` will be documented in this file.
+> [English Changelog](./CHANGELOG.en.md) · [简体中文主文档](./README.md)
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+本日志遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 与 [语义化版本 (SemVer)](https://semver.org/spec/v2.0.0.html) 规范。
+
+## [4.0.0] - 2026-11-23
+
+### 新增 (Added)
+- **AI Agent 优先原生全协议 MCP 服务端（`src/mcp-server.mjs` & `aitest mcp-serve` / `aitest mcp serve`）**：
+  - 零第三方依赖完整实现 **MCP `2025-11-25` / `2025-06-18` / `2025-03-26` / `2024-11-05`** 四版协议协商与 **`stdio` / Streamable HTTP (`/mcp`) / Legacy HTTP+SSE (`/sse` + `/messages`)** 三大传输模式。
+  - 暴露 **12 个强类型 MCP 工具**（含 `inputSchema`、`outputSchema`、`ToolAnnotations` 与包含 `nextRecommendedActions` 的 `structuredContent`）、静态与动态 **Resources / Resource Templates**、中英双语 **Prompts**、`ping` 与 `logging/setLevel`。
+  - HTTP 模式强制执行 `Origin` DNS 重绑定防御（`403`）与非回环网卡 `--auth-token` / `AITEST_MCP_TOKEN` Bearer 校验（`401`）；`stdio` 模式通过 `AITEST_MCP_CAPTURED_STDIO=1` + 异步互斥锁防止 `playwright` / `npm` 子进程输出污染 FD 1。
+- **AI Agent 发现与全仓双语文档体系**：
+  - 新增 `AGENTS.md` / `AGENTS.en.md`、`CLAUDE.md`、`llms.txt`、`docs/ai-agent-quickstart.md` / `.en.md`、`prompts/first-time-ai-agent.md` / `.en.md` 与 `skills/ai-test-workbench/references/mcp-server-protocol.md`。
+  - 全仓所有 `.md` 统一调整为 **默认中文显示 + 完整配对 `.en.md` 英文镜像**，新增 `scripts/check-docs-and-hygiene.mjs`（`npm run lint:docs`）纳入 CI 强制检查链接有效性与去敏合规。
+- **7 大支柱 MCP 编排自举 (`src/mcp-hub.mjs`)**：新增第 7 大支柱 `orchestrator` 与 `ai-test-workbench` 自研 MCP 预设。
+
+### 优化与修复 (Improved & Fixed)
+- 补齐 `src/diagnose.mjs` 与 `src/skill-install.mjs` 的 `--json` 结构化输出，新增 `.gemini/skills/` 与 `.github/skills/` 安装目标；为 `diagnose.mjs` 数据库表名建议增加正则标识符安全过滤；扩展 `src/report.mjs` 统一索引 `SYSTEM_MAP.md`、`code-map.json`、`system-overview.md` 与性能报告。
+- 更新总架构蓝图至 **v4.0** 并补充 `docs/architecture-and-prompts-blueprint.en.md` 英文版，完整涵盖 6 段首次接入与全链路实战提示词。
 
 ## [3.0.0] - 2026-11-23
 
-### Added
-- **Self-Evolving Living Code & System Knowledge Map (`aitest map` / `src/codemap.mjs`)**: Scans host repository frontend views/routers (including broken lazy-import detection), API calls, Spring/Node/Python/PHP controllers, and Prisma/SQL/ORM DB tables; incrementally fuses runtime `system-topology.json`, Playwright `results.json`, and `perf-report.json` into persistent `knowledge/code-map.json` + `knowledge/SYSTEM_MAP.md`; non-destructively auto-syncs `impact-map.json` while preserving manual rules.
-- **6-Pillar Read-Only Full-Link System MCP Hub (`aitest mcp` / `src/mcp-hub.mjs`)**: Built-in catalog and config merger (`.mcp.json` + `.codex/config.toml` + `.env.mcp.example`) across 11 presets (`playwright-test`, `chrome-devtools`, `grafana --disable-write`, `prometheus`, `loki`, `sentry`, `postgres-readonly`, `mysql-readonly`, `redis-readonly --readonly`, `k6`, `openapi-contract`) plus `aitest mcp doctor` write/secret guardrail enforcement.
-- **CDP Web Vitals & Concurrent API SLO Engine (`aitest perf` / `src/perf.mjs` + `perf-budget.json`)**: Captures real Chromium CDP/Navigation metrics (`TTFB`, `FCP`, `LCP`, `CLS`, `DOMNodes`, `JSHeapMB`, duplicate API waterfalls) and read-only concurrent API `P50/P90/P95/P99` + `RPS`, plus `expectPerformanceBudget()` in `tests/fixtures/base.ts`.
-- **Full-Link Trace Correlation (`base.ts` + `src/diagnose.mjs`)**: Passively records distributed trace headers (`traceparent`, `x-trace-id`, `x-request-id`, `sw8`, `eagleeye-traceid`) and exact test time windows, enriching `reports/ai-diagnostics.md` with linked source files from `code-map.json` and ready-to-run Loki/PromQL/Sentry/SQL queries.
-- **Autonomous Explorer v3.0 (`src/explore.mjs`)**: Added Vue 2 Vuex/Vue 3 dynamic route extraction, multi-portal/tenant workspace switcher detection, duplicate GET API waterfall tracking, malformed query parameter detection (`detectUrlQueryAnomalies`), and automatic Code Map sync.
+### 新增 (Added)
+- **自演进活体代码知识图谱（`aitest map` / `src/codemap.mjs`）**：扫描宿主路由（含懒加载断链检测）、API 调用、Controller 与 Prisma/SQL/ORM 表并融合运行态拓扑、测试结果与性能报告输出 `knowledge/SYSTEM_MAP.md`，非破坏式更新 `impact-map.json`。
+- **6 大支柱全链路只读 MCP 中枢（`aitest mcp` / `src/mcp-hub.mjs`）**：生成与安全审计 `.mcp.json` / `.codex/config.toml`（Grafana `--disable-write`、Prometheus、Loki、Sentry、只读 Postgres/MySQL、Redis `--readonly`、k6、OpenAPI）。
+- **CDP Web Vitals 与并发 GET API SLO 引擎（`aitest perf` / `src/perf.mjs`）**：采集 TTFB/FCP/LCP/CLS/DOM/JSHeap 与接口 P50/P90/P95/P99/RPS。
+- **Trace-ID 根因定位贯通**：`base.ts` 自动记录分布式链路头并在 `diagnose.mjs` 中生成 CodeMap 与可观测查询建议。
 
 ## [2.1.0] - 2026-11-23
 
-### Added
-- **Zero-to-One Read-Only Exploration Engine (`aitest explore`)**: Added `src/explore.mjs` and `aitest explore --target <repo> [--entry-path /] [--max-pages 25]` to crawl authenticated applications under strict zero-mutation guards (`DELETE`/`PUT`/`PATCH` and mutating `POST` paths aborted), auto-discover DOM/menu/Vue-Router routes, classify UI action safety (`readonly` vs `mutation`), redact sensitive API query parameters, detect page archetypes (`auth-portal`, `dashboard`, `crud-table`, `form-config`, `content-page`), and generate `reports/system-topology.json` + `specs/system-overview.md`.
-- **Multi-Portal 0→1 Exploration Guidance**: Added `skills/ai-test-workbench/references/zero-to-one-exploration.md` and `prompts/00-explore-and-atlas.md` covering the 4-stage flow: Login -> Multi-Portal 0-to-1 Exploration -> System Panorama (`system-overview.md`) -> Deep Functional Testing & Isolation Audits.
-- **Unit & Integration Tests (`test/explore.test.mjs`)**: Verified action safety classification, API query secret redaction, Markdown atlas generation, production blocking, and live `explore` execution against the local demo server.
+### 新增 (Added)
+- **从 0 到 1 只读全站探索引擎（`aitest explore` / `src/explore.mjs`）**：在只读写入护栏下发现多租户/多端切换器、路由、表格筛选及接口参数脱敏，产出 `system-topology.json` 与 `specs/system-overview.md`。
 
 ## [2.0.0] - 2026-11-23
 
-### Added
-- **Reusable Open-Source CLI (`ai-test-workbench` / `aitest`)**: `doctor`, `init`, `auth-login`, `run`, `impact`, `audit`, `diagnose`, `report`, `update-agents`, and `skill-install` built on zero-dependency Node.js ESM (`>=22.12.0`) with strict `shell: false` process execution.
-- **Official Playwright Test Agents Multi-Loop Orchestration**: Wraps `playwright init-agents` (`codex`, `claude`, `vscode`, `opencode`, `copilot`, `vscode-legacy`) with staging path sanitization, `qa/.aitest/agents-manifest.json` SHA-256 tracking, `.aitest-new` conflict sidecars, and optional `--bridge-root` MCP wiring.
-- **3-Layer Anti-Fake-Green Quality Gate (`scripts/audit-results.mjs`)**:
-  - Static: `tsc --noEmit` + `eslint-plugin-playwright` (`expect-expect`, `no-skipped-test`, `no-wait-for-timeout`, `no-focused-test`, `no-force-option`, `prefer-web-first-assertions`, `no-conditional-in-test`).
-  - Runtime: Separates `passed`, `failed`, `flaky`, `skipped`, and policy-excluded `@mutation` specs with owner-attributed, time-bounded `waivers.json`.
-  - Healer Diff Guard (`--diff-base`): Blocks assertion deletions, added `skip`/`fixme`/`.only`, `{ force: true }`, empty `.catch(() => {})`, and inflated timeouts (`>= 60000ms`).
-- **4-Layer Runtime Stability Fixture (`tests/fixtures/base.ts`)**: `auto` fixture with per-test `failOnPageError` / `failOnServerError` options, same-origin `5xx` detection, dual-surface (`page.route` + `Proxy`-wrapped `APIRequestContext`) endpoint/origin guards, `serviceWorkers: 'block'`, `expectAccessible` (`@axe-core/playwright`), `expectApiContract`, and `sessionStorage` state restoration (`playwright/.auth/session.json`).
-- **Interactive SMS/SSO Session Capture (`auth-login`)**: Headed Chromium flow with optional non-destructive account pre-fill and floating Save Session helper (zero CAPTCHA bypass).
-- **Diff-Impact Test Selection (`impact`)**: Combines `git diff`, uncommitted changes, untracked files, `impact-map.json`, and Playwright `--only-changed`, with automatic full-suite fallback on shared infra or unknown blast radius.
-- **Portable Agent Skill (`skills/ai-test-workbench/SKILL.md`)**: Ready for `.codex/skills/`, `.claude/skills/`, and `.agents/skills/`, including prompt-injection boundaries and A/B/C/D Healer triage.
-- **Self-Contained Local Demo Target (`examples/demo-webapp/server.mjs`)**: Zero-dependency Smart Campus portal (`--preset demo-campus`, `npm run demo:verify`) demonstrating UI search, RBAC `403`, duplicate enrollment `409`, and concurrent `1`-seat race protection (`201 + 409`).
-- **Host Tooling Isolation Inspector**: Warns during `init` when host repository `tsconfig.json` or `eslint.config.*` globs overlap `<repo>/qa/**`.
+### 新增 (Added)
+- **开源可复用 CLI (`ai-test-workbench`)**、官方 **Playwright Test Agents** SHA-256 冲突管理、**三层防假绿门禁**、**4 层扩展 Fixture**、**交互式登录捕获 (`auth-login`)**、**Diff-Impact (`impact`)** 与零依赖智慧校园演示靶场 (`demo-campus`)。

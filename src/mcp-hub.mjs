@@ -2,9 +2,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
 
-export const MCP_PILLARS = ['browser', 'observability', 'database', 'middleware', 'performance', 'api-contract'];
+export const MCP_PILLARS = ['orchestrator', 'browser', 'observability', 'database', 'middleware', 'performance', 'api-contract'];
 
 export const MCP_PRESETS = {
+  'ai-test-workbench': {
+    pillar: 'orchestrator',
+    description: 'AI Test Workbench native MCP Server (stdio/Streamable HTTP/SSE tools, Living Code Map & QA gates)',
+    command: 'npx',
+    args: ['-y', 'ai-test-workbench', 'mcp-serve'],
+    readonly: true,
+    envTemplate: {},
+  },
   'playwright-test': {
     pillar: 'browser',
     description: 'Playwright built-in Test Agents MCP server (Planner / Generator / Healer)',
@@ -147,10 +155,10 @@ export const MCP_PRESETS = {
 };
 
 export const MCP_PROFILES = {
-  minimal: ['playwright-test', 'chrome-devtools'],
-  observability: ['playwright-test', 'grafana', 'prometheus', 'loki', 'sentry'],
-  'data-verify': ['playwright-test', 'postgres-readonly', 'mysql-readonly', 'redis-readonly'],
-  perf: ['playwright-test', 'chrome-devtools', 'prometheus', 'k6'],
+  minimal: ['ai-test-workbench', 'playwright-test', 'chrome-devtools'],
+  observability: ['ai-test-workbench', 'playwright-test', 'grafana', 'prometheus', 'loki', 'sentry'],
+  'data-verify': ['ai-test-workbench', 'playwright-test', 'postgres-readonly', 'mysql-readonly', 'redis-readonly'],
+  perf: ['ai-test-workbench', 'playwright-test', 'chrome-devtools', 'prometheus', 'k6'],
   'full-link': Object.keys(MCP_PRESETS),
 };
 
@@ -314,6 +322,11 @@ function buildMcpEnvTemplate(serverNames) {
 export async function runMcpCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   const action = (options.action || 'presets').toLowerCase();
+
+  if (action === 'serve') {
+    const { runMcpServeCommand } = await import('./mcp-server.mjs');
+    return await runMcpServeCommand(options);
+  }
 
   if (action === 'presets') {
     const summary = {
