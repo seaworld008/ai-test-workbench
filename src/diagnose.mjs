@@ -78,8 +78,28 @@ export function suggestFailureCategory(errorText) {
 function extractAttachmentsAndErrorContext(resultObj, qaDir) {
   let tracePath = null;
   let errorContextText = null;
+  let traceIds = [];
+  let timeWindow = null;
 
   for (const att of resultObj.attachments || []) {
+    let parsedGuard = null;
+    if (att.name === 'workbench-runtime-guard.json' || att.name === 'workbench-trace-context.json') {
+      try {
+        if (att.body) {
+          parsedGuard = JSON.parse(Buffer.from(att.body, 'base64').toString('utf8'));
+        } else if (att.path) {
+          const resolved = path.isAbsolute(att.path) ? att.path : path.resolve(qaDir, att.path);
+          if (fs.existsSync(resolved)) parsedGuard = JSON.parse(fs.readFileSync(resolved, 'utf8'));
+        }
+      } catch {
+        parsedGuard = null;
+      }
+      if (parsedGuard) {
+        if (Array.isArray(parsedGuard.traceIds)) traceIds.push(...parsedGuard.traceIds);
+        if (parsedGuard.timeWindow) timeWindow = parsedGuard.timeWindow;
+      }
+    }
+
     if (!att.path) continue;
     const resolved = path.isAbsolute(att.path) ? att.path : path.resolve(qaDir, att.path);
     if (att.name === 'trace' || resolved.endsWith('trace.zip')) {
@@ -101,7 +121,29 @@ function extractAttachmentsAndErrorContext(resultObj, qaDir) {
     }
   }
 
-  return { tracePath, errorContextText };
+  return { tracePath, errorContextText, traceIds: [...new Set(traceIds)], timeWindow };
+}
+
+function loadCodeMapCorrelations(qaDir, specFile) {
+  const cmPath = path.join(qaDir, 'knowledge', 'code-map.json');
+  if (!fs.existsSync(cmPath)) return null;
+  try {
+    const cm = JSON.parse(fs.readFileSync(cmPath, 'utf8'));
+    const normalizedSpec = String(specFile || '').replace(/\\/g, '/');
+    const matchedRoutes = Object.values(cm.routes || {}).filter((r) =>
+      (r.coveringSpecs || []).some((s) => normalizedSpec.endsWith(s) || s.endsWith(normalizedSpec))
+    );
+    if (matchedRoutes.length === 0) return null;
+    return {
+      routes: matchedRoutes.map((r) => r.route),
+      frontendFiles: [...new Set(matchedRoutes.map((r) => r.frontendFile).filter(Boolean))],
+      backendFiles: [...new Set(matchedRoutes.flatMap((r) => r.linkedBackendFiles || []))],
+      dbTables: [...new Set(matchedRoutes.flatMap((r) => r.linkedDbTables || []))],
+      apis: [...new Set(matchedRoutes.flatMap((r) => r.linkedApis || []))],
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
@@ -138,16 +180,43 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
       (lastResult.errors || []).map((e) => e.message).join('\n') ||
       'No error message recorded';
     const cleanErr = redactSecrets(rawErr);
-    const { tracePath, errorContextText } = extractAttachmentsAndErrorContext(lastResult, qaDir);
+    const { tracePath, errorContextText, traceIds, timeWindow } = extractAttachmentsAndErrorContext(lastResult, qaDir);
     const triage = suggestFailureCategory(cleanErr);
+    const codeCorr = loadCodeMapCorrelations(qaDir, f.file);
 
     lines.push(`## ${idx + 1}. ${redactSecrets(f.title)}`);
     lines.push(`- **Location**: \`${f.file}:${f.line}\` (project: \`${f.projectName}\`, status: \`${f.status}\`)`);
     lines.push(`- **Suggested Category**: **${triage.category}** *(confidence: ${triage.confidence})*`);
     lines.push(`- **Action Guidance**: ${triage.guidance}`);
+    if (timeWindow) {
+      lines.push(`- **Test Time Window**: \`${timeWindow.startedAt}\` → \`${timeWindow.finishedAt}\``);
+    }
+    if (traceIds.length > 0) {
+      lines.push(`- **Captured Distributed Trace IDs**: ${traceIds.slice(0, 6).map((id) => `\`${redactSecrets(id)}\``).join(', ')}`);
+    }
     if (tracePath) {
       lines.push(`- **Trace Replay**: \`npx playwright show-trace "${tracePath}"\``);
     }
+
+    if (codeCorr || traceIds.length > 0 || timeWindow) {
+      lines.push('', '### Full-Link Code Map & Multi-MCP Root-Cause Playbook');
+      if (codeCorr) {
+        if (codeCorr.routes.length > 0) lines.push(`- **CodeMap Routes**: ${codeCorr.routes.map((r) => `\`${r}\``).join(', ')}`);
+        if (codeCorr.frontendFiles.length > 0) lines.push(`- **Frontend Source**: ${codeCorr.frontendFiles.map((s) => `\`${s}\``).join(', ')}`);
+        if (codeCorr.backendFiles.length > 0) lines.push(`- **Backend Controllers**: ${codeCorr.backendFiles.map((s) => `\`${s}\``).join(', ')}`);
+        if (codeCorr.dbTables.length > 0) lines.push(`- **Linked DB Entities**: ${codeCorr.dbTables.map((t) => `\`${t}\``).join(', ')}`);
+      }
+      const primaryTrace = traceIds[0] ? redactSecrets(traceIds[0].split(':').slice(1).join(':')) : '<trace-id>';
+      lines.push(
+        `- **Loki MCP Query**: \`{env=~"staging|test"} |= "${primaryTrace}"\``,
+        `- **Prometheus MCP Query**: \`sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))\``,
+        `- **Sentry MCP**: filter unresolved issues within \`${timeWindow?.startedAt || 'last 15m'}\` to \`${timeWindow?.finishedAt || 'now'}\``
+      );
+      if (codeCorr?.dbTables?.length > 0) {
+        lines.push(`- **Read-Only DB MCP Check**: \`SELECT COUNT(*) FROM ${codeCorr.dbTables[0]} LIMIT 1;\``);
+      }
+    }
+
     lines.push('', '### Error Snippet (Redacted)', '```text', cleanErr.slice(0, 2500), '```', '');
 
     if (errorContextText) {

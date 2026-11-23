@@ -1,0 +1,17 @@
+{
+  "description": "Default Browser Web Vitals + Concurrent Read-Only API SLO thresholds evaluated by `aitest perf`.",
+  "browser": {
+    "maxTtfbMs": 1500,
+    "maxFcpMs": 2500,
+    "maxLcpMs": 4000,
+    "maxCls": 0.25,
+    "maxDomNodes": 5000,
+    "maxJsHeapMb": 256,
+    "maxDuplicateApisPerRoute": 1
+  },
+  "api": {
+    "maxP95Ms": 1500,
+    "maxP99Ms": 3000,
+    "maxErrorRate": 0.01
+  }
+}

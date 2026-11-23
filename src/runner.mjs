@@ -1,6 +1,8 @@
 import path from 'node:path';
+import fs from 'node:fs';
 import { resolveQaDirectory } from './agents.mjs';
 import { runAuditForQaDir } from './audit.mjs';
+import { syncLivingCodeMap } from './codemap.mjs';
 import { computeImpact } from './impact.mjs';
 import { evaluateTargetSafety, loadMergedQaEnv } from './origin-guard.mjs';
 import { resolvePlaywrightCli, runPlaywright } from './proc.mjs';
@@ -127,6 +129,18 @@ export async function runSuiteCommand(options = {}) {
 
   console.log(`[Runner] (${qaDir}) playwright ${pwArgs.join(' ')}`);
   const pwRes = await runPlaywright(qaDir, pwArgs, { env: runEnv, inheritStdio: true });
+
+  // Evolve Living Code Map automatically if knowledge/code-map.json has been initialized
+  if (fs.existsSync(path.join(qaDir, 'knowledge', 'code-map.json'))) {
+    try {
+      const mapSync = syncLivingCodeMap(qaDir, { lang, syncImpact: false });
+      console.log(
+        `[CodeMap] Synced Revision #${mapSync.revision} (${mapSync.coverage.coveredRoutes}/${mapSync.coverage.totalRoutes} routes covered)`
+      );
+    } catch {
+      // non-fatal knowledge sync warning
+    }
+  }
 
   if (!options.audit) {
     return pwRes.code;

@@ -30,36 +30,30 @@
 
 ---
 
-## 🏗️ 核心架构
+## 🏗️ v3.0 全链路自主 AI 测试核心架构
 
 ```mermaid
 flowchart TB
-    subgraph AI["1. 创作与自愈阶段（AI Agents via MCP，默认在 <repo>/qa 下运行）"]
-        A1["Codex CLI / Claude Code / Antigravity / Cursor"]
-        A2["标准 Skill: skills/ai-test-workbench/SKILL.md"]
-        A3["Playwright Test Agents: Planner → Generator → Healer<br/>(通过内置 run-test-mcp-server 驱动)"]
-        A1 --> A2 --> A3
+    subgraph MCP["6 大只读系统 MCP 中枢 (aitest mcp add --profile full-link)"]
+        M1["浏览器/CDP: Playwright Test Agents + Chrome DevTools"]
+        M2["可观测与日志: Grafana (--disable-write) · Prometheus · Loki · Sentry"]
+        M3["数据与中间件: PostgreSQL / MySQL (禁写) · Redis (--readonly)"]
+        M4["性能与契约: k6 MCP + OpenAPI Schema"]
     end
 
-    subgraph WB["2. 公共可复用工作台 ai-test-workbench (零运行时第三方依赖)"]
-        CLI["doctor · init · auth-login · run · impact · audit · diagnose · report · update-agents · skill-install"]
-        Guard["单一防护真源: target-guard.mjs<br/>禁生产 / 域名白名单 / 危险接口黑名单 / 提示词注入防护"]
+    subgraph BRAIN["活体代码与系统知识图谱 (knowledge/SYSTEM_MAP.md)"]
+        K1["aitest explore: 多端/多租户 0→1 自动测绘 + 瀑布/畸形参数探测"]
+        K2["aitest map: 融合源码路由/API/DB表 + 运行态 + 测试结果持续进化"]
+        K1 --> K2
     end
 
-    subgraph ISO["3. 业务仓库零污染隔离 (<repo>/qa/)"]
-        P1["Next.js / Vue / H5<br/><repo>/qa"]
-        P2["Java / Spring Cloud<br/><repo>/qa"]
-        P3["PHP / ThinkPHP<br/><repo>/qa"]
+    subgraph RUN["确定性门禁 · 性能 SLO · 全链路追踪"]
+        R1["aitest run: E2E / API / A11y + 自动捕获分布式 Trace-ID"]
+        R2["aitest perf: 真实浏览器 CDP Web Vitals + 并发 GET P95/RPS 基线"]
+        R3["aitest audit + diagnose: 三层防假绿 + 代码地图 & Loki/SQL 排障手册"]
     end
 
-    subgraph GATE["4. 确定性回归与三层防假绿门禁（CI 不调用 LLM）"]
-        G1["静态门禁: tsc --noEmit + eslint-plugin-playwright"]
-        G2["运行时门禁: scripts/audit-results.mjs + 到期豁免 waivers.json"]
-        G3["Healer Diff 守卫: --diff-base 阻断删断言 / 新增 skip / force:true"]
-        G1 --> G2 --> G3
-    end
-
-    AI --> WB --> ISO --> GATE
+    MCP --> BRAIN --> RUN
 ```
 
 ---
@@ -144,8 +138,11 @@ npm run demo:verify
 | `doctor` | 探测本机环境、AI CLI 与浏览器缓存 | `--target <path>`、`--json` |
 | `init` | 幂等初始化 `<repo>/qa` 并检查宿主工程隔离冲突 | `--name`、`--target`、`--preset generic\|demo-campus`、`--loop codex,claude`、`--dry-run`、`--bridge-root` |
 | `auth-login` | 可视化登录并保存 `cookies/localStorage/sessionStorage` | `--target`、`--base-url`、`--account`、`--login-path`、`--timeout` |
-| `explore` | 登录后从 0 到 1 只读探索全站与多端切换器，生成 `system-overview.md` 全景图 | `--target`、`--base-url`、`--entry-path /`、`--max-pages 25` |
-| `run` | 按 Suite 执行测试并传播真实退出码 | `--suite smoke\|e2e\|api\|a11y\|critical\|seed\|impact\|all`、`--base-url`、`--allow-mutation`、`--audit`、`--last-failed` |
+| `explore` | 登录后从 0 到 1 只读探索全站与多端切换器并更新代码地图 | `--target`、`--base-url`、`--entry-path /`、`--max-pages 25` |
+| `map` | 融合仓库源码 + 运行态拓扑 + 测试结果演进活体代码知识图谱 | `--target`、`--repo`、`--no-sync-impact`、`--json` |
+| `mcp` | 6 大支柱全链路只读 MCP 一键接入与安全审计 | `presets \| add --profile full-link \| doctor` |
+| `perf` | 真实 Chromium CDP Web Vitals + 并发 GET API P95/RPS 门禁 | `--routes /,/login`、`--concurrency 4`、`--iterations 12`、`--enforce-budget` |
+| `run` | 按 Suite 执行测试并自动演进 `SYSTEM_MAP.md` | `--suite smoke\|e2e\|api\|a11y\|critical\|seed\|impact\|all`、`--base-url`、`--allow-mutation`、`--audit` |
 | `impact` | 基于 Git Diff 分析受影响测试集（不确定自动退全量） | `--target`、`--base origin/main`、`--json` |
 | `audit` | 执行静态 ESLint/TSC + 运行时结果 + Healer Diff 门禁 | `--check-specs`、`--require-e2e`、`--diff-base HEAD`、`--max-flaky 0` |
 | `diagnose` | 汇总 `results.json` 与官方 `error-context.md`，脱敏输出建议分类 | `--target`、`--output` |

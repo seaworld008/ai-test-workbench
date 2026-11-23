@@ -1,7 +1,7 @@
 {
   "name": "ai-test-workbench",
-  "version": "2.1.0",
-  "description": "Reusable local AI-driven E2E testing workbench and Agent Skill built on Playwright Test Agents (Planner/Generator/Healer), zero-to-one system explorer, Diff-Impact selection, ESLint/TSC anti-fake-green gates, and WCAG 2.2 checks.",
+  "version": "3.0.0",
+  "description": "Reusable AI-driven full-link testing workbench & Agent Skill: Zero-to-One Explorer, Self-Evolving Living Code Map, 6-Pillar Read-Only System MCP Hub (Grafana/Prometheus/Loki/Sentry/DB/Redis/k6), CDP/API Perf Budgets, and 3-Layer Anti-Fake-Green Gates.",
   "license": "MIT",
   "author": "seaworld008",
   "homepage": "https://github.com/seaworld008/ai-test-workbench#readme",
@@ -47,6 +47,7 @@
     "scripts/",
     "templates/playwright-qa/package.json",
     "templates/playwright-qa/package-lock.json",
+    "templates/playwright-qa/perf-budget.json",
     "templates/playwright-qa/tsconfig.json",
     "templates/playwright-qa/eslint.config.mjs",
     "templates/playwright-qa/playwright.config.ts",

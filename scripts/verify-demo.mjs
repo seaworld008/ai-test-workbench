@@ -61,8 +61,38 @@ try {
   const seedCode = await runCli(['run', '--target', tempWorkspace, '--suite', 'seed']);
   const allCode = await runCli(['run', '--target', tempWorkspace, '--suite', 'all', '--audit']);
   const auditCode = await runCli(['audit', '--target', tempWorkspace, '--check-specs', '--require-e2e']);
+  const exploreCode = await runCli(['explore', '--target', tempWorkspace, '--base-url', demo.baseURL, '--max-pages', '5']);
+  const mapCode = await runCli(['map', '--target', tempWorkspace]);
+  const mcpAddCode = await runCli(['mcp', 'add', '--target', tempWorkspace, '--profile', 'full-link']);
+  const mcpDocCode = await runCli(['mcp', 'doctor', '--target', tempWorkspace]);
+  const perfCode = await runCli([
+    'perf',
+    '--target',
+    tempWorkspace,
+    '--base-url',
+    demo.baseURL,
+    '--routes',
+    '/',
+    '--endpoint',
+    '/api/courses',
+    '--concurrency',
+    '2',
+    '--iterations',
+    '6',
+    '--enforce-budget',
+  ]);
 
-  exitCode = seedCode === 0 && allCode === 0 && auditCode === 0 ? 0 : 1;
+  exitCode =
+    seedCode === 0 &&
+    allCode === 0 &&
+    auditCode === 0 &&
+    exploreCode === 0 &&
+    mapCode === 0 &&
+    mcpAddCode === 0 &&
+    mcpDocCode === 0 &&
+    perfCode === 0
+      ? 0
+      : 1;
 } finally {
   const qaModules = path.join(tempWorkspace, 'qa', 'node_modules');
   try {

@@ -1,8 +1,8 @@
 # AI Test Workbench (Playwright Test Agents + Multi-Agent Skill) 可复用本机 AI 自动化测试工作台——架构设计与实施提示词
 
-> **文档版本**：v2.1（经双模型交叉审计与 `@playwright/test@1.65.1` 真机探针校准版）  
+> **文档版本**：v3.0（经实战多租户 SaaS 验证与全球前沿 AI 全链路测试体系升级版）  
 > **编制与升级日期**：2026-11-23  
-> **目标**：建设一套可纳入 Git、可作为开源包（`ai-test-workbench`）及标准 Agent Skill（`SKILL.md`）跨项目复用的 AI 自动化测试工作台，支持快速、零污染接入 Vue/H5、React、Java/Spring Cloud、PHP/ThinkPHP 等项目。  
+> **目标**：建设一套可纳入 Git、可作为开源包（`ai-test-workbench`）及标准 Agent Skill（`SKILL.md`）跨项目复用的 AI 全链路自动化测试工作台，打通 **「0→1 多端探索 → 活体代码知识地图 → 6 大系统 MCP（可观测/日志/数据库/Redis/k6）→ 性能 SLO 门禁 → 三层防假绿确定性回归」**。  
 > **主要技术**：Playwright Test（精确锁死 `1.65.1`）、官方 Planner / Generator / Healer（内置 `run-test-mcp-server`）、`@axe-core/playwright`（`4.14.0`）、`eslint-plugin-playwright`（`2.12.2`）、TypeScript（`6.0.3`）、Node.js（`26 Active LTS` / `24 Maintenance LTS`，最低 `>= 22.12`）、Codex CLI、Claude Code、Git、可选 Docker/Jenkins/GitHub Actions/GitLab CI。  
 > **实施原则**：本机优先、官方能力优先、创作期与回归期解耦、单一防护真源、防提示词注入、零假绿容忍、无密钥泄漏、无生产写操作、可跨项目复用。
 
@@ -25,6 +25,20 @@
 | **5. 写操作守卫误伤登录 & `request` 漏检** | 粗暴拦截全部非 GET 会拦掉登录 `POST` 和 GraphQL 查询，且 `page.route` 管不到 API 测试的 `request` 与 Service Worker | 改为三层写保护：① 改数据的用例打 `@mutation` 标签，`TEST_ALLOW_MUTATION=0` 时按策略排除并单独统计；② 危险接口黑名单 `TEST_BLOCKED_ENDPOINTS` 同时作用于 `page.route` 与 `Proxy` 包装后的 `request` (`APIRequestContext`)；③ 配置 `serviceWorkers: 'block'`，可选 `TEST_STRICT_READONLY=1` |
 | **6. Projects 耦合与无环境假绿** | 把 `seed` 混入常规回归或未配 URL 时整套 `test.skip` 会制造假绿 | 拆分为 5 个独立 Project：`smoke`（纯离线无需 URL）、`setup`（API 登录写 `storageState`）、`e2e`（依赖 `setup`）、`api`、`seed`（仅单独运行或供 Planner 使用）；未配 `TEST_BASE_URL` 时跑 `e2e/api/setup` 直接报配置错误退出 |
 | **7. 跨工具复用、提示词注入、交互式登录与从 0 到 1 探索图谱** | 仅靠复制长提示词，缺少抗提示词注入约束、短信/SSO 会话捕获、多端全景探索与可运行靶场 | 提供标准 `skills/ai-test-workbench/SKILL.md`（页面内容一律视为数据而非指令）；新增 `auth-login` 可视化登录捕获（同时保存 `storageState` 与 `sessionStorage`，不绕过验证码）与 **`explore` 从 0 到 1 只读全站探索引擎**（自动汇总多端视角、路由原型、API 端点并生成 `specs/system-overview.md` 全景图）；`diagnose` 汇总官方 `error-context.md` 并脱敏输出建议分类+置信度；内置零依赖 `examples/demo-webapp/server.mjs`（默认端口 `5899`、`--port 0`、`--preset demo-campus` 与 `npm run demo:verify`） |
+
+### 0.3 v3.0 顶层全链路设计：活体代码地图 + 6 大只读系统 MCP + 性能 SLO 门禁
+
+1. **活体代码与系统知识地图（`aitest map` → `knowledge/code-map.json` + `knowledge/SYSTEM_MAP.md`）**：
+   - 静态扫描宿主代码（Next.js/Vue/React 路由与缺失动态 import 断链、前端 API 调用、Spring/Node/Python/PHP Controller 端点、Prisma/SQL/ORM 实体表）并与运行态探索（`system-topology.json`）、回归结果（`results.json`）、性能快照（`perf-report.json`）增量融合，每次运行自动递增 `revision` 并非破坏式同步 `impact-map.json`。
+2. **6 大支柱只读系统 MCP 中枢（`aitest mcp add --profile full-link`）**：
+   - **浏览器/CDP 域**：`playwright-test`（内置）、`chrome-devtools`。
+   - **可观测与崩溃日志域**：`grafana`（强制 `--disable-write`）、`prometheus`、`loki`、`sentry`。
+   - **数据库状态校验域**：`postgres-readonly`、`mysql-readonly`（强制 `ALLOW_INSERT/UPDATE/DELETE_OPERATION=false`）。
+   - **中间件域**：`redis-readonly`（强制 `--readonly`）。
+   - **性能与压测域**：`k6` + 本地 Zero-Dep `aitest perf`（Chromium CDP Web Vitals + 只读并发 API P50/P95/P99/RPS）。
+   - **契约漂移域**：`openapi-contract`；配套 `aitest mcp doctor` 审计配置禁止写入标志与明文硬编码密码。
+3. **分布式 Trace-ID 根因贯通（`tests/fixtures/base.ts` + `aitest diagnose`）**：
+   - 被动记录响应头中的 `traceparent` / `x-trace-id` / `x-request-id` / `sw8` / `eagleeye-traceid` 及精确时间窗；失败时结合 `code-map.json` 在 `reports/ai-diagnostics.md` 直接给出可复制的 Loki LogQL、PromQL、Sentry 与只读 SQL 查询语句。
 
 ---
 
@@ -353,6 +367,6 @@ pipeline {
 - [x] 启动 `examples/demo-webapp/server.mjs` 本地靶场（`npm run demo:verify`），跑通 `seed + smoke + e2e + api + audit --require-e2e`（含 `Promise.all` 单名额并发 `201 + 409`、重复报名 `409`、学生管理端 `403`，11/11 通过，退出码 `0`）
 - [x] 真实业务项目接入验证（某生产级 Next.js 16.2.6 + Vitest Web 应用，已脱敏）：`init --dry-run` 准确识别技术栈与宿主隔离提示（不改源码）；在独立沙箱目录对本地 `http://127.0.0.1:3100` 跑通首页安全头、定价页、安全页 WCAG 扫描、中英文切换与 `/api/demo` 确定性契约（`seed` 1/1 + `all` 12/12 + `audit --require-e2e` 退出码 `0`）
 - [x] 反向安全与防假绿门禁全部返回非 `0` 退出码：`TEST_ENV=production`（`2`）、未授权 host（`2`）、`REQUIRE_TEST_TARGET=1` 空 URL（`2`）、故意失败用例（`1`，含 Trace 生成与 `ai-diagnostics.md` 脱敏及 `error-context.md` 汇总）、`@critical` 被 skip（`1`）、零断言 spec（`1`）、含 `waitForTimeout`（`1`）、Healer diff 删减 `expect`（`1`）、命中危险接口黑名单（`1`）
-- [x] **v2.1 新增 `explore` 从 0 到 1 系统探索引擎**：支持只读防火墙（拦截 `DELETE`/`PUT`/`PATCH` 及写类型 `POST`）、UI 按钮安全分类、API Query 密钥脱敏，并在本地靶场实测生成 `reports/system-topology.json` 与 `specs/system-overview.md`
-- [x] `npm pack --dry-run` 验证产物不含 `node_modules` / `.env` / `reports` 且包含 `templates/playwright-qa/gitignore`
+- [x] **v3.0 全链路自主测试升级**：新增 `aitest map` 活体代码知识图谱（静态路由/断链import/API/Controller/DB表融合+自动更新 `impact-map.json`）、`aitest mcp` 6 大支柱 11 项全链路只读 MCP 中枢与 `mcp doctor` 写操作拦截、`aitest perf` 真实浏览器 CDP Web Vitals + 并发 GET P95/RPS SLO 引擎，以及 `base.ts`/`diagnose.mjs` 分布式 Trace-ID 根因关联（`npm test` `35/35`、Demo 与 Staging 实测全部通过）
+- [x] `npm pack --dry-run` 验证产物不含 `node_modules` / `.env` / `reports` 且包含 `templates/playwright-qa/gitignore` 与 `perf-budget.json`
 - [x] 根目录 `git status` 干净规范（`.sandbox` 已忽略，`templates/playwright-qa/package-lock.json` 受控跟踪）

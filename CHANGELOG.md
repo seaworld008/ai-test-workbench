@@ -4,6 +4,15 @@ All notable changes to `ai-test-workbench` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-11-23
+
+### Added
+- **Self-Evolving Living Code & System Knowledge Map (`aitest map` / `src/codemap.mjs`)**: Scans host repository frontend views/routers (including broken lazy-import detection), API calls, Spring/Node/Python/PHP controllers, and Prisma/SQL/ORM DB tables; incrementally fuses runtime `system-topology.json`, Playwright `results.json`, and `perf-report.json` into persistent `knowledge/code-map.json` + `knowledge/SYSTEM_MAP.md`; non-destructively auto-syncs `impact-map.json` while preserving manual rules.
+- **6-Pillar Read-Only Full-Link System MCP Hub (`aitest mcp` / `src/mcp-hub.mjs`)**: Built-in catalog and config merger (`.mcp.json` + `.codex/config.toml` + `.env.mcp.example`) across 11 presets (`playwright-test`, `chrome-devtools`, `grafana --disable-write`, `prometheus`, `loki`, `sentry`, `postgres-readonly`, `mysql-readonly`, `redis-readonly --readonly`, `k6`, `openapi-contract`) plus `aitest mcp doctor` write/secret guardrail enforcement.
+- **CDP Web Vitals & Concurrent API SLO Engine (`aitest perf` / `src/perf.mjs` + `perf-budget.json`)**: Captures real Chromium CDP/Navigation metrics (`TTFB`, `FCP`, `LCP`, `CLS`, `DOMNodes`, `JSHeapMB`, duplicate API waterfalls) and read-only concurrent API `P50/P90/P95/P99` + `RPS`, plus `expectPerformanceBudget()` in `tests/fixtures/base.ts`.
+- **Full-Link Trace Correlation (`base.ts` + `src/diagnose.mjs`)**: Passively records distributed trace headers (`traceparent`, `x-trace-id`, `x-request-id`, `sw8`, `eagleeye-traceid`) and exact test time windows, enriching `reports/ai-diagnostics.md` with linked source files from `code-map.json` and ready-to-run Loki/PromQL/Sentry/SQL queries.
+- **Autonomous Explorer v3.0 (`src/explore.mjs`)**: Added Vue 2 Vuex/Vue 3 dynamic route extraction, multi-portal/tenant workspace switcher detection, duplicate GET API waterfall tracking, malformed query parameter detection (`detectUrlQueryAnomalies`), and automatic Code Map sync.
+
 ## [2.1.0] - 2026-11-23
 
 ### Added

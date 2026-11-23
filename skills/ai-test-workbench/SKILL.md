@@ -32,9 +32,12 @@ npx ai-test-workbench doctor
 npx ai-test-workbench init --name my-app --target /path/to/repo --loop codex --dry-run
 npx ai-test-workbench init --name my-app --target /path/to/repo --loop codex
 
-# 2.5 Optional for unfamiliar / multi-tenant SaaS: Login -> Explore 0-to-1 -> Generate specs/system-overview.md
+# 2.5 Optional for unfamiliar / multi-tenant SaaS: Login -> Explore 0-to-1 -> Evolving Code Map -> Full-Link MCPs
 npx ai-test-workbench auth-login --target /path/to/repo --base-url https://staging.example.internal
 npx ai-test-workbench explore --target /path/to/repo --base-url https://staging.example.internal --max-pages 30
+npx ai-test-workbench map --target /path/to/repo
+npx ai-test-workbench mcp add --target /path/to/repo --profile full-link && npx ai-test-workbench mcp doctor --target /path/to/repo
+npx ai-test-workbench perf --target /path/to/repo --concurrency 4 --iterations 12
 
 # 3. Verify offline smoke + 3-layer quality gate
 npx ai-test-workbench run --target /path/to/repo --suite smoke --audit
@@ -53,8 +56,9 @@ npx ai-test-workbench diagnose --target /path/to/repo
 
 Start your coding agent **from `<repo>/qa/`** (`cd qa && codex` or `cd qa && claude`) unless `--bridge-root` was explicitly configured:
 
-0. **Zero-to-One System Atlas First (`explore`, recommended for existing / multi-portal SaaS)**:
-   - Run `aitest explore` and follow [references/zero-to-one-exploration.md](references/zero-to-one-exploration.md) to inventory Platform and Tenant/School switchers, routes, tables, APIs, and pre-existing runtime/a11y defects into `specs/system-overview.md` BEFORE writing functional specs.
+0. **Zero-to-One System Atlas & Living Code Map (`explore`, `map`, `mcp`, `perf`)**:
+   - Run `aitest explore` and `aitest map` following [references/zero-to-one-exploration.md](references/zero-to-one-exploration.md) and [references/full-link-mcp-and-codemap.md](references/full-link-mcp-and-codemap.md) so Platform/Tenant portals, source files, APIs, DB entities, and coverage gaps evolve in `knowledge/SYSTEM_MAP.md`.
+   - Connect read-only observability/DB/k6 MCPs via `aitest mcp add --profile full-link` and benchmark CDP Web Vitals + API SLOs via `aitest perf`.
 1. **Seed First (`--project=seed`)**:
    - Ensure `tests/seed.spec.ts` runs cleanly against the allowlisted `TEST_BASE_URL` without irreversible mutations.
 2. **Planner (`specs/*.md`)**:

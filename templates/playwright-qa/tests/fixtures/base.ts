@@ -140,6 +140,17 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
       const blockedRequests: string[] = [];
       const pageErrors: string[] = [];
       const serverErrors: string[] = [];
+      const traceIdsSet = new Set<string>();
+      const startedAtIso = new Date().toISOString();
+
+      const TRACE_HEADER_NAMES = [
+        'traceparent',
+        'x-trace-id',
+        'x-request-id',
+        'sw8',
+        'eagleeye-traceid',
+        'x-b3-traceid',
+      ];
 
       const baseOrigin = baseURL ? new URL(baseURL).origin.toLowerCase() : null;
 
@@ -162,6 +173,14 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
       });
 
       page.on('response', (res) => {
+        const headers = res.headers();
+        for (const hName of TRACE_HEADER_NAMES) {
+          const hVal = headers[hName];
+          if (hVal && traceIdsSet.size < 20) {
+            traceIdsSet.add(`${hName}:${hVal.slice(0, 128)}`);
+          }
+        }
+
         const status = res.status();
         if (status < 500) return;
         const url = res.url();
@@ -179,13 +198,24 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
 
       await use();
 
+      const finishedAtIso = new Date().toISOString();
+      const traceContext = {
+        timeWindow: { startedAt: startedAtIso, finishedAt: finishedAtIso },
+        traceIds: [...traceIdsSet],
+      };
+
       if (blockedRequests.length > 0 || pageErrors.length > 0 || serverErrors.length > 0) {
         await testInfo.attach('workbench-runtime-guard.json', {
           contentType: 'application/json',
           body: Buffer.from(
-            JSON.stringify({ blockedRequests, pageErrors, serverErrors }, null, 2),
+            JSON.stringify({ blockedRequests, pageErrors, serverErrors, ...traceContext }, null, 2),
             'utf8'
           ),
+        });
+      } else if (testInfo.status !== testInfo.expectedStatus) {
+        await testInfo.attach('workbench-trace-context.json', {
+          contentType: 'application/json',
+          body: Buffer.from(JSON.stringify(traceContext, null, 2), 'utf8'),
         });
       }
 
@@ -204,6 +234,34 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
 });
 
 export { expect };
+
+/**
+ * Verifies Navigation Timing & DOM complexity stay within configurable SLO budgets.
+ */
+export async function expectPerformanceBudget(
+  page: Page,
+  budget: { maxTtfbMs?: number; maxFcpMs?: number; maxDomNodes?: number } = {}
+): Promise<void> {
+  const maxTtfbMs = budget.maxTtfbMs ?? 1500;
+  const maxFcpMs = budget.maxFcpMs ?? 2500;
+  const maxDomNodes = budget.maxDomNodes ?? 5000;
+
+  const snap = await page.evaluate(() => {
+    const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+    const fcp = performance.getEntriesByName('first-contentful-paint')[0];
+    return {
+      ttfbMs: nav ? Math.round(nav.responseStart) : 0,
+      fcpMs: fcp ? Math.round(fcp.startTime) : 0,
+      domNodes: document.getElementsByTagName('*').length,
+    };
+  });
+
+  expect(snap.ttfbMs, `TTFB ${snap.ttfbMs}ms exceeded ${maxTtfbMs}ms`).toBeLessThanOrEqual(maxTtfbMs);
+  if (snap.fcpMs > 0) {
+    expect(snap.fcpMs, `FCP ${snap.fcpMs}ms exceeded ${maxFcpMs}ms`).toBeLessThanOrEqual(maxFcpMs);
+  }
+  expect(snap.domNodes, `DOM node count ${snap.domNodes} exceeded ${maxDomNodes}`).toBeLessThanOrEqual(maxDomNodes);
+}
 
 /**
  * Runs an automated axe-core scan for WCAG 2.0/2.1/2.2 Level A & AA rules.

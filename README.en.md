@@ -67,19 +67,23 @@ npx ai-test-workbench run --target "/path/to/your-repo" --suite smoke --audit
 
 ---
 
-## Interactive Login & Zero-to-One System Exploration (`auth-login` -> `explore`)
-
-For complex multi-tenant SaaS apps protected by SMS OTP / SSO / CAPTCHA:
+## Full-Link Autonomous Testing Loop (v3.0): Explore -> Living Code Map -> MCP Hub -> Perf
 
 ```bash
-# 1. Open headed Chromium, optionally pre-fill phone/username, save storageState + sessionStorage
-npx ai-test-workbench auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal --account 13800138000
+# 1. Capture session for SMS / SSO / CAPTCHA staging portals (no bypass)
+npx ai-test-workbench auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
 
-# 2. Explore all reachable routes read-only (0 -> 1) and generate specs/system-overview.md + reports/system-topology.json
+# 2. Explore all portals & routes read-only (0 -> 1) and fuse static source + runtime into Living Code Map
 npx ai-test-workbench explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
+npx ai-test-workbench map --target "/path/to/your-repo"
 
-# 3. Run deterministic E2E reusing captured session state
-npx ai-test-workbench run --target "/path/to/your-repo" --suite e2e --base-url https://staging.example.internal --audit
+# 3. Connect 6-Pillar Read-Only System MCPs (Grafana/Prometheus/Loki/Sentry/DB/Redis/k6) and verify safety
+npx ai-test-workbench mcp add --target "/path/to/your-repo" --profile full-link
+npx ai-test-workbench mcp doctor --target "/path/to/your-repo"
+
+# 4. Run Chromium CDP Web Vitals + Concurrent GET API SLO benchmark + Deterministic Regression
+npx ai-test-workbench perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
+npx ai-test-workbench run --target "/path/to/your-repo" --suite all --audit
 ```
 
 ---

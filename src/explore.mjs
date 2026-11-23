@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveQaDirectory } from './agents.mjs';
+import { syncLivingCodeMap } from './codemap.mjs';
 import { evaluateTargetSafety, loadMergedQaEnv } from './origin-guard.mjs';
 import { redactSecrets } from './proc.mjs';
 
@@ -47,6 +48,24 @@ export function redactEndpointUrl(rawUrl) {
   } catch {
     return redactSecrets(input);
   }
+}
+
+/**
+ * Detects malformed query parameters such as serialized JS/Day.js objects (`[$L]=en`, `[object Object]`).
+ */
+export function detectUrlQueryAnomalies(rawUrl) {
+  const input = String(rawUrl || '');
+  const anomalies = [];
+  if (/(?:\[|\\%5B)\$[a-zA-Z0-9_]+(?:\]|\\%5D)=/.test(input)) {
+    anomalies.push('Serialized date/object internals in query parameters (e.g. dayjs [$L]/[$d])');
+  }
+  if (/\[object Object\]|%5Bobject%20Object%5D/i.test(input)) {
+    anomalies.push('Literal [object Object] serialized in URL query');
+  }
+  if (/[?&][^=]+=undefined(?:&|$)/i.test(input)) {
+    anomalies.push('Literal "undefined" passed as URL query parameter');
+  }
+  return anomalies;
 }
 
 /**
@@ -281,6 +300,8 @@ export async function runExploreCommand(options = {}) {
     portals: [],
     pages: [],
     endpoints: [],
+    queryAnomalies: [],
+    duplicateWaterfalls: [],
     consoleErrors: [],
     serverErrors: [],
   };
@@ -308,6 +329,8 @@ export async function runExploreCommand(options = {}) {
     const page = await context.newPage();
     let activeRouteLabel = entryPath;
     const seenEndpointKeys = new Set();
+    let routeApiCounts = new Map();
+    const seenAnomalyKeys = new Set();
 
     // Strict zero-mutation firewall during automated exploration
     await page.route('**/*', async (route) => {
@@ -366,6 +389,22 @@ export async function runExploreCommand(options = {}) {
             status,
           });
         }
+        if (res.request().method().toUpperCase() === 'GET') {
+          let pathnameOnly = cleanEp;
+          try {
+            pathnameOnly = new URL(url).pathname;
+          } catch {
+            // keep cleanEp
+          }
+          routeApiCounts.set(pathnameOnly, (routeApiCounts.get(pathnameOnly) || 0) + 1);
+        }
+        for (const detail of detectUrlQueryAnomalies(url)) {
+          const aKey = `${activeRouteLabel}:${detail}`;
+          if (!seenAnomalyKeys.has(aKey)) {
+            seenAnomalyKeys.add(aKey);
+            topology.queryAnomalies.push({ route: activeRouteLabel, detail, endpoint: cleanEp });
+          }
+        }
       }
     });
 
@@ -373,6 +412,7 @@ export async function runExploreCommand(options = {}) {
     const visited = new Set();
     const stackSet = new Set();
     const authKeysSet = new Set();
+    const portalMap = new Map();
 
     while (queue.length > 0 && topology.pages.length < maxPages) {
       const nextRoute = queue.shift();
@@ -381,6 +421,7 @@ export async function runExploreCommand(options = {}) {
       if (visited.has(normalizedKey)) continue;
       visited.add(normalizedKey);
       activeRouteLabel = normalizedKey;
+      routeApiCounts = new Map();
 
       try {
         await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20_000 });
@@ -393,7 +434,7 @@ export async function runExploreCommand(options = {}) {
       await page
         .waitForFunction(
           () => {
-            const masks = document.querySelectorAll('.el-loading-mask, .ant-spin-spinning, [aria-busy="true"]');
+            const masks = document.querySelectorAll('.el-loading-mask, .ant-spin-spinning, [aria-busy="true"], .el-skeleton');
             for (const m of masks) {
               if (getComputedStyle(m).display !== 'none') return false;
             }
@@ -446,7 +487,8 @@ export async function runExploreCommand(options = {}) {
         if (document.querySelector('[class*="ant-"]')) tech.push('Ant Design');
         if (document.querySelector('#__next, [data-nextjs-scroll-focus-boundary]')) tech.push('Next.js');
 
-        const vueRouter = document.querySelector('#app')?.__vue__?.$router;
+        const vueRoot = document.querySelector('#app')?.__vue__;
+        const vueRouter = vueRoot?.$router;
         const vueRoutes = [];
         const walkVueRoutes = (routes, prefix = '') => {
           for (const r of routes || []) {
@@ -457,6 +499,40 @@ export async function runExploreCommand(options = {}) {
           }
         };
         if (vueRouter?.options?.routes) walkVueRoutes(vueRouter.options.routes);
+        if (vueRoot?.$store?.state?.permission?.routes) walkVueRoutes(vueRoot.$store.state.permission.routes);
+        if (vueRoot?.$store?.state?.permission?.sidebarRouters) walkVueRoutes(vueRoot.$store.state.permission.sidebarRouters);
+
+        const vue3Router = document.querySelector('#app')?.__vue_app__?.config?.globalProperties?.$router;
+        if (vue3Router && typeof vue3Router.getRoutes === 'function') {
+          for (const r of vue3Router.getRoutes()) {
+            if (r?.path && !r.path.includes(':') && !r.path.includes('*')) vueRoutes.push(r.path);
+          }
+        }
+
+        const detectedPortals = [];
+        const appPlatforms = vueRoot?.$store?.state?.app?.platforms;
+        if (Array.isArray(appPlatforms)) {
+          for (const pf of appPlatforms.slice(0, 10)) {
+            if (pf?.name) detectedPortals.push({ name: pf.name, mode: 'platform', id: pf.id ?? null, notes: 'Vuex app.platforms' });
+          }
+        }
+        const switcherKeys = ['tenants', 'workspaces', 'organizations', 'orgs', 'projects'];
+        const walkFindSwitcher = (node, depth = 0) => {
+          if (!node || depth > 5) return;
+          for (const key of switcherKeys) {
+            if (Array.isArray(node[key])) {
+              for (const item of node[key].slice(0, 10)) {
+                if (item?.name) detectedPortals.push({ name: item.name, mode: 'tenant', id: item.id ?? null, notes: `Workspace Switcher (${key})` });
+              }
+            }
+          }
+          for (const c of node.$children || []) walkFindSwitcher(c, depth + 1);
+        };
+        walkFindSwitcher(vueRoot);
+        const switcherDom = document.querySelectorAll('[class*="tenant-switch"], [class*="workspace-switch"], [class*="org-switch"], [data-testid*="tenant-switcher"], [data-testid*="workspace-switcher"]');
+        if (switcherDom.length > 0 && detectedPortals.length === 0) {
+          detectedPortals.push({ name: 'Multi-Tenant Drawer Detected', mode: 'switcher', notes: 'Interactive switcher DOM found' });
+        }
 
         return {
           actualPath: window.location.pathname,
@@ -484,12 +560,23 @@ export async function runExploreCommand(options = {}) {
           authKeyNames: Object.keys(window.localStorage || {}).filter((k) =>
             /token|auth|session|user|platform|tenant|admin/i.test(k)
           ),
+          detectedPortals,
           discoveredLinks: [...anchors, ...vueRoutes],
         };
       });
 
       for (const tName of snap.tech) stackSet.add(tName);
       for (const k of snap.authKeyNames) authKeysSet.add(k);
+      for (const dp of snap.detectedPortals || []) {
+        portalMap.set(`${dp.mode}:${dp.id ?? dp.name}`, dp);
+      }
+
+      const apisObserved = [...routeApiCounts.keys()];
+      for (const [epPath, count] of routeApiCounts.entries()) {
+        if (count >= 2) {
+          topology.duplicateWaterfalls.push({ route: normalizedKey, endpoint: epPath, count });
+        }
+      }
 
       const readonlyButtons = snap.buttons.filter((b) => classifyActionSafety(b) === 'readonly');
       const mutationButtons = snap.buttons.filter((b) => classifyActionSafety(b) === 'mutation');
@@ -506,6 +593,7 @@ export async function runExploreCommand(options = {}) {
         buttons: snap.buttons,
         readonlyButtons,
         mutationButtons,
+        apisObserved,
         hasPasswordInput: snap.hasPasswordInput,
         hasChart: snap.hasChart,
         a11y: snap.a11y,
@@ -530,13 +618,13 @@ export async function runExploreCommand(options = {}) {
 
     topology.techStack = [...stackSet];
     topology.authKeyNames = [...authKeysSet];
-    if (topology.portals.length === 0) {
-      topology.portals.push({
-        name: topology.pages[0]?.title || 'Default Web Context',
-        mode: 'default',
-        notes: `${topology.pages.length} route(s) explored cleanly.`,
-      });
-    }
+    topology.portals = portalMap.size > 0
+      ? [...portalMap.values()]
+      : [{
+          name: topology.pages[0]?.title || 'Default Web Context',
+          mode: 'default',
+          notes: `${topology.pages.length} route(s) explored cleanly.`,
+        }];
   } finally {
     await browser.close();
   }
@@ -551,16 +639,27 @@ export async function runExploreCommand(options = {}) {
   fs.writeFileSync(topologyPath, JSON.stringify(topology, null, 2) + '\n', 'utf8');
   fs.writeFileSync(overviewPath, generateSystemOverviewMarkdown(topology, lang), 'utf8');
 
+  const codeMapSync = syncLivingCodeMap(qaDir, { lang });
+
   if (options.json) {
-    console.log(JSON.stringify({ topologyPath, overviewPath, pagesCount: topology.pages.length, endpointsCount: topology.endpoints.length }, null, 2));
+    console.log(JSON.stringify({
+      topologyPath,
+      overviewPath,
+      codeMapPath: codeMapSync.codeMapPath,
+      systemMapMdPath: codeMapSync.systemMapMdPath,
+      revision: codeMapSync.revision,
+      pagesCount: topology.pages.length,
+      endpointsCount: topology.endpoints.length,
+    }, null, 2));
   } else {
     console.log(
       lang === 'zh'
-        ? `\n[Explore] 从 0 到 1 探索完成：共扫描 ${topology.pages.length} 个路由、${topology.endpoints.length} 个脱敏 API 端点。`
-        : `\n[Explore] Zero-to-one exploration complete: ${topology.pages.length} route(s), ${topology.endpoints.length} redacted API endpoint(s).`
+        ? `\n[Explore] 从 0 到 1 探索完成：共扫描 ${topology.pages.length} 个路由、${topology.endpoints.length} 个脱敏 API 端点，并同步更新活体知识图谱 (Revision #${codeMapSync.revision})。`
+        : `\n[Explore] Zero-to-one exploration complete: ${topology.pages.length} route(s), ${topology.endpoints.length} redacted API endpoint(s), synced Living Code Map (Revision #${codeMapSync.revision}).`
     );
     console.log(`  Topology JSON : ${topologyPath}`);
     console.log(`  System Atlas  : ${overviewPath}`);
+    console.log(`  Code Map MD   : ${codeMapSync.systemMapMdPath}`);
   }
 
   return 0;
