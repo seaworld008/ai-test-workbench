@@ -86,7 +86,6 @@ test('runExploreCommand blocks production targets cleanly', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aitest-explore-prod-'));
   try {
     await runCli(['init', '--name', 'prod-block', '--target', tmpDir, '--skip-install', '--loop', 'none']);
-    fs.symlinkSync(TEMPLATE_MODULES, path.join(tmpDir, 'qa', 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
     fs.writeFileSync(
       path.join(tmpDir, 'qa', '.env'),
       'TEST_ENV=production\nTEST_BASE_URL=https://prod.example.com\nTEST_ALLOWED_HOSTS=prod.example.com\n',

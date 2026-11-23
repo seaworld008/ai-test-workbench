@@ -238,16 +238,6 @@ export async function runExploreCommand(options = {}) {
     return 1;
   }
 
-  const pwPkg = loadPlaywrightChromium(qaDir);
-  if (!pwPkg) {
-    console.error(
-      lang === 'zh'
-        ? `在 ${qaDir} 中未找到 playwright 包，请先安装依赖。`
-        : `playwright package not found in ${qaDir}. Install dependencies first.`
-    );
-    return 1;
-  }
-
   const overrides = {};
   if (options.baseUrl) overrides.TEST_BASE_URL = options.baseUrl;
   const mergedEnv = loadMergedQaEnv(qaDir, { ...process.env, ...overrides });
@@ -259,6 +249,16 @@ export async function runExploreCommand(options = {}) {
       console.error(`[Target Guard Blocked] ${err}`);
     }
     return 2;
+  }
+
+  const pwPkg = loadPlaywrightChromium(qaDir);
+  if (!pwPkg) {
+    console.error(
+      lang === 'zh'
+        ? `在 ${qaDir} 中未找到 playwright 包，请先安装依赖。`
+        : `playwright package not found in ${qaDir}. Install dependencies first.`
+    );
+    return 1;
   }
 
   const maxPages = Math.max(1, Math.min(100, Number(options.maxPages || 25)));
