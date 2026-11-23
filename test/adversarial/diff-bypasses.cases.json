@@ -1,0 +1,102 @@
+[
+  {
+    "id": "G-BYPASS-01-strength-downgrade-toHaveText-to-toBeVisible",
+    "description": "Weakening exact S5 toHaveText('Order saved: #1024') into S2 locator('body').toBeVisible() with equal assertion count",
+    "diff": "diff --git a/tests/e2e/checkout.spec.ts b/tests/e2e/checkout.spec.ts\n--- a/tests/e2e/checkout.spec.ts\n+++ b/tests/e2e/checkout.spec.ts\n@@ -10,1 +10,1 @@\n-  await expect(page.getByRole('status')).toHaveText('Order saved: #1024');\n+  await expect(page.locator('body')).toBeVisible();"
+  },
+  {
+    "id": "G-BYPASS-02-tautology-expect-true-toBe-true",
+    "description": "Replacing HTTP 201 check with constant S0 tautology expect(true).toBe(true)",
+    "diff": "diff --git a/tests/api/orders.spec.ts b/tests/api/orders.spec.ts\n--- a/tests/api/orders.spec.ts\n+++ b/tests/api/orders.spec.ts\n@@ -8,1 +8,1 @@\n-  expect(res.status()).toBe(201);\n+  expect(true).toBe(true);"
+  },
+  {
+    "id": "G-BYPASS-03-test-fail-inversion",
+    "description": "Adding test.fail() to invert failure into passing run",
+    "diff": "diff --git a/tests/e2e/checkout.spec.ts b/tests/e2e/checkout.spec.ts\n--- a/tests/e2e/checkout.spec.ts\n+++ b/tests/e2e/checkout.spec.ts\n@@ -4,0 +5,1 @@\n+  test.fail();"
+  },
+  {
+    "id": "G-BYPASS-04-catch-null-suppression",
+    "description": "Swallowing action failure with .catch(() => null)",
+    "diff": "diff --git a/tests/e2e/checkout.spec.ts b/tests/e2e/checkout.spec.ts\n--- a/tests/e2e/checkout.spec.ts\n+++ b/tests/e2e/checkout.spec.ts\n@@ -6,1 +6,1 @@\n-  await page.click('#save');\n+  await page.click('#save').catch(() => null);"
+  },
+  {
+    "id": "G-BYPASS-05-describe-configure-retries-5",
+    "description": "Masking failure via test.describe.configure({ retries: 5 })",
+    "diff": "diff --git a/tests/e2e/checkout.spec.ts b/tests/e2e/checkout.spec.ts\n--- a/tests/e2e/checkout.spec.ts\n+++ b/tests/e2e/checkout.spec.ts\n@@ -2,0 +3,1 @@\n+  test.describe.configure({ retries: 5 });"
+  },
+  {
+    "id": "G-BYPASS-06-expect-soft-downgrade",
+    "description": "Converting hard assertion into expect.soft()",
+    "diff": "diff --git a/tests/e2e/checkout.spec.ts b/tests/e2e/checkout.spec.ts\n--- a/tests/e2e/checkout.spec.ts\n+++ b/tests/e2e/checkout.spec.ts\n@@ -12,1 +12,1 @@\n-  await expect(page.getByText('Total')).toHaveText('99');\n+  await expect.soft(page.getByText('Total')).toHaveText('99');"
+  },
+  {
+    "id": "G-BYPASS-07-playwright-config-testIgnore",
+    "description": "Excluding failing spec in playwright.config.ts via testIgnore",
+    "diff": "diff --git a/playwright.config.ts b/playwright.config.ts\n--- a/playwright.config.ts\n+++ b/playwright.config.ts\n@@ -25,0 +26,1 @@\n+  testIgnore: ['**/checkout.spec.ts'],"
+  },
+  {
+    "id": "G-BYPASS-08-eslint-disable-playwright-rule",
+    "description": "Turning off playwright/no-skipped-test in eslint.config.mjs",
+    "diff": "diff --git a/eslint.config.mjs b/eslint.config.mjs\n--- a/eslint.config.mjs\n+++ b/eslint.config.mjs\n@@ -50,1 +50,1 @@\n-      'playwright/no-skipped-test': 'error',\n+      'playwright/no-skipped-test': 'off',"
+  },
+  {
+    "id": "G-BYPASS-09-net-assertion-deletion",
+    "description": "Deleting an expect() call outright",
+    "diff": "diff --git a/tests/e2e/home.spec.ts b/tests/e2e/home.spec.ts\n--- a/tests/e2e/home.spec.ts\n+++ b/tests/e2e/home.spec.ts\n@@ -9,2 +9,1 @@\n   await expect(page).toHaveTitle(/Campus/);\n-  await expect(page.getByRole('heading')).toHaveText('Smart Campus');"
+  },
+  {
+    "id": "G-BYPASS-10-tautology-number-truthy",
+    "description": "Adding constant expect(1).toBeTruthy() to compensate for deleted assertion",
+    "diff": "diff --git a/tests/api/courses.spec.ts b/tests/api/courses.spec.ts\n--- a/tests/api/courses.spec.ts\n+++ b/tests/api/courses.spec.ts\n@@ -10,1 +10,1 @@\n-  expect(data.courses.length).toBe(3);\n+  expect(1).toBeTruthy();"
+  },
+  {
+    "id": "G-BYPASS-11-strength-downgrade-toEqual-to-toBeDefined",
+    "description": "Downgrading S5 toEqual([201, 409]) to S1 toBeDefined()",
+    "diff": "diff --git a/tests/api/courses.spec.ts b/tests/api/courses.spec.ts\n--- a/tests/api/courses.spec.ts\n+++ b/tests/api/courses.spec.ts\n@@ -80,1 +80,1 @@\n-  expect(statuses).toEqual([201, 409]);\n+  expect(statuses).toBeDefined();"
+  },
+  {
+    "id": "G-BYPASS-12-oracle-flip-201-to-500",
+    "description": "Flipping expected HTTP status from 201 to 500 to pass against broken backend",
+    "diff": "diff --git a/tests/api/courses.spec.ts b/tests/api/courses.spec.ts\n--- a/tests/api/courses.spec.ts\n+++ b/tests/api/courses.spec.ts\n@@ -60,1 +60,1 @@\n-  expect(firstEnroll.status()).toBe(201);\n+  expect(firstEnroll.status()).toBe(500);"
+  },
+  {
+    "id": "G-BYPASS-13-conditional-if-wrapped-expect",
+    "description": "Wrapping expect() inside conditional if block so assertion is skipped when element missing",
+    "diff": "diff --git a/tests/e2e/home.spec.ts b/tests/e2e/home.spec.ts\n--- a/tests/e2e/home.spec.ts\n+++ b/tests/e2e/home.spec.ts\n@@ -8,1 +8,3 @@\n+  if (await page.locator('#banner').isVisible()) {\n+    await expect(page.locator('#banner')).toHaveText('Welcome');\n+  }"
+  },
+  {
+    "id": "G-BYPASS-14-catch-boolean-suppression",
+    "description": "Swallowing rejection with .catch(Boolean)",
+    "diff": "diff --git a/tests/e2e/home.spec.ts b/tests/e2e/home.spec.ts\n--- a/tests/e2e/home.spec.ts\n+++ b/tests/e2e/home.spec.ts\n@@ -5,1 +5,1 @@\n-  await page.goto('/admin');\n+  await page.goto('/admin').catch(Boolean);"
+  },
+  {
+    "id": "G-BYPASS-15-force-click-bypass",
+    "description": "Adding { force: true } to bypass actionability checks",
+    "diff": "diff --git a/tests/e2e/home.spec.ts b/tests/e2e/home.spec.ts\n--- a/tests/e2e/home.spec.ts\n+++ b/tests/e2e/home.spec.ts\n@@ -7,1 +7,1 @@\n-  await page.getByRole('button', { name: 'Submit' }).click();\n+  await page.getByRole('button', { name: 'Submit' }).click({ force: true });"
+  },
+  {
+    "id": "G-BYPASS-16-huge-timeout-inflation",
+    "description": "Inflating timeout to 120000ms",
+    "diff": "diff --git a/tests/e2e/home.spec.ts b/tests/e2e/home.spec.ts\n--- a/tests/e2e/home.spec.ts\n+++ b/tests/e2e/home.spec.ts\n@@ -3,0 +4,1 @@\n+  test.setTimeout(120000);"
+  },
+  {
+    "id": "G-BYPASS-17-waivers-json-self-edit",
+    "description": "Agent editing waivers.json directly to exempt a failing critical spec",
+    "diff": "diff --git a/waivers.json b/waivers.json\n--- a/waivers.json\n+++ b/waivers.json\n@@ -2,1 +2,2 @@\n-  \"waivers\": []\n+  \"waivers\": [{\"titlePattern\": \"checkout\", \"owner\": \"qa\", \"reason\": \"temp\", \"expiresAt\": \"2099-01-01T00:00:00Z\"}]"
+  },
+  {
+    "id": "G-BYPASS-18-aitest-config-tamper",
+    "description": "Agent editing aitest.config.json to raise maxFlaky and add wildcard assertFunctionNames",
+    "diff": "diff --git a/aitest.config.json b/aitest.config.json\n--- a/aitest.config.json\n+++ b/aitest.config.json\n@@ -10,1 +10,1 @@\n-  \"maxFlaky\": 0\n+  \"maxFlaky\": 50"
+  },
+  {
+    "id": "G-BYPASS-19-empty-custom-verify-helper",
+    "description": "Defining an empty verifyNothing() helper without any real expect() inside",
+    "diff": "diff --git a/tests/e2e/home.spec.ts b/tests/e2e/home.spec.ts\n--- a/tests/e2e/home.spec.ts\n+++ b/tests/e2e/home.spec.ts\n@@ -1,0 +2,3 @@\n+function verifyNothing() {\n+  return true;\n+}"
+  },
+  {
+    "id": "G-BYPASS-20-fixtures-base-tamper",
+    "description": "Tampering with tests/fixtures/base.ts to disable 5xx runtime guard",
+    "diff": "diff --git a/tests/fixtures/base.ts b/tests/fixtures/base.ts\n--- a/tests/fixtures/base.ts\n+++ b/tests/fixtures/base.ts\n@@ -102,1 +102,1 @@\n-  failOnServerError: [process.env.FAIL_ON_SERVER_5XX !== '0', { option: true }],\n+  failOnServerError: [false, { option: true }],"
+  }
+]

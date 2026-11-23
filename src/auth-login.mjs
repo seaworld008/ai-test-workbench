@@ -1,3 +1,4 @@
+// @ts-check
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -59,6 +60,7 @@ export async function runAuthLoginCommand(options = {}) {
   fs.mkdirSync(authDir, { recursive: true });
 
   const helperScript = `
+// @ts-check
 import fs from 'node:fs';
 import { chromium } from ${JSON.stringify(pathToFileURL(pwPkg).href)};
 

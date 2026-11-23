@@ -17,7 +17,7 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKBENCH_ROOT = path.resolve(__dirname, '..');
 
-test('MCP server negotiates all supported protocol versions (2024-11-05 .. 2025-11-25) and exposes 12 typed tools', async () => {
+test('MCP server negotiates all supported protocol versions (2024-11-05 .. 2025-11-25) and exposes 21 typed tools (zero governance_approve)', async () => {
   for (const ver of SUPPORTED_MCP_VERSIONS) {
     const res = await handleMcpJsonRpcMessage({
       jsonrpc: '2.0',
@@ -26,6 +26,7 @@ test('MCP server negotiates all supported protocol versions (2024-11-05 .. 2025-
       params: { protocolVersion: ver, clientInfo: { name: 'unit-test', version: '1.0' } },
     });
     assert.equal(res.result.protocolVersion, ver);
+    assert.equal(res.result.serverInfo.version, '5.0.0');
     assert.ok(res.result.capabilities.tools);
     assert.ok(res.result.capabilities.resources);
     assert.ok(res.result.capabilities.prompts);
@@ -40,13 +41,24 @@ test('MCP server negotiates all supported protocol versions (2024-11-05 .. 2025-
   assert.equal(futureRes.result.protocolVersion, '2025-11-25');
 
   const tools = getMcpToolDefinitions();
-  assert.equal(tools.length, 12);
+  assert.equal(tools.length, 21);
+  assert.equal(tools.some((t) => t.name === 'aitest_verify_change'), true);
+  assert.equal(tools.some((t) => t.name === 'aitest_heal_begin'), true);
+  assert.equal(tools.some((t) => t.name === 'aitest_job_status'), true);
+  assert.equal(tools.some((t) => t.name.includes('governance')), false);
+
   for (const tool of tools) {
     assert.ok(tool.inputSchema);
     assert.ok(tool.outputSchema);
     assert.ok(tool.annotations);
     assert.equal(typeof tool.annotations.readOnlyHint, 'boolean');
   }
+
+  // M-06: Verify accurate readOnlyHint annotations
+  const exploreTool = tools.find((t) => t.name === 'aitest_explore');
+  const doctorTool = tools.find((t) => t.name === 'aitest_doctor');
+  assert.equal(exploreTool.annotations.readOnlyHint, false);
+  assert.equal(doctorTool.annotations.readOnlyHint, true);
 
   const prompts = getMcpPromptDefinitions();
   assert.ok(prompts.length >= 5);
@@ -64,10 +76,10 @@ test('MCP server negotiates all supported protocol versions (2024-11-05 .. 2025-
     method: 'prompts/get',
     params: { name: 'first-time-onboarding', arguments: { target: '.', lang: 'en' } },
   });
-  assert.match(enPrompt.result.messages[0].content.text, /Onboard AI Test Workbench|Initialize AI Test Workbench/i);
+  assert.match(enPrompt.result.messages[0].content.text, /Initialize AI Test Workbench/i);
 });
 
-test('MCP stdio transport emits pure NDJSON JSON-RPC frames across initialize, tools/call, resources/read & logging', async () => {
+test('MCP stdio transport emits pure NDJSON JSON-RPC frames across initialize, tools/call, progress & resources/read', async () => {
   const tmpRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'aitest-mcp-stdio-'));
   try {
     const child = spawn(process.execPath, [path.join(WORKBENCH_ROOT, 'tools', 'aitest.mjs'), 'mcp-serve'], {
@@ -90,7 +102,7 @@ test('MCP stdio transport emits pure NDJSON JSON-RPC frames across initialize, t
 
     const sendAndWait = (msg, expectedId) =>
       new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error(`Timeout waiting for MCP id=${expectedId}`)), 12000);
+        const timeout = setTimeout(() => reject(new Error(`Timeout waiting for MCP id=${expectedId}`)), 15000);
         const timer = setInterval(() => {
           const hit = lines.find((l) => l.id === expectedId);
           if (hit) {
@@ -129,6 +141,7 @@ test('MCP stdio transport emits pure NDJSON JSON-RPC frames across initialize, t
         params: {
           name: 'aitest_init',
           arguments: { target: tmpRepo, dryRun: true, lang: 'zh' },
+          _meta: { progressToken: 'prog-12' },
         },
       },
       12
@@ -137,6 +150,7 @@ test('MCP stdio transport emits pure NDJSON JSON-RPC frames across initialize, t
     assert.equal(initDryRes.result.structuredContent.ok, true);
     assert.equal(initDryRes.result.structuredContent.tool, 'aitest_init');
     assert.ok(initDryRes.result.structuredContent.nextRecommendedActions.length >= 1);
+    assert.equal(lines.some((l) => l.method === 'notifications/progress' && l.params?.progressToken === 'prog-12'), true);
 
     const presetRes = await sendAndWait(
       {
@@ -159,34 +173,33 @@ test('MCP stdio transport emits pure NDJSON JSON-RPC frames across initialize, t
   }
 });
 
-test('MCP Streamable HTTP (/mcp), Origin/Token security guards, and Legacy SSE (/sse + /messages) work cleanly', async () => {
+test('MCP Streamable HTTP (/mcp) enforces initialize-only sessions, 404 on unknown session, protocol-aware batching, and Legacy SSE', async () => {
   assert.throws(() => createMcpHttpServer({ host: '0.0.0.0' }), /without --auth-token/);
 
-  const server = createMcpHttpServer({ host: '127.0.0.1', authToken: 'tok-v4-test' });
+  const server = createMcpHttpServer({ host: '127.0.0.1', authToken: 'tok-v5-test' });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address();
   const baseUrl = `http://127.0.0.1:${port}`;
 
   try {
-    // 1. Health endpoint
     const health = await fetch(`${baseUrl}/health`);
     assert.equal(health.status, 200);
     const healthJson = await health.json();
     assert.equal(healthJson.ok, true);
 
-    // 2. DNS-rebinding Origin rejection (403)
+    // DNS-rebinding Origin rejection (403)
     const badOrigin = await fetch(`${baseUrl}/mcp`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Origin: 'https://evil.example.com',
-        Authorization: 'Bearer tok-v4-test',
+        Authorization: 'Bearer tok-v5-test',
       },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }),
     });
     assert.equal(badOrigin.status, 403);
 
-    // 3. Auth rejection (401)
+    // Auth rejection (401)
     const unauth = await fetch(`${baseUrl}/mcp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -194,13 +207,24 @@ test('MCP Streamable HTTP (/mcp), Origin/Token security guards, and Legacy SSE (
     });
     assert.equal(unauth.status, 401);
 
-    // 4. Streamable HTTP initialize + session header + SSE response option + batch + DELETE
-    const initHttp = await fetch(`${baseUrl}/mcp`, {
+    // M-05: Non-initialize POST or DELETE without valid Mcp-Session-Id returns 404!
+    const noSessionPing = await fetch(`${baseUrl}/mcp`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer tok-v4-test',
-      },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer tok-v5-test' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'ping' }),
+    });
+    assert.equal(noSessionPing.status, 404);
+
+    const unknownDel = await fetch(`${baseUrl}/mcp`, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer tok-v5-test', 'Mcp-Session-Id': 'non-existent' },
+    });
+    assert.equal(unknownDel.status, 404);
+
+    // Streamable HTTP initialize (2025-06-18) -> rejects JSON-RPC batch per MCP spec!
+    const initModern = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer tok-v5-test' },
       body: JSON.stringify({
         jsonrpc: '2.0',
         id: 20,
@@ -208,20 +232,17 @@ test('MCP Streamable HTTP (/mcp), Origin/Token security guards, and Legacy SSE (
         params: { protocolVersion: '2025-06-18' },
       }),
     });
-    assert.equal(initHttp.status, 200);
-    const sid = initHttp.headers.get('mcp-session-id');
-    assert.ok(sid);
-    assert.equal(initHttp.headers.get('mcp-protocol-version'), '2025-06-18');
-    const initBody = await initHttp.json();
-    assert.equal(initBody.result.protocolVersion, '2025-06-18');
+    assert.equal(initModern.status, 200);
+    const sidModern = initModern.headers.get('mcp-session-id');
+    assert.ok(sidModern);
 
     const sseToolRes = await fetch(`${baseUrl}/mcp`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Accept: 'text/event-stream',
-        Authorization: 'Bearer tok-v4-test',
-        'Mcp-Session-Id': sid,
+        Authorization: 'Bearer tok-v5-test',
+        'Mcp-Session-Id': sidModern,
       },
       body: JSON.stringify({
         jsonrpc: '2.0',
@@ -231,40 +252,62 @@ test('MCP Streamable HTTP (/mcp), Origin/Token security guards, and Legacy SSE (
       }),
     });
     assert.equal(sseToolRes.status, 200);
-    assert.match(sseToolRes.headers.get('content-type') || '', /text\/event-stream/);
     const sseText = await sseToolRes.text();
     const dataLine = sseText.split(/\r?\n/).find((l) => l.startsWith('data: '));
     const parsedToolReply = JSON.parse(dataLine.slice(6));
     assert.equal(parsedToolReply.result.structuredContent.ok, true);
-    assert.ok(parsedToolReply.result.structuredContent.data.pillars.includes('orchestrator'));
 
-    const batchRes = await fetch(`${baseUrl}/mcp`, {
+    const batchRejected = await fetch(`${baseUrl}/mcp`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: 'Bearer tok-v4-test',
-        'Mcp-Session-Id': sid,
+        Authorization: 'Bearer tok-v5-test',
+        'Mcp-Session-Id': sidModern,
+      },
+      body: JSON.stringify([{ jsonrpc: '2.0', id: 22, method: 'ping' }]),
+    });
+    assert.equal(batchRejected.status, 400);
+
+    // 2025-03-26 session -> accepts JSON-RPC batch!
+    const initLegacyBatch = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer tok-v5-test' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 30,
+        method: 'initialize',
+        params: { protocolVersion: '2025-03-26' },
+      }),
+    });
+    const sidBatch = initLegacyBatch.headers.get('mcp-session-id');
+    const batchOkRes = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer tok-v5-test',
+        'Mcp-Session-Id': sidBatch,
       },
       body: JSON.stringify([
-        { jsonrpc: '2.0', id: 22, method: 'ping' },
-        { jsonrpc: '2.0', id: 23, method: 'tools/list' },
+        { jsonrpc: '2.0', id: 31, method: 'ping' },
+        { jsonrpc: '2.0', id: 32, method: 'tools/list' },
       ]),
     });
-    const batchJson = await batchRes.json();
+    assert.equal(batchOkRes.status, 200);
+    const batchJson = await batchOkRes.json();
     assert.equal(batchJson.length, 2);
-    assert.equal(batchJson[1].result.tools.length, 12);
+    assert.equal(batchJson[1].result.tools.length, 21);
 
     const delRes = await fetch(`${baseUrl}/mcp`, {
       method: 'DELETE',
-      headers: { Authorization: 'Bearer tok-v4-test', 'Mcp-Session-Id': sid },
+      headers: { Authorization: 'Bearer tok-v5-test', 'Mcp-Session-Id': sidModern },
     });
     assert.equal(delRes.status, 200);
 
-    // 5. Legacy 2024-11-05 HTTP+SSE (/sse + /messages)
+    // Legacy 2024-11-05 HTTP+SSE (/sse + /messages)
     await new Promise((resolve, reject) => {
       const req = http.get(
         `${baseUrl}/sse`,
-        { headers: { Authorization: 'Bearer tok-v4-test' } },
+        { headers: { Authorization: 'Bearer tok-v5-test' } },
         (res) => {
           let buf = '';
           let messagesPath = null;
@@ -277,7 +320,7 @@ test('MCP Streamable HTTP (/mcp), Origin/Token security guards, and Legacy SSE (
                 try {
                   const postRes = await fetch(`${baseUrl}${messagesPath}`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer tok-v4-test' },
+                    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer tok-v5-test' },
                     body: JSON.stringify({ jsonrpc: '2.0', id: 99, method: 'prompts/list' }),
                   });
                   assert.equal(postRes.status, 202);

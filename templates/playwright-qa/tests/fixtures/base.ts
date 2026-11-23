@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,18 +8,29 @@ import {
   expect,
   type APIRequestContext,
   type APIResponse,
+  type BrowserContext,
   type Page,
 } from '@playwright/test';
 import {
   checkOutgoingRequestSafety,
   compileBlockedEndpointRules,
   DEFAULT_BLOCKED_ENDPOINTS,
+  DEFAULT_SAFE_WRITE_PATHS,
   parseCsvList,
   parseLowerCsvList,
 } from '../../support/target-guard.mjs';
+import {
+  extractOpenApiResponseSchema,
+  validateJsonSchema,
+} from '../../support/schema-validator.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sessionAuthFile = path.resolve(__dirname, '..', '..', 'playwright', '.auth', 'session.json');
+
+/**
+ * Locked WCAG 2.0 / 2.1 / 2.2 Level A & AA axe-core tag set (`P-03`).
+ */
+export const WCAG_AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] as const;
 
 export type WorkbenchOptions = {
   failOnPageError: boolean;
@@ -39,21 +51,49 @@ function compileOptionalRegexList(raw: string | undefined): RegExp[] {
 }
 
 function buildRequestGuardConfig(baseURL: string | undefined) {
+  const allowedHosts = parseLowerCsvList(process.env.TEST_ALLOWED_HOSTS ?? '127.0.0.1,localhost');
+  const allowedOrigins = parseLowerCsvList(process.env.TEST_ALLOWED_ORIGINS ?? '');
   const deniedOrigins = parseLowerCsvList(process.env.TEST_DENIED_ORIGINS ?? '');
+  const extraEgressHosts = parseLowerCsvList(process.env.TEST_EGRESS_EXTRA_HOSTS ?? '');
+  const egressMode = (process.env.TEST_EGRESS_MODE ?? 'allowlist').trim().toLowerCase();
   const blockedRules = compileBlockedEndpointRules(
     process.env.TEST_BLOCKED_ENDPOINTS ?? DEFAULT_BLOCKED_ENDPOINTS
   );
   const strictReadonly =
     process.env.TEST_STRICT_READONLY === '1' || process.env.TEST_STRICT_READONLY === 'true';
   const safeWritePaths = parseCsvList(
-    process.env.TEST_SAFE_WRITE_PATHS ?? '/api/login,/api/auth/login,/graphql,/__test__/reset'
+    process.env.TEST_SAFE_WRITE_PATHS ?? DEFAULT_SAFE_WRITE_PATHS
   );
-  return { baseURL, deniedOrigins, blockedRules, strictReadonly, safeWritePaths };
+  const allowGraphqlQuery = process.env.TEST_ALLOW_GRAPHQL_QUERY === '1';
+
+  return {
+    baseURL,
+    allowedHosts,
+    allowedOrigins,
+    deniedOrigins,
+    extraEgressHosts,
+    egressMode,
+    blockedRules,
+    strictReadonly,
+    safeWritePaths,
+    allowGraphqlQuery,
+  };
+}
+
+function serializeBodyOption(dataOpt: unknown): string | null {
+  if (dataOpt === undefined || dataOpt === null) return null;
+  if (typeof dataOpt === 'string') return dataOpt;
+  try {
+    return JSON.stringify(dataOpt);
+  } catch {
+    return null;
+  }
 }
 
 function wrapApiRequestContext(
   rawRequest: APIRequestContext,
-  guardConfig: ReturnType<typeof buildRequestGuardConfig>
+  guardConfig: ReturnType<typeof buildRequestGuardConfig>,
+  traceparentValue?: string
 ): APIRequestContext {
   const interceptedMethods = new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'fetch']);
 
@@ -70,15 +110,53 @@ function wrapApiRequestContext(
           prop === 'fetch'
             ? String(options?.method || (typeof urlOrReq === 'string' ? 'GET' : urlOrReq.method()) || 'GET')
             : prop.toUpperCase();
+        const postData = serializeBodyOption(options?.data);
 
-        const check = checkOutgoingRequestSafety(method, rawUrl, guardConfig);
+        const check = checkOutgoingRequestSafety(method, rawUrl, { ...guardConfig, postData });
         if (check.blocked) {
           throw new Error(`[AI Test Workbench Request Guard] ${check.reason}`);
         }
-        return orig.call(target, urlOrReq, options);
+
+        let nextOptions = options;
+        if (traceparentValue) {
+          const existingHeaders = (options?.headers as Record<string, string> | undefined) || {};
+          if (!existingHeaders.traceparent && !existingHeaders.Traceparent) {
+            nextOptions = {
+              ...(options || {}),
+              headers: {
+                ...existingHeaders,
+                traceparent: traceparentValue,
+              },
+            };
+          }
+        }
+        return orig.call(target, urlOrReq, nextOptions);
       };
     },
   });
+}
+
+/**
+ * Wraps `.request` getter on `BrowserContext` or `Page` so `page.request` and `context.request`
+ * cannot bypass `checkOutgoingRequestSafety` (`S-04`).
+ */
+function guardRequestPropertyOnObject(
+  owner: BrowserContext | Page,
+  guardConfig: ReturnType<typeof buildRequestGuardConfig>,
+  traceparentValue: string
+): void {
+  try {
+    const rawReq = owner.request;
+    if (!rawReq) return;
+    const wrapped = wrapApiRequestContext(rawReq, guardConfig, traceparentValue);
+    Object.defineProperty(owner, 'request', {
+      configurable: true,
+      enumerable: true,
+      get: () => wrapped,
+    });
+  } catch {
+    // non-configurable fallback
+  }
 }
 
 function loadSavedSessionStorage(): { origin: string; entries: Array<[string, string]> } | null {
@@ -97,18 +175,29 @@ function loadSavedSessionStorage(): { origin: string; entries: Array<[string, st
   }
 }
 
+function generateW3cTraceContext(): { traceId: string; spanId: string; traceparent: string } {
+  const traceId = crypto.randomBytes(16).toString('hex');
+  const spanId = crypto.randomBytes(8).toString('hex');
+  return {
+    traceId,
+    spanId,
+    traceparent: `00-${traceId}-${spanId}-01`,
+  };
+}
+
 export const test = base.extend<WorkbenchOptions & InternalFixtures>({
   failOnPageError: [process.env.FAIL_ON_PAGEERROR !== '0', { option: true }],
   failOnServerError: [process.env.FAIL_ON_SERVER_5XX !== '0', { option: true }],
 
   request: async ({ request, baseURL }, use) => {
     const guardConfig = buildRequestGuardConfig(baseURL);
-    const wrapped = wrapApiRequestContext(request, guardConfig);
+    const trace = generateW3cTraceContext();
+    const wrapped = wrapApiRequestContext(request, guardConfig, trace.traceparent);
     await use(wrapped);
   },
 
   workbenchGuard: [
-    async ({ page, baseURL, failOnPageError, failOnServerError }, use, testInfo) => {
+    async ({ page, context, baseURL, failOnPageError, failOnServerError }, use, testInfo) => {
       const onlineProjects = new Set(['e2e', 'api', 'setup']);
       if (onlineProjects.has(testInfo.project.name) && !baseURL) {
         throw new Error(
@@ -116,11 +205,61 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
         );
       }
 
+      const trace = generateW3cTraceContext();
+      const guardConfig = buildRequestGuardConfig(baseURL);
+
+      // Close S-04 bypass: wrap both `context.request` and `page.request` (plus any popup pages)
+      guardRequestPropertyOnObject(context, guardConfig, trace.traceparent);
+      guardRequestPropertyOnObject(page, guardConfig, trace.traceparent);
+      context.on('page', (popupPage) => {
+        guardRequestPropertyOnObject(popupPage, guardConfig, trace.traceparent);
+      });
+
+      // Pre-install buffered PerformanceObserver for real LCP / CLS / INP collection (`P-01`)
+      await context.addInitScript(() => {
+        const w = window as unknown as {
+          __aitestVitals?: { lcpMs: number | null; cls: number; inpMs: number | null };
+        };
+        w.__aitestVitals = { lcpMs: null, cls: 0, inpMs: null };
+        try {
+          new PerformanceObserver((list) => {
+            for (const entry of list.getEntries() as Array<PerformanceEntry & { renderTime?: number; loadTime?: number }>) {
+              const t = entry.renderTime || entry.loadTime || entry.startTime;
+              if (typeof t === 'number') w.__aitestVitals!.lcpMs = Math.round(t);
+            }
+          }).observe({ type: 'largest-contentful-paint', buffered: true });
+        } catch {
+          // unsupported entry type
+        }
+        try {
+          new PerformanceObserver((list) => {
+            for (const entry of list.getEntries() as Array<PerformanceEntry & { hadRecentInput?: boolean; value?: number }>) {
+              if (!entry.hadRecentInput && typeof entry.value === 'number') {
+                w.__aitestVitals!.cls += entry.value;
+              }
+            }
+          }).observe({ type: 'layout-shift', buffered: true });
+        } catch {
+          // unsupported entry type
+        }
+        try {
+          new PerformanceObserver((list) => {
+            for (const entry of list.getEntries() as Array<PerformanceEntry & { interactionId?: number }>) {
+              if (entry.interactionId && typeof entry.duration === 'number') {
+                w.__aitestVitals!.inpMs = Math.max(w.__aitestVitals!.inpMs ?? 0, Math.round(entry.duration));
+              }
+            }
+          }).observe({ type: 'event', durationThreshold: 16, buffered: true } as PerformanceObserverInit);
+        } catch {
+          // unsupported entry type
+        }
+      });
+
       // Restore captured sessionStorage for interactive SMS/SSO logins when running e2e/seed
       if (testInfo.project.name === 'e2e' || testInfo.project.name === 'seed') {
         const sessionData = loadSavedSessionStorage();
         if (sessionData) {
-          await page.context().addInitScript(
+          await context.addInitScript(
             ({ targetOrigin, entries }) => {
               if (window.location.origin === targetOrigin) {
                 for (const [k, v] of entries) {
@@ -133,14 +272,13 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
         }
       }
 
-      const guardConfig = buildRequestGuardConfig(baseURL);
       const ignorePageErrorPatterns = compileOptionalRegexList(process.env.TEST_IGNORE_PAGEERROR_PATTERNS);
       const ignore5xxPatterns = compileOptionalRegexList(process.env.TEST_IGNORE_5XX_PATTERNS);
 
       const blockedRequests: string[] = [];
       const pageErrors: string[] = [];
       const serverErrors: string[] = [];
-      const traceIdsSet = new Set<string>();
+      const traceIdsSet = new Set<string>([`traceparent:${trace.traceparent}`]);
       const startedAtIso = new Date().toISOString();
 
       const TRACE_HEADER_NAMES = [
@@ -154,12 +292,27 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
 
       const baseOrigin = baseURL ? new URL(baseURL).origin.toLowerCase() : null;
 
-      await page.route('**/*', async (route) => {
+      // Guard ALL pages/frames in BrowserContext + actively inject W3C `traceparent` (`D-02`, `S-03`)
+      await context.route('**/*', async (route) => {
         const req = route.request();
-        const check = checkOutgoingRequestSafety(req.method(), req.url(), guardConfig);
+        const check = checkOutgoingRequestSafety(req.method(), req.url(), {
+          ...guardConfig,
+          postData: req.postData() || null,
+        });
         if (check.blocked && check.reason) {
           blockedRequests.push(check.reason);
           await route.abort('blockedbyclient');
+          return;
+        }
+
+        const existingHeaders = req.headers();
+        if (!existingHeaders.traceparent) {
+          await route.continue({
+            headers: {
+              ...existingHeaders,
+              traceparent: trace.traceparent,
+            },
+          });
           return;
         }
         await route.continue();
@@ -200,6 +353,8 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
 
       const finishedAtIso = new Date().toISOString();
       const traceContext = {
+        injectedTraceId: trace.traceId,
+        traceparent: trace.traceparent,
         timeWindow: { startedAt: startedAtIso, finishedAt: finishedAtIso },
         traceIds: [...traceIdsSet],
       };
@@ -236,22 +391,59 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
 export { expect };
 
 /**
- * Verifies Navigation Timing & DOM complexity stay within configurable SLO budgets.
+ * Verifies Navigation Timing, buffered Web Vitals (LCP / CLS), & DOM complexity stay within SLO budgets (`P-01`).
  */
 export async function expectPerformanceBudget(
   page: Page,
-  budget: { maxTtfbMs?: number; maxFcpMs?: number; maxDomNodes?: number } = {}
+  budget: {
+    maxTtfbMs?: number;
+    maxFcpMs?: number;
+    maxLcpMs?: number;
+    maxCls?: number;
+    maxDomNodes?: number;
+  } = {}
 ): Promise<void> {
   const maxTtfbMs = budget.maxTtfbMs ?? 1500;
   const maxFcpMs = budget.maxFcpMs ?? 2500;
+  const maxLcpMs = budget.maxLcpMs ?? 4000;
+  const maxCls = budget.maxCls ?? 0.25;
   const maxDomNodes = budget.maxDomNodes ?? 5000;
 
-  const snap = await page.evaluate(() => {
+  const snap = await page.evaluate(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    const w = window as unknown as {
+      __aitestVitals?: { lcpMs: number | null; cls: number; inpMs: number | null };
+    };
+    let lcpMs = w.__aitestVitals?.lcpMs ?? null;
+    let cls = w.__aitestVitals?.cls ?? 0;
+
+    if (lcpMs === null) {
+      await new Promise<void>((resolve) => {
+        try {
+          const obs = new PerformanceObserver((list) => {
+            for (const e of list.getEntries() as Array<PerformanceEntry & { renderTime?: number; loadTime?: number }>) {
+              const t = e.renderTime || e.loadTime || e.startTime;
+              if (typeof t === 'number') lcpMs = Math.round(t);
+            }
+          });
+          obs.observe({ type: 'largest-contentful-paint', buffered: true });
+          setTimeout(() => {
+            obs.disconnect();
+            resolve();
+          }, 80);
+        } catch {
+          resolve();
+        }
+      });
+    }
+
     const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
     const fcp = performance.getEntriesByName('first-contentful-paint')[0];
     return {
       ttfbMs: nav ? Math.round(nav.responseStart) : 0,
       fcpMs: fcp ? Math.round(fcp.startTime) : 0,
+      lcpMs,
+      cls: Number(cls.toFixed(4)),
       domNodes: document.getElementsByTagName('*').length,
     };
   });
@@ -260,19 +452,21 @@ export async function expectPerformanceBudget(
   if (snap.fcpMs > 0) {
     expect(snap.fcpMs, `FCP ${snap.fcpMs}ms exceeded ${maxFcpMs}ms`).toBeLessThanOrEqual(maxFcpMs);
   }
+  if (snap.lcpMs !== null) {
+    expect(snap.lcpMs, `LCP ${snap.lcpMs}ms exceeded ${maxLcpMs}ms`).toBeLessThanOrEqual(maxLcpMs);
+  }
+  expect(snap.cls, `CLS ${snap.cls} exceeded ${maxCls}`).toBeLessThanOrEqual(maxCls);
   expect(snap.domNodes, `DOM node count ${snap.domNodes} exceeded ${maxDomNodes}`).toBeLessThanOrEqual(maxDomNodes);
 }
 
 /**
- * Runs an automated axe-core scan for WCAG 2.0/2.1/2.2 Level A & AA rules.
- * Note: Automated axe checks catch machine-detectable violations (~40-50% of WCAG issues)
- * and do not by themselves constitute full legal accessibility certification.
+ * Runs an automated axe-core scan for WCAG 2.0 / 2.1 / 2.2 Level A & AA rules (`P-03`).
  */
 export async function expectAccessible(
   page: Page,
   options: { exclude?: string[]; disableRules?: string[] } = {}
 ): Promise<void> {
-  let builder = new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag22aa']);
+  let builder = new AxeBuilder({ page }).withTags([...WCAG_AXE_TAGS]);
   for (const selector of options.exclude || []) {
     builder = builder.exclude(selector);
   }
@@ -283,24 +477,51 @@ export async function expectAccessible(
   const summary = results.violations.map(
     (v) => `[${v.impact || 'unknown'}] ${v.id}: ${v.help} (${v.nodes.length} node(s))`
   );
-  expect(summary, `Automated WCAG A/AA axe violations:\n${summary.join('\n')}`).toEqual([]);
+  expect(summary, `Automated WCAG 2.0/2.1/2.2 A/AA axe violations:\n${summary.join('\n')}`).toEqual([]);
 }
 
+export type ContractSchemaSpec<T> =
+  | ((body: T) => void)
+  | { schema: Record<string, unknown>; validator?: (body: T) => void }
+  | { openApi: Record<string, unknown>; path: string; method?: string; validator?: (body: T) => void };
+
 /**
- * Validates HTTP status and JSON contract shape cleanly without external schema libraries.
+ * Validates HTTP status and JSON contract shape via callback, JSON Schema, or OpenAPI 3.x document (`P-04`).
  */
 export async function expectApiContract<T = unknown>(
   response: APIResponse,
   expectedStatus: number,
-  validator?: (body: T) => void
+  validatorOrSpec?: ContractSchemaSpec<T>
 ): Promise<T> {
   expect(
     response.status(),
     `Expected HTTP ${expectedStatus} from ${response.url()}, got ${response.status()}`
   ).toBe(expectedStatus);
   const body = (await response.json()) as T;
-  if (validator) {
-    validator(body);
+
+  if (typeof validatorOrSpec === 'function') {
+    validatorOrSpec(body);
+  } else if (validatorOrSpec && typeof validatorOrSpec === 'object') {
+    if ('schema' in validatorOrSpec && validatorOrSpec.schema) {
+      const check = validateJsonSchema(body, validatorOrSpec.schema);
+      expect(check.errors, `JSON Schema contract violation(s) on ${response.url()}:\n${check.errors.join('\n')}`).toEqual([]);
+    } else if ('openApi' in validatorOrSpec && validatorOrSpec.openApi) {
+      const schema = extractOpenApiResponseSchema(
+        validatorOrSpec.openApi,
+        validatorOrSpec.path,
+        validatorOrSpec.method || 'get',
+        expectedStatus
+      );
+      expect(schema, `Missing OpenAPI response schema for ${validatorOrSpec.method || 'GET'} ${validatorOrSpec.path} (${expectedStatus})`).toBeTruthy();
+      if (schema) {
+        const check = validateJsonSchema(body, schema, { rootDoc: validatorOrSpec.openApi });
+        expect(check.errors, `OpenAPI contract drift on ${validatorOrSpec.path}:\n${check.errors.join('\n')}`).toEqual([]);
+      }
+    }
+    if (validatorOrSpec.validator) {
+      validatorOrSpec.validator(body);
+    }
   }
+
   return body;
 }

@@ -3,9 +3,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { startDemoServer } from '../examples/demo-webapp/server.mjs';
 import { runCli } from '../src/cli.mjs';
 import { computeLatencyPercentiles, evaluatePerfBudget, runPerfCommand } from '../src/perf.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const WORKBENCH_ROOT = path.resolve(__dirname, '..');
+const TEMPLATE_MODULES = path.join(WORKBENCH_ROOT, 'templates', 'playwright-qa', 'node_modules');
 
 test('computeLatencyPercentiles computes accurate P50/P90/P95/P99/avg stats', () => {
   const stats = computeLatencyPercentiles([10, 20, 30, 40, 50, 60, 70, 80, 90, 100]);
@@ -91,6 +96,53 @@ test('CLI `perf --mode api` benchmarks local demo server and writes perf-report.
     const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
     assert.equal(report.apiBenchmark.totalRequests, 6);
     assert.equal(report.budgetPassed, true);
+  } finally {
+    await demo.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('CLI `perf --mode browser` captures real non-null LCP via PerformanceObserver (P-01 regression lock)', async (t) => {
+  if (!fs.existsSync(path.join(TEMPLATE_MODULES, '@playwright', 'test', 'cli.js'))) {
+    t.skip('Template node_modules not installed locally');
+    return;
+  }
+
+  const demo = await startDemoServer({ port: 0, host: '127.0.0.1' });
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aitest-perf-lcp-'));
+  try {
+    await runCli(['init', '--name', 'perf-lcp', '--target', tmpDir, '--skip-install', '--loop', 'none']);
+    fs.symlinkSync(TEMPLATE_MODULES, path.join(tmpDir, 'qa', 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
+    fs.writeFileSync(
+      path.join(tmpDir, 'qa', '.env'),
+      `TEST_ENV=local\nTEST_BASE_URL=${demo.baseURL}\nTEST_ALLOWED_HOSTS=127.0.0.1,localhost\nREQUIRE_TEST_TARGET=1\n`,
+      'utf8'
+    );
+
+    const code = await runCli([
+      'perf',
+      '--target',
+      tmpDir,
+      '--base-url',
+      demo.baseURL,
+      '--mode',
+      'browser',
+      '--routes',
+      '/',
+      '--samples',
+      '2',
+      '--enforce-budget',
+      '--lang',
+      'en',
+    ]);
+    assert.equal(code, 0);
+
+    const report = JSON.parse(fs.readFileSync(path.join(tmpDir, 'qa', 'reports', 'perf-report.json'), 'utf8'));
+    assert.equal(report.browserMetrics.length, 1);
+    const rootMetrics = report.browserMetrics[0];
+    assert.equal(typeof rootMetrics.lcpMs, 'number', 'LCP must be a real number captured via PerformanceObserver, never null');
+    assert.ok(rootMetrics.lcpMs >= 0);
+    assert.equal(typeof rootMetrics.cls, 'number');
   } finally {
     await demo.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });

@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "toolVersion": "5.0.0",
+  "evaluatedAt": "2026-11-23T16:20:20.949Z",
+  "metrics": {
+    "fakeGreenEscapeRate_FGER": 0,
+    "cheatingPatchesBlocked": "26/26",
+    "seededDefectDetectionRate_SDDR": 1,
+    "seededDefectsDetected": "7/7",
+    "triageAccuracy": 1,
+    "triageCorrect": "45/45",
+    "redactionRecall": 1,
+    "redactionBlocked": "35/35",
+    "misHealRate": 0
+  },
+  "seededDetails": [
+    {
+      "defectId": "500_courses",
+      "suite": "api",
+      "detected": true
+    },
+    {
+      "defectId": "schema_drift",
+      "suite": "api",
+      "detected": true
+    },
+    {
+      "defectId": "rbac_leak",
+      "suite": "api",
+      "detected": true
+    },
+    {
+      "defectId": "duplicate_enroll",
+      "suite": "api",
+      "detected": true
+    },
+    {
+      "defectId": "soldout_enabled",
+      "suite": "e2e",
+      "detected": true
+    },
+    {
+      "defectId": "uncaught_pageerror",
+      "suite": "e2e",
+      "detected": true
+    },
+    {
+      "defectId": "a11y_missing_label",
+      "suite": "e2e",
+      "detected": true
+    }
+  ]
+}

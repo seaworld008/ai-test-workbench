@@ -140,6 +140,29 @@ export function checkDocsAndHygiene(rootDir = DEFAULT_REPO_ROOT) {
     }
   }
 
+  // Verify docs/claims.json -> test traceability when present at root
+  const claimsPath = path.join(rootDir, 'docs', 'claims.json');
+  if (fs.existsSync(claimsPath)) {
+    try {
+      const claimsDoc = JSON.parse(fs.readFileSync(claimsPath, 'utf8'));
+      for (const item of claimsDoc.claims || []) {
+        const tf = path.join(rootDir, String(item.testFile || ''));
+        if (!fs.existsSync(tf)) {
+          errors.push(`[Unverified Claim:${item.id}] Referenced testFile "${item.testFile}" does not exist.`);
+        } else {
+          const tfText = fs.readFileSync(tf, 'utf8');
+          if (!tfText.includes(String(item.testTitleSubstring || ''))) {
+            errors.push(
+              `[Unverified Claim:${item.id}] Test title "${item.testTitleSubstring}" not found in "${item.testFile}".`
+            );
+          }
+        }
+      }
+    } catch (err) {
+      errors.push(`[Claims JSON Error] Failed to parse docs/claims.json: ${err.message}`);
+    }
+  }
+
   return {
     ok: errors.length === 0,
     checkedMarkdownCount: checkedMd.length,

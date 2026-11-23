@@ -91,6 +91,22 @@ try {
   });
   const mcpOk = mcpReportReply?.result?.structuredContent?.ok === true;
 
+  const verifyReply = await handleMcpJsonRpcMessage({
+    jsonrpc: '2.0',
+    id: 2,
+    method: 'tools/call',
+    params: {
+      name: 'aitest_verify_change',
+      arguments: { target: tempWorkspace, mode: 'full', baseUrl: demo.baseURL },
+    },
+  });
+  const verifyData = verifyReply?.result?.structuredContent?.data;
+  const verifyOk =
+    verifyReply?.result?.structuredContent?.ok === true &&
+    verifyData?.verdict === 'pass' &&
+    verifyData?.acceptanceScope === 'business-e2e' &&
+    Boolean(verifyData?.artifacts?.attestationPath && fs.existsSync(verifyData.artifacts.attestationPath));
+
   exitCode =
     seedCode === 0 &&
     allCode === 0 &&
@@ -100,7 +116,8 @@ try {
     mcpAddCode === 0 &&
     mcpDocCode === 0 &&
     perfCode === 0 &&
-    mcpOk
+    mcpOk &&
+    verifyOk
       ? 0
       : 1;
 } finally {

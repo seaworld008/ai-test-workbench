@@ -1,0 +1,209 @@
+// @ts-check
+import fs from 'node:fs';
+import path from 'node:path';
+import { resolveQaDirectory } from './agents.mjs';
+import { readPerTestLedgerRuns } from './ledger.mjs';
+import { SCHEMA_VERSIONS } from './version.mjs';
+
+/**
+ * Computes historical flaky & failure rates per test from Run Ledger (`R1-2`).
+ * @param {string} qaDir
+ * @param {{ windowSize?: number, flakyThreshold?: number, minRuns?: number, releasePassStreak?: number }} [options]
+ */
+export function computeFlakyReport(qaDir, options = {}) {
+  const windowSize = options.windowSize ?? 20;
+  const flakyThreshold = options.flakyThreshold ?? 0.2;
+  const minRuns = options.minRuns ?? 3;
+  const releasePassStreak = options.releasePassStreak ?? 5;
+
+  const runs = readPerTestLedgerRuns(qaDir, windowSize);
+  /** @type {Map<string, { testId: string, file: string, title: string, totalRuns: number, passed: number, failed: number, flaky: number, durations: number[], consecutivePasses: number }>} */
+  const byTest = new Map();
+
+  for (const run of runs) {
+    for (const t of run.tests || []) {
+      if (t.status === 'skipped') continue;
+      let rec = byTest.get(t.testId);
+      if (!rec) {
+        rec = {
+          testId: t.testId,
+          file: t.file,
+          title: t.title,
+          totalRuns: 0,
+          passed: 0,
+          failed: 0,
+          flaky: 0,
+          durations: [],
+          consecutivePasses: 0,
+        };
+        byTest.set(t.testId, rec);
+      }
+      rec.totalRuns += 1;
+      if (typeof t.durationMs === 'number') rec.durations.push(t.durationMs);
+      if (t.status === 'expected' && !t.retryPassed) {
+        rec.passed += 1;
+        rec.consecutivePasses += 1;
+      } else if (t.status === 'flaky' || t.retryPassed) {
+        rec.flaky += 1;
+        rec.consecutivePasses = 0;
+      } else if (t.status === 'unexpected') {
+        rec.failed += 1;
+        rec.consecutivePasses = 0;
+      }
+    }
+  }
+
+  const metrics = [...byTest.values()].map((r) => {
+    const flakyEvents = r.flaky + (r.passed > 0 && r.failed > 0 ? Math.min(r.passed, r.failed) : 0);
+    const flakyRate = r.totalRuns > 0 ? Number((flakyEvents / r.totalRuns).toFixed(4)) : 0;
+    const failRate = r.totalRuns > 0 ? Number((r.failed / r.totalRuns).toFixed(4)) : 0;
+    const avgDurationMs =
+      r.durations.length > 0 ? Math.round(r.durations.reduce((a, b) => a + b, 0) / r.durations.length) : 0;
+    const shouldQuarantine =
+      r.totalRuns >= minRuns &&
+      flakyRate >= flakyThreshold &&
+      r.consecutivePasses < releasePassStreak &&
+      !/@critical|@smoke/.test(r.title);
+    const readyToRelease = r.consecutivePasses >= releasePassStreak;
+    return {
+      testId: r.testId,
+      file: r.file,
+      title: r.title,
+      totalRuns: r.totalRuns,
+      passed: r.passed,
+      failed: r.failed,
+      flaky: r.flaky,
+      flakyRate,
+      failRate,
+      consecutivePasses: r.consecutivePasses,
+      avgDurationMs,
+      shouldQuarantine,
+      readyToRelease,
+    };
+  });
+
+  metrics.sort((a, b) => b.flakyRate - a.flakyRate || b.failRate - a.failRate);
+
+  const qPath = path.join(qaDir, '.aitest', 'quarantine.json');
+  let quarantine = { schemaVersion: SCHEMA_VERSIONS.quarantine, entries: [] };
+  if (fs.existsSync(qPath)) {
+    try {
+      quarantine = JSON.parse(fs.readFileSync(qPath, 'utf8'));
+    } catch {
+      // ignore
+    }
+  }
+
+  return {
+    runsAnalyzed: runs.length,
+    windowSize,
+    flakyCandidates: metrics.filter((m) => m.flakyRate > 0),
+    quarantineEntries: quarantine.entries || [],
+    allTests: metrics,
+  };
+}
+
+/**
+ * Automatically updates `.aitest/quarantine.json` based on Ledger telemetry (max TTL 7 days, max 5 entries).
+ * @param {string} qaDir
+ * @param {{ nowMs?: number, maxQuarantined?: number, ttlDays?: number }} [options]
+ */
+export function syncQuarantineFromLedger(qaDir, options = {}) {
+  const nowMs = options.nowMs ?? Date.now();
+  const maxQuarantined = options.maxQuarantined ?? 5;
+  const ttlDays = Math.min(7, options.ttlDays ?? 7);
+  const report = computeFlakyReport(qaDir);
+
+  const aitestDir = path.join(qaDir, '.aitest');
+  const qPath = path.join(aitestDir, 'quarantine.json');
+  /** @type {Map<string, any>} */
+  const existingMap = new Map();
+  if (fs.existsSync(qPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(qPath, 'utf8'));
+      for (const e of parsed.entries || []) {
+        existingMap.set(`${e.file}::${e.title}`, e);
+      }
+    } catch {
+      // reset cleanly
+    }
+  }
+
+  const added = [];
+  const released = [];
+
+  for (const m of report.allTests) {
+    const key = `${m.file}::${m.title}`;
+    if (existingMap.has(key) && m.readyToRelease) {
+      existingMap.delete(key);
+      released.push(key);
+      continue;
+    }
+    if (!existingMap.has(key) && m.shouldQuarantine && existingMap.size < maxQuarantined) {
+      const createdAt = new Date(nowMs).toISOString();
+      const expiresAt = new Date(nowMs + ttlDays * 24 * 60 * 60 * 1000).toISOString();
+      const entry = {
+        file: m.file,
+        title: m.title,
+        flakyRate: m.flakyRate,
+        addedAt: createdAt,
+        expiresAt,
+        reason: `Auto-quarantined by Ledger flaky policy (flakyRate=${m.flakyRate} across ${m.totalRuns} runs)`,
+      };
+      existingMap.set(key, entry);
+      added.push(key);
+    }
+  }
+
+  const payload = {
+    schemaVersion: SCHEMA_VERSIONS.quarantine,
+    updatedAt: new Date(nowMs).toISOString(),
+    maxQuarantined,
+    ttlDays,
+    entries: [...existingMap.values()],
+  };
+  fs.mkdirSync(aitestDir, { recursive: true });
+  fs.writeFileSync(qPath, JSON.stringify(payload, null, 2) + '\n', 'utf8');
+
+  return {
+    quarantinePath: qPath,
+    activeCount: payload.entries.length,
+    added,
+    released,
+    entries: payload.entries,
+  };
+}
+
+export async function runFlakyCommand(options = {}) {
+  const lang = options.lang === 'zh' ? 'zh' : 'en';
+  if (!options.target) {
+    console.error(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
+    return 1;
+  }
+  const qaDir = resolveQaDirectory(path.resolve(options.target), options.qaDir);
+  if (!qaDir) {
+    console.error(lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
+    return 1;
+  }
+
+  let syncResult = null;
+  if (options.syncQuarantine) {
+    syncResult = syncQuarantineFromLedger(qaDir);
+  }
+  const report = computeFlakyReport(qaDir);
+  const out = { ...report, syncResult };
+
+  if (options.json) {
+    console.log(JSON.stringify(out, null, 2));
+    return 0;
+  }
+
+  console.log(
+    `\n=== ${lang === 'zh' ? 'Flaky 历史统计与隔离区报告' : 'Historical Flaky Telemetry & Quarantine Report'} ===`
+  );
+  console.log(`Runs analyzed: ${report.runsAnalyzed} · Flaky candidates: ${report.flakyCandidates.length} · Quarantined: ${report.quarantineEntries.length}`);
+  for (const c of report.flakyCandidates.slice(0, 15)) {
+    console.log(`  - [flakyRate=${c.flakyRate}] ${c.file} :: ${c.title} (runs=${c.totalRuns}, passStreak=${c.consecutivePasses})`);
+  }
+  return 0;
+}

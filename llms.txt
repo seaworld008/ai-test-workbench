@@ -1,22 +1,25 @@
-# AI Test Workbench (`ai-test-workbench` v4.0.0)
+# AI Test Workbench (`ai-test-workbench` v5.0.0)
 
-> AI-Agent-First reusable Playwright Test Agents workbench & native multi-protocol MCP Server (`stdio`, Streamable HTTP `/mcp`, Legacy HTTP+SSE `/sse`). Supports Chinese-default docs with paired English `.en.md` docs.
+> Trustworthy Verification Kernel & AI-Agent-First multi-protocol MCP Server (`stdio`, Streamable HTTP `/mcp`, Legacy HTTP+SSE `/sse`) for Playwright E2E/API verification. Supports Chinese-default docs with paired English `.en.md` docs.
 
-## Core Capabilities
-- **Native Multi-Protocol MCP Server (`src/mcp-server.mjs`)**: Supports MCP `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05` with 12 typed tools (`structuredContent` + `outputSchema` + `ToolAnnotations`), Resources, Resource Templates (`aitest://project/{target}/*`), and bilingual Prompts.
-- **Zero-to-One System Explorer (`src/explore.mjs`)**: Read-only crawler with write guards (`DELETE`/`PUT`/`PATCH` & mutating `POST` blocked), multi-portal workspace switcher detection, PII/secret URL redaction, and API waterfall detection.
-- **Self-Evolving Living Code Map (`src/codemap.mjs`)**: Fuses host repo routes, broken lazy imports, Spring/Node/Python/PHP controllers, and DB tables with runtime topology, test results, and perf baselines into `knowledge/SYSTEM_MAP.md`.
-- **7-Pillar Read-Only MCP Hub (`src/mcp-hub.mjs`)**: Configures and audits Playwright Test Agents, Chrome DevTools, Grafana (`--disable-write`), Prometheus, Loki, Sentry, PostgreSQL/MySQL (read-only), Redis (`--readonly`), k6, and OpenAPI.
-- **Perf SLO Engine & Trace-Correlated Diagnostics (`src/perf.mjs`, `src/diagnose.mjs`)**: Chromium CDP Web Vitals (`TTFB`, `FCP`, `LCP`, `CLS`, `DOMNodes`, `JSHeap`) + concurrent GET API `P50/P95/P99/RPS` + Trace-ID RCA playbooks.
-- **3-Layer Anti-Fake-Green Gate (`templates/playwright-qa/scripts/audit-results.mjs`)**: `tsc` + `eslint-plugin-playwright`, runtime `results.json` / `waivers.json`, and `--diff-base` Healer diff guard.
+## Core v5.0 Capabilities
+- **4-Layer Anti-Fake-Green Gate Kernel (`templates/playwright-qa/support/gate-kernel.mjs`, `src/governance.mjs`, `src/ledger.mjs`)**: Combines SHA-256 `.aitest/governance.lock` tamper protection, `tsc` + `eslint-plugin-playwright`, ULID `Run Ledger` input-hash binding + human-approved `waivers.json`, and an `S0–S5` Semantic Assertion Strength Lattice Diff Guard (`FGER = 0.0%`, `26/26` cheating patches blocked).
+- **Native Multi-Protocol MCP Server v2 & Job Runner (`src/mcp-server.mjs`, `src/jobs.mjs`)**: Zero runtime npm dependencies; supports MCP `2025-11-25`..`2024-11-05` with **21 typed tools**, isolated child-process jobs (`syncBudgetMs`), `_meta.progressToken` heartbeats, `notifications/cancelled` process-tree termination, concurrent read tools, and per-workspace write locks.
+- **One-Call Change Verdict & Stateful Healer (`src/verdict.mjs`, `src/heal.mjs`, `src/traceability.mjs`)**: `aitest_verify_change` emits `attestation.json`, `verdict-summary.md`, and `verdict.sarif.json`; `aitest_heal_begin|attempt|conclude` hard-blocks Class B/C/D test edits (`0.0%` mis-heal rate) and maps `REQ-xxx` traceability.
+- **Import-Graph Impact v2 & Living Code Map v4 (`src/impact.mjs`, `src/codemap.mjs`, `src/explore.mjs`)**: Static reverse `import` dependency graph with `why` provenance, default-deny read-only exploration (`specs/pages/*.md`), preserved `:id`/`[id]` dynamic routes, and automatic defect convergence.
+- **PerformanceObserver Web Vitals, WCAG 2.0/2.1/2.2 & JSON Schema Contracts (`src/perf.mjs`, `base.ts`, `schema-validator.mjs`)**: Real `LCP / CLS / INP` median & P75 capture, guarded `page.request` + `context.request` + allowlist egress, active W3C `traceparent` correlation, and `100%` seeded-defect detection (`7/7`).
 
 ## Documentation & Entrypoints
 - [README (Chinese Default)](./README.md)
 - [README (English)](./README.en.md)
 - [AI Agent Guide (Chinese)](./AGENTS.md)
 - [AI Agent Guide (English)](./AGENTS.en.md)
-- [AI Agent Quickstart & First-Time Prompts (Chinese)](./docs/ai-agent-quickstart.md)
-- [AI Agent Quickstart & First-Time Prompts (English)](./docs/ai-agent-quickstart.en.md)
+- [Governance & 4-Layer Gate Kernel (Chinese)](./docs/governance.md)
+- [Governance & 4-Layer Gate Kernel (English)](./docs/governance.en.md)
+- [ADR-0001: Zero-Dependency MCP Kernel v2 (Chinese)](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md)
+- [ADR-0001: Zero-Dependency MCP Kernel v2 (English)](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md)
+- [v5.0 Verification & Benchmark Scorecard (Chinese)](./docs/review/v5-verification-scorecard.md)
+- [v5.0 Verification & Benchmark Scorecard (English)](./docs/review/v5-verification-scorecard.en.md)
 - [Architecture & Security Boundaries (Chinese)](./ARCHITECTURE.md)
 - [Architecture & Security Boundaries (English)](./ARCHITECTURE.en.md)
 - [MCP Server Protocol Reference](./skills/ai-test-workbench/references/mcp-server-protocol.md)

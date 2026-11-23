@@ -1,39 +1,54 @@
 # 更新日志 (Changelog)
 
-> [English Changelog](./CHANGELOG.en.md) · [简体中文主文档](./README.md)
+> [English Changelog](./CHANGELOG.en.md) · [简体中文主文档](./README.md) · [v5.0 验证评分卡](./docs/review/v5-verification-scorecard.md)
 
 本日志遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 与 [语义化版本 (SemVer)](https://semver.org/spec/v2.0.0.html) 规范。
+
+## [5.0.0] - 2026-11-24
+
+### 新增 (Added)
+- **四层可信防假绿门禁内核 v2（`templates/playwright-qa/support/gate-kernel.mjs`）**：
+  - 引入 **`S0–S5` 断言强度格（Assertion Strength Lattice）** 与全工作区语义 Diff 守卫（`AITEST-G101..G113`），拦截同数量弱化替换、`expect(true).toBe(true)`、`test.fail()`、`.catch(() => null)`、`retries` 调大、`expect.soft()`、`testIgnore`、ESLint 关规则、条件包裹 `if (...) { expect(...) }`、`200 -> 500` 反向迎合等 **26 种作弊补丁（`FGER = 0.0%`）**。
+- **治理文件防篡改锁与人类审批协议（`src/governance.mjs` & `aitest governance`）**：
+  - 自动维护 11 项受保护文件的 `.aitest/governance.lock` SHA-256 清单与只追加 `.aitest/governance-audit.jsonl`；`governance approve` 仅限人类本地 CLI 调用，硬阻断 MCP 子进程与机器人审批名。
+- **运行账本绑定与历史抖动隔离（`src/ledger.mjs` & `src/flaky.mjs`）**：
+  - 每次运行生成 Crockford Base32 ULID `runId` 并绑定工作区源码输入指纹（`.aitest/runs/<runId>/manifest.json`），杜绝重放陈旧 `results.json`；支持近 20 次抖动率统计与 `<= 7 天` 自动到期隔离（`.aitest/quarantine.json`）。
+- **一键变更判决、有状态自愈状态机与需求追溯矩阵（`src/verdict.mjs`、`src/heal.mjs`、`src/traceability.mjs`）**：
+  - 新增 `aitest verify-change` / `aitest_verify_change`（产出 `attestation.json`、`verdict-summary.md`、`verdict.sarif.json`）。
+  - 新增 `aitest heal begin|attempt|conclude` 状态机：工具层硬阻断 B/C/D 类改测试（误修率 `0.0%`），C 类自动产出含 W3C `Trace-ID` 的 `reports/defects/*.md` 工单。
+  - 新增 `aitest trace-matrix` / `aitest_trace_matrix` 校验 `REQ-xxx` 需求追溯覆盖率。
+- **MCP 执行模型 v2 与独立子进程作业调度器（`src/jobs.mjs` & `src/mcp-server.mjs`）**：
+  - 扩展至 **21 个强类型 MCP 工具**；彻底移除进程内 `console` 劫持；支持只读并发 + 工作区细粒度写锁、`syncBudgetMs` 异步后台作业、`_meta.progressToken` 进度推送与 `notifications/cancelled` 跨平台进程树终止（`killProcessTree`）。
+  - 新增架构决策记录 [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md)。
+- **零依赖 JSON Schema / OpenAPI 3.x 契约校验器与公开基准靶场（`support/schema-validator.mjs` & `scripts/run-bench.mjs`）**：
+  - 新增 `npm run bench` 评测 7 类注入式全栈种子缺陷（检出率 `100%`）与 26 类假绿绕过（逃逸率 `0%`），输出机器可读 `bench/scorecard.json`；新增 `npm run typecheck` 与 `docs/claims.json` 文档声明自动核验门禁。
+
+### 优化与安全修复 (Improved & Security Fixed)
+- **修复 CDP Web Vitals 失真（`src/perf.mjs` & `base.ts`）**：改用预注入 `PerformanceObserver({ buffered: true })` 真实采集非空 `LCP`、`CLS`、`INP`（多样本中位数 + P75）；`expectAccessible` 补齐 `wcag21a` 与 `wcag21aa` 标签。
+- **全通道安全与凭据脱敏 v2（`target-guard.mjs`、`explore.mjs`、`proc.mjs`、`mcp-hub.mjs`）**：
+  - `explore` 默认拒绝所有非 `GET/HEAD/OPTIONS` 请求并禁用 `sendBeacon`，输出单页脱敏 ARIA 档案 `specs/pages/*.md`；移除 `/graphql` 默认安全写豁免并拦截 GraphQL `mutation`；新增 `TEST_EGRESS_MODE=allowlist` 并统一代理 `page.request` / `context.request`。
+  - 升级 `redactSecrets` 覆盖 JSON 键值密码、JWT、云厂商密钥、PEM 私钥与连接串（35/35 召回率 `100%`）；全量锁死外部 MCP 预设版本（替换已归档 Postgres 包为 `@bytebase/dbhub@0.15.0 --readonly`）并增加 `.aitest/mcp.lock` 哈希漂移与提示词投毒检测。
+  - Streamable HTTP 严格限制仅 `initialize` 创建会话、未知会话返回 `404`、启用 `crypto.timingSafeEqual` Bearer 校验与协议感知批处理控制。
+- **活体代码地图 v4、反向依赖 Impact v2 与结构化诊断 v2（`codemap.mjs`、`impact.mjs`、`diagnose.mjs`）**：
+  - 保留 `:id`/`[id]` 动态路由、自动清理已删文件、收敛缺陷计数；构建静态 `import` 反向依赖图；诊断优先消费结构化运行时守卫信号（45/45 分类准确率 `100%`）；CLI 开启严格未知参数拦截与拼写纠错提示。
 
 ## [4.0.0] - 2026-11-23
 
 ### 新增 (Added)
-- **AI Agent 优先原生全协议 MCP 服务端（`src/mcp-server.mjs` & `aitest mcp-serve` / `aitest mcp serve`）**：
-  - 零第三方依赖完整实现 **MCP `2025-11-25` / `2025-06-18` / `2025-03-26` / `2024-11-05`** 四版协议协商与 **`stdio` / Streamable HTTP (`/mcp`) / Legacy HTTP+SSE (`/sse` + `/messages`)** 三大传输模式。
-  - 暴露 **12 个强类型 MCP 工具**（含 `inputSchema`、`outputSchema`、`ToolAnnotations` 与包含 `nextRecommendedActions` 的 `structuredContent`）、静态与动态 **Resources / Resource Templates**、中英双语 **Prompts**、`ping` 与 `logging/setLevel`。
-  - HTTP 模式强制执行 `Origin` DNS 重绑定防御（`403`）与非回环网卡 `--auth-token` / `AITEST_MCP_TOKEN` Bearer 校验（`401`）；`stdio` 模式通过 `AITEST_MCP_CAPTURED_STDIO=1` + 异步互斥锁防止 `playwright` / `npm` 子进程输出污染 FD 1。
-- **AI Agent 发现与全仓双语文档体系**：
-  - 新增 `AGENTS.md` / `AGENTS.en.md`、`CLAUDE.md`、`llms.txt`、`docs/ai-agent-quickstart.md` / `.en.md`、`prompts/first-time-ai-agent.md` / `.en.md` 与 `skills/ai-test-workbench/references/mcp-server-protocol.md`。
-  - 全仓所有 `.md` 统一调整为 **默认中文显示 + 完整配对 `.en.md` 英文镜像**，新增 `scripts/check-docs-and-hygiene.mjs`（`npm run lint:docs`）纳入 CI 强制检查链接有效性与去敏合规。
-- **7 大支柱 MCP 编排自举 (`src/mcp-hub.mjs`)**：新增第 7 大支柱 `orchestrator` 与 `ai-test-workbench` 自研 MCP 预设。
-
-### 优化与修复 (Improved & Fixed)
-- 补齐 `src/diagnose.mjs` 与 `src/skill-install.mjs` 的 `--json` 结构化输出，新增 `.gemini/skills/` 与 `.github/skills/` 安装目标；为 `diagnose.mjs` 数据库表名建议增加正则标识符安全过滤；扩展 `src/report.mjs` 统一索引 `SYSTEM_MAP.md`、`code-map.json`、`system-overview.md` 与性能报告。
-- 更新总架构蓝图至 **v4.0** 并补充 `docs/architecture-and-prompts-blueprint.en.md` 英文版，完整涵盖 6 段首次接入与全链路实战提示词。
+- **AI Agent 优先原生全协议 MCP 服务端（`src/mcp-server.mjs` & `aitest mcp-serve`）**：支持 MCP `2025-11-25`..`2024-11-05` 与 `stdio` / Streamable HTTP (`/mcp`) / Legacy SSE (`/sse`)，暴露 12 个工具、Resources 与双语 Prompts。
+- **全仓默认中文 + 配对 `.en.md` 双语文档体系**与 `npm run lint:docs` 门禁。
 
 ## [3.0.0] - 2026-11-23
 
 ### 新增 (Added)
-- **自演进活体代码知识图谱（`aitest map` / `src/codemap.mjs`）**：扫描宿主路由（含懒加载断链检测）、API 调用、Controller 与 Prisma/SQL/ORM 表并融合运行态拓扑、测试结果与性能报告输出 `knowledge/SYSTEM_MAP.md`，非破坏式更新 `impact-map.json`。
-- **6 大支柱全链路只读 MCP 中枢（`aitest mcp` / `src/mcp-hub.mjs`）**：生成与安全审计 `.mcp.json` / `.codex/config.toml`（Grafana `--disable-write`、Prometheus、Loki、Sentry、只读 Postgres/MySQL、Redis `--readonly`、k6、OpenAPI）。
-- **CDP Web Vitals 与并发 GET API SLO 引擎（`aitest perf` / `src/perf.mjs`）**：采集 TTFB/FCP/LCP/CLS/DOM/JSHeap 与接口 P50/P90/P95/P99/RPS。
-- **Trace-ID 根因定位贯通**：`base.ts` 自动记录分布式链路头并在 `diagnose.mjs` 中生成 CodeMap 与可观测查询建议。
+- **自演进活体代码知识图谱（`aitest map`）**、**6 大支柱只读 MCP 中枢（`aitest mcp`）**、**性能评测引擎（`aitest perf`）** 与 **Trace-ID 根因贯通**。
 
 ## [2.1.0] - 2026-11-23
 
 ### 新增 (Added)
-- **从 0 到 1 只读全站探索引擎（`aitest explore` / `src/explore.mjs`）**：在只读写入护栏下发现多租户/多端切换器、路由、表格筛选及接口参数脱敏，产出 `system-topology.json` 与 `specs/system-overview.md`。
+- **从 0 到 1 只读探索引擎（`aitest explore`）**。
 
 ## [2.0.0] - 2026-11-23
 
 ### 新增 (Added)
-- **开源可复用 CLI (`ai-test-workbench`)**、官方 **Playwright Test Agents** SHA-256 冲突管理、**三层防假绿门禁**、**4 层扩展 Fixture**、**交互式登录捕获 (`auth-login`)**、**Diff-Impact (`impact`)** 与零依赖智慧校园演示靶场 (`demo-campus`)。
+- 初始开源版本：跨项目 `<repo>/qa` 隔离、Playwright Test Agents SHA-256 同步、三层门禁、交互式 `auth-login` 与 `demo-campus` 演示靶场。

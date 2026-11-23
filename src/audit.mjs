@@ -1,9 +1,14 @@
+// @ts-check
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
 import { loadMergedQaEnv } from './origin-guard.mjs';
 import {
+  GATE_KERNEL_VERSION,
   analyzeHealerDiffText,
   auditResultsJson,
+  classifyAssertionStatement,
+  computeProtectedFileHashes,
+  computeWorkspaceInputHash,
   isCoveredByWaiver,
   loadAitestConfig,
   loadAndValidateWaivers,
@@ -11,11 +16,17 @@ import {
   runGitDiffGuard,
   runStaticSpecChecks,
   scanSpecFilesFallback,
+  verifyGovernanceLockInQaDir,
+  verifyLedgerBindingInQaDir,
 } from '../templates/playwright-qa/scripts/audit-results.mjs';
 
 export {
+  GATE_KERNEL_VERSION,
   analyzeHealerDiffText,
   auditResultsJson,
+  classifyAssertionStatement,
+  computeProtectedFileHashes,
+  computeWorkspaceInputHash,
   isCoveredByWaiver,
   loadAitestConfig,
   loadAndValidateWaivers,
@@ -23,6 +34,8 @@ export {
   runGitDiffGuard,
   runStaticSpecChecks,
   scanSpecFilesFallback,
+  verifyGovernanceLockInQaDir,
+  verifyLedgerBindingInQaDir,
 };
 
 export async function runAuditCommand(options = {}) {
@@ -48,6 +61,7 @@ export async function runAuditCommand(options = {}) {
     checkSpecs: Boolean(options.checkSpecs),
     requireE2e: Boolean(options.requireE2e),
     staticOnly: Boolean(options.staticOnly),
+    allowUnboundResults: Boolean(options.allowUnboundResults),
     maxFlaky: options.maxFlaky,
     maxSkipped: options.maxSkipped,
     diffBase: options.diffBase,
@@ -59,10 +73,13 @@ export async function runAuditCommand(options = {}) {
     return res.ok ? 0 : 1;
   }
 
-  console.log(`\n=== ${lang === 'zh' ? '防假绿质量门禁审计 (audit)' : 'Anti-Fake-Green Quality Gate (audit)'} ===`);
+  console.log(`\n=== ${lang === 'zh' ? '四层防假绿质量门禁审计 (audit v5)' : '4-Layer Anti-Fake-Green Quality Gate (audit v5)'} ===`);
+  if (res.runId) {
+    console.log(`Bound Run ID: ${res.runId}`);
+  }
   if (res.stats) {
     console.log(
-      `Stats: passed=${res.stats.passed}, failed=${res.stats.failed}, flaky=${res.stats.flaky}, skipped=${res.stats.skipped}, policyExcluded(@mutation)=${res.stats.policyExcludedMutations}`
+      `Stats: passed=${res.stats.passed}, failed=${res.stats.failed}, flaky=${res.stats.flaky}, quarantined=${res.stats.quarantined || 0}, skipped=${res.stats.skipped}, policyExcluded(@mutation)=${res.stats.policyExcludedMutations}`
     );
   }
   for (const item of res.policyExcludedTitles) {
@@ -77,6 +94,6 @@ export async function runAuditCommand(options = {}) {
     }
     return 1;
   }
-  console.log(`[OK] ${lang === 'zh' ? '质量门禁全部通过' : 'All quality gates passed'}.\n`);
+  console.log(`[OK] ${lang === 'zh' ? '四层防假绿质量门禁全部通过' : 'All 4 quality gate layers passed'}.\n`);
   return 0;
 }

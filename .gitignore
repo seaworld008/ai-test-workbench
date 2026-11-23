@@ -27,6 +27,14 @@ reports/
 **/reports/
 blob-report/
 **/blob-report/
+.aitest/runs/
+**/.aitest/runs/
+.aitest/heals/
+**/.aitest/heals/
+.aitest/jobs/
+**/.aitest/jobs/
+templates/playwright-qa/.aitest/
+bench/.work/
 
 # OS / IDE clutter
 .DS_Store

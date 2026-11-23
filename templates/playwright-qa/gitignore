@@ -9,5 +9,8 @@ playwright-report/
 test-results/
 reports/
 blob-report/
+.aitest/runs/
+.aitest/heals/
+.aitest/jobs/
 *.aitest-new
 *.log

@@ -1,15 +1,32 @@
+// @ts-check
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
+import { SCHEMA_VERSIONS, WORKBENCH_VERSION } from './version.mjs';
 
-export const MCP_PILLARS = ['orchestrator', 'browser', 'observability', 'database', 'middleware', 'performance', 'api-contract'];
+export const MCP_PILLARS = [
+  'orchestrator',
+  'browser',
+  'observability',
+  'database',
+  'middleware',
+  'performance',
+  'api-contract',
+];
 
+/**
+ * 7-Pillar System MCP Presets with Supply-Chain Version Pinning (`S-06`) and
+ * 3-Tier Risk Classification (`riskLevel: 'read' | 'local-write' | 'remote-effect'`, `S-07`).
+ */
 export const MCP_PRESETS = {
   'ai-test-workbench': {
     pillar: 'orchestrator',
     description: 'AI Test Workbench native MCP Server (stdio/Streamable HTTP/SSE tools, Living Code Map & QA gates)',
     command: 'npx',
     args: ['-y', 'ai-test-workbench', 'mcp-serve'],
+    pinnedVersion: WORKBENCH_VERSION,
+    riskLevel: 'local-write',
     readonly: true,
     envTemplate: {},
   },
@@ -17,23 +34,29 @@ export const MCP_PRESETS = {
     pillar: 'browser',
     description: 'Playwright built-in Test Agents MCP server (Planner / Generator / Healer)',
     command: 'npx',
-    args: ['playwright', 'run-test-mcp-server'],
-    readonly: true,
+    args: ['playwright@1.65.1', 'run-test-mcp-server'],
+    pinnedVersion: '1.65.1',
+    riskLevel: 'local-write',
+    readonly: false,
     envTemplate: {},
   },
   'chrome-devtools': {
     pillar: 'browser',
     description: 'Chrome DevTools Protocol live DOM, console, network & performance trace inspection',
     command: 'npx',
-    args: ['-y', 'chrome-devtools-mcp@latest'],
-    readonly: true,
+    args: ['-y', 'chrome-devtools-mcp@0.18.0'],
+    pinnedVersion: '0.18.0',
+    riskLevel: 'local-write',
+    readonly: false,
     envTemplate: {},
   },
   grafana: {
     pillar: 'observability',
     description: 'Read-only Grafana dashboards, alerts & correlated Prometheus/Loki datasource queries',
     command: 'uvx',
-    args: ['mcp-grafana', '--disable-write'],
+    args: ['mcp-grafana==0.7.8', '--disable-write'],
+    pinnedVersion: '0.7.8',
+    riskLevel: 'read',
     readonly: true,
     env: {
       GRAFANA_URL: '${GRAFANA_URL}',
@@ -48,7 +71,9 @@ export const MCP_PRESETS = {
     pillar: 'observability',
     description: 'Read-only PromQL metrics queries (latency P95/P99, CPU, DB pool saturation, 5xx rates)',
     command: 'uvx',
-    args: ['prometheus-mcp-server'],
+    args: ['prometheus-mcp-server==1.4.2'],
+    pinnedVersion: '1.4.2',
+    riskLevel: 'read',
     readonly: true,
     env: {
       PROMETHEUS_URL: '${PROMETHEUS_URL}',
@@ -61,7 +86,9 @@ export const MCP_PRESETS = {
     pillar: 'observability',
     description: 'Read-only LogQL microservice log search correlated by traceId & test time window',
     command: 'uvx',
-    args: ['loki-mcp-server'],
+    args: ['loki-mcp-server==0.3.1'],
+    pinnedVersion: '0.3.1',
+    riskLevel: 'read',
     readonly: true,
     env: {
       LOKI_URL: '${LOKI_URL}',
@@ -74,7 +101,9 @@ export const MCP_PRESETS = {
     pillar: 'observability',
     description: 'Sentry exception stack traces, breadcrumbs, and frontend/backend issue correlation',
     command: 'npx',
-    args: ['-y', '@sentry/mcp-server'],
+    args: ['-y', '@sentry/mcp-server@0.29.0'],
+    pinnedVersion: '0.29.0',
+    riskLevel: 'read',
     readonly: true,
     env: {
       SENTRY_ACCESS_TOKEN: '${SENTRY_ACCESS_TOKEN}',
@@ -87,9 +116,12 @@ export const MCP_PRESETS = {
   },
   'postgres-readonly': {
     pillar: 'database',
-    description: 'PostgreSQL strict read-only SQL verification (assert DB state after UI/API actions)',
+    description:
+      'PostgreSQL read-only SQL verification via maintained DBHub (--readonly; MUST also enforce read-only DB role)',
     command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-postgres', '${POSTGRES_READONLY_URL}'],
+    args: ['-y', '@bytebase/dbhub@0.15.0', '--readonly', '--dsn', '${POSTGRES_READONLY_URL}'],
+    pinnedVersion: '0.15.0',
+    riskLevel: 'read',
     readonly: true,
     envTemplate: {
       POSTGRES_READONLY_URL: 'postgresql://qa_readonly:change_me@staging-db.internal:5432/app_staging',
@@ -97,9 +129,12 @@ export const MCP_PRESETS = {
   },
   'mysql-readonly': {
     pillar: 'database',
-    description: 'MySQL strict read-only inspection (INSERT/UPDATE/DELETE explicitly disabled)',
+    description:
+      'MySQL read-only inspection (INSERT/UPDATE/DELETE disabled; MUST also enforce SELECT-only DB user)',
     command: 'npx',
-    args: ['-y', '@benborla29/mcp-server-mysql'],
+    args: ['-y', '@benborla29/mcp-server-mysql@1.0.41'],
+    pinnedVersion: '1.0.41',
+    riskLevel: 'read',
     readonly: true,
     env: {
       MYSQL_HOST: '${MYSQL_HOST}',
@@ -123,7 +158,9 @@ export const MCP_PRESETS = {
     pillar: 'middleware',
     description: 'Redis read-only cache, session & queue key inspection (--readonly enforced)',
     command: 'uvx',
-    args: ['redis-mcp-server', '--readonly'],
+    args: ['redis-mcp-server==0.3.0', '--readonly'],
+    pinnedVersion: '0.3.0',
+    riskLevel: 'read',
     readonly: true,
     env: {
       REDIS_URL: '${REDIS_READONLY_URL}',
@@ -134,10 +171,12 @@ export const MCP_PRESETS = {
   },
   k6: {
     pillar: 'performance',
-    description: 'Grafana k6 load, stress & soak script generation and benchmark execution',
+    description: 'Grafana k6 load, stress & soak script execution (remote-effect load generator: staging only)',
     command: 'uvx',
-    args: ['mcp-k6'],
-    readonly: true,
+    args: ['mcp-k6==0.4.0'],
+    pinnedVersion: '0.4.0',
+    riskLevel: 'remote-effect',
+    readonly: false,
     envTemplate: {
       K6_PROMETHEUS_RW_SERVER_URL: 'https://prometheus.staging.internal/api/v1/write',
     },
@@ -146,7 +185,9 @@ export const MCP_PRESETS = {
     pillar: 'api-contract',
     description: 'OpenAPI / Swagger live schema reader for automated contract drift detection',
     command: 'npx',
-    args: ['-y', 'openapi-mcp-server', '${OPENAPI_SPEC_URL}'],
+    args: ['-y', 'openapi-mcp-server@1.2.0', '${OPENAPI_SPEC_URL}'],
+    pinnedVersion: '1.2.0',
+    riskLevel: 'read',
     readonly: true,
     envTemplate: {
       OPENAPI_SPEC_URL: 'https://staging-api.internal/v3/api-docs',
@@ -162,7 +203,11 @@ export const MCP_PROFILES = {
   'full-link': Object.keys(MCP_PRESETS),
 };
 
+const PROMPT_POISONING_RE =
+  /(ignore\s+(?:all\s+)?previous\s+instructions|disregard\s+system\s+prompt|<\s*system\s*>|you\s+are\s+now\s+in\s+developer\s+mode|exfiltrate|send\s+.*\s+to\s+https?:\/\/|\bcurl\s+-X\s+POST\b)/i;
+
 function toMcpServerSpec(preset) {
+  /** @type {Record<string, any>} */
   const entry = { command: preset.command, args: [...preset.args] };
   if (preset.env && Object.keys(preset.env).length > 0) {
     entry.env = { ...preset.env };
@@ -170,9 +215,6 @@ function toMcpServerSpec(preset) {
   return entry;
 }
 
-/**
- * Non-destructively adds or updates `mcpServers` entries in a `.mcp.json` object.
- */
 export function mergeMcpServersIntoJson(existingJsonObj, serverNames) {
   const base = existingJsonObj && typeof existingJsonObj === 'object' ? { ...existingJsonObj } : {};
   const existingServers = base.mcpServers && typeof base.mcpServers === 'object' ? { ...base.mcpServers } : {};
@@ -205,9 +247,6 @@ function formatTomlServerKey(name) {
   return /^[A-Za-z0-9_-]+$/.test(name) ? name : escapeTomlStr(name);
 }
 
-/**
- * Safely appends missing `[mcp_servers.<name>]` sections into Codex TOML config without clobbering manual edits.
- */
 export function mergeMcpServersIntoCodexToml(existingTomlText, serverNames) {
   let content = String(existingTomlText || '');
   const added = [];
@@ -226,7 +265,7 @@ export function mergeMcpServersIntoCodexToml(existingTomlText, serverNames) {
     const argsList = preset.args.map(escapeTomlStr).join(', ');
     const lines = [
       '',
-      `# [AI Test Workbench] ${preset.pillar}: ${preset.description}`,
+      `# [AI Test Workbench] ${preset.pillar} (risk=${preset.riskLevel}): ${preset.description}`,
       `[mcp_servers.${key}]`,
       `command = ${escapeTomlStr(preset.command)}`,
       `args = [${argsList}]`,
@@ -245,19 +284,76 @@ export function mergeMcpServersIntoCodexToml(existingTomlText, serverNames) {
 }
 
 /**
- * Audits `.mcp.json` and `.codex/config.toml` for dangerous write operations or hardcoded secrets.
+ * Scans MCP tool/server metadata for prompt-poisoning payloads and verifies SHA-256 lockfile integrity (`R1-6`).
+ * @param {Record<string, { description?: string, command?: string, args?: string[] }>} serverOrToolSpecs
+ * @param {Record<string, string> | null} [lockedHashes]
  */
-export function auditMcpSafety(mcpJsonObj, codexTomlText = '') {
+export function auditMcpDescriptorsAndLock(serverOrToolSpecs, lockedHashes = null) {
+  const issues = [];
+  /** @type {Record<string, string>} */
+  const computedHashes = {};
+
+  for (const [name, spec] of Object.entries(serverOrToolSpecs || {})) {
+    const desc = String(spec?.description || '');
+    const normalized = JSON.stringify({
+      command: spec?.command || null,
+      args: spec?.args || [],
+      description: desc,
+    });
+    const digest = `sha256:${crypto.createHash('sha256').update(normalized).digest('hex')}`;
+    computedHashes[name] = digest;
+
+    if (PROMPT_POISONING_RE.test(desc)) {
+      issues.push(`[MCP Prompt-Poisoning Guard] Server/tool "${name}" contains suspicious prompt-injection instructions.`);
+    }
+    if (lockedHashes && name in lockedHashes && lockedHashes[name] !== digest) {
+      issues.push(
+        `[MCP Lock Drift] Server/tool "${name}" descriptor hash drifted from .aitest/mcp.lock (${digest.slice(0, 19)} != ${String(lockedHashes[name]).slice(0, 19)}).`
+      );
+    }
+  }
+
+  if (lockedHashes) {
+    for (const lockedName of Object.keys(lockedHashes)) {
+      if (!(lockedName in computedHashes)) {
+        issues.push(`[MCP Lock Drift] Locked MCP entry "${lockedName}" was removed without updating .aitest/mcp.lock.`);
+      }
+    }
+  }
+
+  return {
+    ok: issues.length === 0,
+    issues,
+    hashes: computedHashes,
+  };
+}
+
+/**
+ * Audits `.mcp.json` and `.codex/config.toml` for write flags, `@latest` unpinned tags, archived packages,
+ * hardcoded secrets, and `.aitest/mcp.lock` drift.
+ */
+export function auditMcpSafety(mcpJsonObj, codexTomlText = '', options = {}) {
   const issues = [];
   const warnings = [];
   const checkedServers = [];
+  /** @type {Record<string, string>} */
+  const riskByServer = {};
 
   const servers = mcpJsonObj?.mcpServers || {};
   for (const [name, cfg] of Object.entries(servers)) {
     checkedServers.push(name);
     const argsStr = Array.isArray(cfg.args) ? cfg.args.join(' ') : '';
     const env = cfg.env || {};
+    riskByServer[name] = MCP_PRESETS[name]?.riskLevel || 'unknown';
 
+    if (/@latest\b/i.test(argsStr)) {
+      issues.push(`[MCP Supply Chain] Server "${name}" uses floating "@latest" tag; pin an exact semver version.`);
+    }
+    if (/@modelcontextprotocol\/server-postgres\b/i.test(argsStr)) {
+      warnings.push(
+        `[MCP Supply Chain] Server "${name}" references archived @modelcontextprotocol/server-postgres; migrate to @bytebase/dbhub --readonly and enforce a read-only PostgreSQL role.`
+      );
+    }
     if (/grafana/i.test(name) && !argsStr.includes('--disable-write')) {
       issues.push(`[MCP Safety] Server "${name}" in .mcp.json must include "--disable-write" flag for staging safety.`);
     }
@@ -277,8 +373,12 @@ export function auditMcpSafety(mcpJsonObj, codexTomlText = '') {
       }
     }
 
-    if (/postgres:\/\/[^:${]+:[^:@$]+@/i.test(argsStr) || /mysql:\/\/[^:${]+:[^:@$]+@/i.test(argsStr)) {
+    if (/postgres(?:ql)?:\/\/[^:${]+:[^:@$]+@/i.test(argsStr) || /mysql:\/\/[^:${]+:[^:@$]+@/i.test(argsStr)) {
       issues.push(`[MCP Secret Hygiene] Server "${name}" embeds a plaintext DB password in .mcp.json args; use "\${...}" env placeholder.`);
+    }
+
+    if (cfg.description && PROMPT_POISONING_RE.test(String(cfg.description))) {
+      issues.push(`[MCP Prompt-Poisoning Guard] Server "${name}" description contains prompt-injection pattern.`);
     }
   }
 
@@ -289,13 +389,21 @@ export function auditMcpSafety(mcpJsonObj, codexTomlText = '') {
     if (/\[mcp_servers\.[^\]]*grafana[^\]]*\][\s\S]{0,200}?args\s*=\s*\[(?![^\]]*--disable-write)/i.test(codexTomlText)) {
       issues.push('[MCP Safety] Grafana MCP entry in .codex/config.toml is missing "--disable-write".');
     }
+    if (/@latest\b/i.test(codexTomlText)) {
+      issues.push('[MCP Supply Chain] .codex/config.toml uses floating "@latest" tag.');
+    }
   }
+
+  const lockCheck = auditMcpDescriptorsAndLock(servers, options.lockedHashes || null);
+  issues.push(...lockCheck.issues);
 
   return {
     ok: issues.length === 0,
     issues,
     warnings,
     checkedServers,
+    riskByServer,
+    descriptorHashes: lockCheck.hashes,
   };
 }
 
@@ -303,6 +411,7 @@ function buildMcpEnvTemplate(serverNames) {
   const lines = [
     '# Optional Read-Only Full-Link System MCP Credentials (NEVER commit real secrets to Git)',
     '# Copy needed entries into your shell environment or untracked .env before invoking Grafana/DB/Sentry MCPs.',
+    '# Database Security Note: Always enforce read-only permissions at the PostgreSQL/MySQL database role level!',
     '',
   ];
   const seen = new Set();
@@ -312,7 +421,7 @@ function buildMcpEnvTemplate(serverNames) {
     for (const [k, v] of Object.entries(preset.envTemplate)) {
       if (seen.has(k)) continue;
       seen.add(k);
-      lines.push(`# ${name} (${preset.pillar})`);
+      lines.push(`# ${name} (${preset.pillar} · risk=${preset.riskLevel})`);
       lines.push(`${k}=${v}`);
     }
   }
@@ -335,7 +444,15 @@ export async function runMcpCommand(options = {}) {
       presets: Object.fromEntries(
         Object.entries(MCP_PRESETS).map(([k, v]) => [
           k,
-          { pillar: v.pillar, readonly: v.readonly, command: v.command, args: v.args, description: v.description },
+          {
+            pillar: v.pillar,
+            riskLevel: v.riskLevel,
+            pinnedVersion: v.pinnedVersion,
+            readonly: v.readonly,
+            command: v.command,
+            args: v.args,
+            description: v.description,
+          },
         ])
       ),
     };
@@ -345,18 +462,13 @@ export async function runMcpCommand(options = {}) {
     }
     console.log(
       lang === 'zh'
-        ? '\n=== AI Test Workbench 6 大支柱全链路系统 MCP 预设清单 ==='
-        : '\n=== AI Test Workbench 6-Pillar Full-Link MCP Presets ==='
+        ? '\n=== AI Test Workbench 7 大支柱全链路系统 MCP 预设清单 (已锁版本 & 风险分级) ==='
+        : '\n=== AI Test Workbench 7-Pillar Full-Link MCP Presets (Pinned & Risk-Graded) ==='
     );
     for (const [name, p] of Object.entries(MCP_PRESETS)) {
-      console.log(`  [${p.pillar.padEnd(13)}] ${name.padEnd(18)} — ${p.description}`);
+      console.log(`  [${p.pillar.padEnd(13)} | ${p.riskLevel.padEnd(13)}] ${name.padEnd(18)} — ${p.description}`);
     }
     console.log(`\nProfiles: ${Object.keys(MCP_PROFILES).join(', ')}`);
-    console.log(
-      lang === 'zh'
-        ? '示例: npx ai-test-workbench mcp add --target <repo> --profile full-link'
-        : 'Example: npx ai-test-workbench mcp add --target <repo> --profile full-link'
-    );
     return 0;
   }
 
@@ -373,13 +485,41 @@ export async function runMcpCommand(options = {}) {
 
   const mcpJsonPath = path.join(qaDir, '.mcp.json');
   const codexTomlPath = path.join(qaDir, '.codex', 'config.toml');
+  const mcpLockPath = path.join(qaDir, '.aitest', 'mcp.lock');
 
   if (action === 'doctor') {
     const mcpObj = fs.existsSync(mcpJsonPath) ? JSON.parse(fs.readFileSync(mcpJsonPath, 'utf8')) : { mcpServers: {} };
     const tomlText = fs.existsSync(codexTomlPath) ? fs.readFileSync(codexTomlPath, 'utf8') : '';
-    const audit = auditMcpSafety(mcpObj, tomlText);
+    let lockedHashes = null;
+    if (!options.lock && fs.existsSync(mcpLockPath)) {
+      try {
+        lockedHashes = JSON.parse(fs.readFileSync(mcpLockPath, 'utf8')).hashes || null;
+      } catch {
+        lockedHashes = null;
+      }
+    }
+
+    const audit = auditMcpSafety(mcpObj, tomlText, { lockedHashes });
+
+    if (options.lock && audit.ok) {
+      fs.mkdirSync(path.dirname(mcpLockPath), { recursive: true });
+      fs.writeFileSync(
+        mcpLockPath,
+        JSON.stringify(
+          {
+            schemaVersion: SCHEMA_VERSIONS.mcpLock,
+            lockedAt: new Date().toISOString(),
+            hashes: audit.descriptorHashes,
+          },
+          null,
+          2
+        ) + '\n',
+        'utf8'
+      );
+    }
+
     if (options.json) {
-      console.log(JSON.stringify(audit, null, 2));
+      console.log(JSON.stringify({ ...audit, mcpLockPath: fs.existsSync(mcpLockPath) ? mcpLockPath : null }, null, 2));
     } else {
       console.log(
         lang === 'zh'
@@ -388,7 +528,7 @@ export async function runMcpCommand(options = {}) {
       );
       for (const w of audit.warnings) console.warn(`  [WARN] ${w}`);
       for (const iss of audit.issues) console.error(`  [FAIL] ${iss}`);
-      if (audit.ok) console.log('  [OK] All MCP configurations enforce read-only & secret hygiene guardrails.');
+      if (audit.ok) console.log('  [OK] All MCP configurations enforce supply-chain, read-only & secret hygiene guardrails.');
     }
     return audit.ok ? 0 : 2;
   }

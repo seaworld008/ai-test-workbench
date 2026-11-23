@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "description": "Maps public capability claims in README.md / AGENTS.md / SKILL.md to concrete automated verification tests so zero claims drift unverified.",
+  "claims": [
+    {
+      "id": "CLAIM-01-semantic-diff-guard",
+      "claim": "Semantic AST Diff Guard blocks assertion weakening (S5->S2/S1), S0 tautologies, test.fail(), expect.soft(), swallowed .catch(), retry inflation, and config tampering",
+      "testFile": "test/adversarial.test.mjs",
+      "testTitleSubstring": "Adversarial Diff Guard Suite"
+    },
+    {
+      "id": "CLAIM-02-governance-lock",
+      "claim": "Layer 0 .aitest/governance.lock prevents AI Agents from modifying protected configs/waivers/fixtures and blocks MCP self-approval",
+      "testFile": "test/governance-and-ledger.test.mjs",
+      "testTitleSubstring": "Layer 0 Governance Lock intercepts all 5"
+    },
+    {
+      "id": "CLAIM-03-run-ledger-binding",
+      "claim": "Run Ledger binds reports/results.json to ULID runId and workspace input hash, rejecting stale green results after code edits",
+      "testFile": "test/governance-and-ledger.test.mjs",
+      "testTitleSubstring": "Run Ledger binds results.json to runId"
+    },
+    {
+      "id": "CLAIM-04-performance-observer-lcp-cls",
+      "claim": "Real Chromium Web Vitals (LCP, CLS, INP) captured via pre-injected buffered PerformanceObserver",
+      "testFile": "test/perf.test.mjs",
+      "testTitleSubstring": "captures real non-null LCP via PerformanceObserver"
+    },
+    {
+      "id": "CLAIM-05-wcag-20-21-22-axe-tags",
+      "claim": "expectAccessible enforces WCAG 2.0, 2.1, and 2.2 Level A & AA axe-core tags",
+      "testFile": "test/adversarial.test.mjs",
+      "testTitleSubstring": "WCAG 2.0/2.1/2.2 tag lock"
+    },
+    {
+      "id": "CLAIM-06-explore-default-deny-firewall",
+      "claim": "Zero-to-One Explorer default-denies all non-GET/HEAD requests, blocks GraphQL mutations, and enforces outbound egress allowlist",
+      "testFile": "test/adversarial.test.mjs",
+      "testTitleSubstring": "Explore Firewall & Egress Allowlist"
+    },
+    {
+      "id": "CLAIM-07-redaction-v2",
+      "claim": "Redaction v2 strips JSON passwords, JWTs, SaaS API tokens, PEM private keys, cookies, and URL secrets",
+      "testFile": "test/adversarial.test.mjs",
+      "testTitleSubstring": "Adversarial Redaction v2 Suite"
+    },
+    {
+      "id": "CLAIM-08-mcp-async-job-runner",
+      "claim": "MCP Job Runner supports async backgrounding, progress notifications, process-tree cancellation, concurrent read tools, and workspace root boundaries",
+      "testFile": "test/mcp-jobs.test.mjs",
+      "testTitleSubstring": "MCP Job Runner auto-backgrounds tasks"
+    },
+    {
+      "id": "CLAIM-09-heal-state-machine",
+      "claim": "Stateful Heal Session enforces 0% C/D mis-heal rate and <= 3 Class-A repair attempts",
+      "testFile": "test/governance-and-ledger.test.mjs",
+      "testTitleSubstring": "Heal Session State Machine enforces 0% C-class mis-heal rate"
+    },
+    {
+      "id": "CLAIM-10-import-graph-impact-v2",
+      "claim": "Impact v2 traces reverse static import dependency chains to select affected specs with explainable provenance",
+      "testFile": "test/impact.test.mjs",
+      "testTitleSubstring": "Impact v2 resolves reverse import-graph"
+    },
+    {
+      "id": "CLAIM-11-codemap-v2-convergence",
+      "claim": "Living Code Map v4 preserves dynamic routes (:id / [id]), prunes deleted routes, and converges defects without seenCount inflation",
+      "testFile": "test/codemap.test.mjs",
+      "testTitleSubstring": "CodeMap v2 preserves dynamic routes"
+    },
+    {
+      "id": "CLAIM-12-requirement-traceability",
+      "claim": "Requirement Traceability Matrix maps specs/REQ-xxx IDs to Playwright test specs and runtime outcomes",
+      "testFile": "test/governance-and-ledger.test.mjs",
+      "testTitleSubstring": "Requirement Traceability Matrix"
+    }
+  ]
+}

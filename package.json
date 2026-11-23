@@ -1,7 +1,7 @@
 {
   "name": "ai-test-workbench",
-  "version": "4.0.0",
-  "description": "AI-Agent-First multi-protocol MCP Server & reusable QA workbench: stdio / Streamable HTTP / SSE MCP server, Zero-to-One Explorer, Self-Evolving Living Code Map, 7-Pillar Read-Only System MCP Hub, CDP/API Perf Budgets, and 3-Layer Anti-Fake-Green Gates.",
+  "version": "5.0.0",
+  "description": "Trustworthy Verification Kernel & Multi-Protocol MCP Server for AI Coding Agents: 4-Layer Semantic AST Anti-Fake-Green Gates, Governance Lock, Run Ledger, One-Call verify_change Verdict, Stateful Heal Governance, Import-Graph Impact v2, and PerformanceObserver Web Vitals.",
   "license": "MIT",
   "author": "seaworld008",
   "homepage": "https://github.com/seaworld008/ai-test-workbench#readme",
@@ -22,7 +22,9 @@
   },
   "scripts": {
     "test": "node scripts/run-unit-tests.mjs",
+    "typecheck": "node scripts/run-typecheck.mjs",
     "lint:docs": "node scripts/check-docs-and-hygiene.mjs",
+    "bench": "node scripts/run-bench.mjs",
     "doctor": "node tools/aitest.mjs doctor",
     "mcp:serve": "node tools/aitest.mjs mcp-serve",
     "smoke": "node tools/aitest.mjs run --target templates/playwright-qa --suite smoke --audit",
@@ -71,6 +73,7 @@
     "prompts/",
     "examples/",
     "docs/",
+    "bench/scorecard.json",
     "README.md",
     "README.en.md",
     "AGENTS.md",
