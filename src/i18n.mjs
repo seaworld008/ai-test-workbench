@@ -16,7 +16,7 @@ export function detectLang(flagLang) {
 
 const DICT = {
   zh: {
-    appTitle: 'AI Test Workbench (ai-test-workbench / aitest) v2.0 — 可复用 AI 自动化测试工作台',
+    appTitle: 'AI Test Workbench (ai-test-workbench / aitest) v2.1 — 可复用 AI 自动化测试工作台',
     usageHeader: '用法',
     commandsHeader: '可用命令',
     optionsHeader: '常用选项',
@@ -25,6 +25,7 @@ const DICT = {
       doctor: '检测本机 OS、Node/npm、Git、Codex/Claude、Docker、Playwright 与浏览器缓存状态',
       init: '将独立可复用的 Playwright QA 子工程幂等初始化到目标业务仓库 (<repo>/qa)',
       'auth-login': '打开可视化 Chromium 登录页（支持人工输入短信验证码/SSO），捕获并持久化登录态',
+      explore: '登录后从 0 到 1 只读巡检全站路由、表单表格结构与 API 面，生成系统全景图谱 (system-overview.md)',
       run: '按套件运行 Playwright 测试 (smoke/e2e/api/a11y/critical/seed/impact/all) 并传递真实退出码',
       impact: '基于 git diff 与 impact-map.json 计算受影响用例（不确定时自动回退全量）',
       audit: '执行三层防假绿门禁（ESLint+TSC 静态检查 + results.json 审计 + Healer diff 守卫）',
@@ -37,7 +38,7 @@ const DICT = {
     qaNotFound: (p) => `未找到 QA 测试目录（期望 ${p} 或包含 playwright.config.ts 的目录）。请先执行 init。`,
   },
   en: {
-    appTitle: 'AI Test Workbench (ai-test-workbench / aitest) v2.0 — Reusable AI-Driven E2E Testing Workbench',
+    appTitle: 'AI Test Workbench (ai-test-workbench / aitest) v2.1 — Reusable AI-Driven E2E Testing Workbench',
     usageHeader: 'Usage',
     commandsHeader: 'Commands',
     optionsHeader: 'Global Options',
@@ -46,6 +47,7 @@ const DICT = {
       doctor: 'Inspect OS, Node/npm, Git, Codex/Claude, Docker, Playwright & browser cache readiness',
       init: 'Idempotently initialize an isolated Playwright QA subproject into <repo>/qa',
       'auth-login': 'Open headed Chromium login window (for manual SMS OTP/SSO) and capture reusable session state',
+      explore: 'Crawl authenticated app routes & APIs read-only from 0 to 1 and generate specs/system-overview.md',
       run: 'Execute a Playwright suite (smoke/e2e/api/a11y/critical/seed/impact/all) with real exit code propagation',
       impact: 'Select targeted tests via git diff + impact-map.json (falls back to full suite when uncertain)',
       audit: 'Run 3-layer anti-fake-green gate (ESLint+TSC + results.json + Healer diff guard)',

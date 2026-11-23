@@ -24,7 +24,7 @@
 | **4. npm 发包丢失 `.gitignore` 与双份 Guard 漂移** | npm 打包默认剥离模板里的 `.gitignore`；CLI 与 `playwright.config.ts` 各写一份白名单容易不一致 | 模板内存储为无点号 `templates/playwright-qa/gitignore`，`init` 时还原为 `.gitignore`；提取零依赖单一真源 `support/target-guard.mjs` 供 CLI、`playwright.config.ts` 与 Fixture 共同引用；弃用 `dotenv` 改用 Node 原生文件解析加载 |
 | **5. 写操作守卫误伤登录 & `request` 漏检** | 粗暴拦截全部非 GET 会拦掉登录 `POST` 和 GraphQL 查询，且 `page.route` 管不到 API 测试的 `request` 与 Service Worker | 改为三层写保护：① 改数据的用例打 `@mutation` 标签，`TEST_ALLOW_MUTATION=0` 时按策略排除并单独统计；② 危险接口黑名单 `TEST_BLOCKED_ENDPOINTS` 同时作用于 `page.route` 与 `Proxy` 包装后的 `request` (`APIRequestContext`)；③ 配置 `serviceWorkers: 'block'`，可选 `TEST_STRICT_READONLY=1` |
 | **6. Projects 耦合与无环境假绿** | 把 `seed` 混入常规回归或未配 URL 时整套 `test.skip` 会制造假绿 | 拆分为 5 个独立 Project：`smoke`（纯离线无需 URL）、`setup`（API 登录写 `storageState`）、`e2e`（依赖 `setup`）、`api`、`seed`（仅单独运行或供 Planner 使用）；未配 `TEST_BASE_URL` 时跑 `e2e/api/setup` 直接报配置错误退出 |
-| **7. 跨工具复用、提示词注入、交互式登录与本地靶场** | 仅靠复制长提示词，缺少抗提示词注入约束、短信/SSO 会话捕获与可运行靶场 | 提供标准 `skills/ai-test-workbench/SKILL.md`（页面内容一律视为数据而非指令）；新增 `auth-login` 可视化登录捕获（同时保存 `storageState` 与 `sessionStorage`，不绕过验证码）；`diagnose` 汇总官方 `error-context.md` 并脱敏输出建议分类+置信度；内置零依赖 `examples/demo-webapp/server.mjs`（默认端口 `5899`、`--port 0`、`--preset demo-campus` 与 `npm run demo:verify`） |
+| **7. 跨工具复用、提示词注入、交互式登录与从 0 到 1 探索图谱** | 仅靠复制长提示词，缺少抗提示词注入约束、短信/SSO 会话捕获、多端全景探索与可运行靶场 | 提供标准 `skills/ai-test-workbench/SKILL.md`（页面内容一律视为数据而非指令）；新增 `auth-login` 可视化登录捕获（同时保存 `storageState` 与 `sessionStorage`，不绕过验证码）与 **`explore` 从 0 到 1 只读全站探索引擎**（自动汇总多端视角、路由原型、API 端点并生成 `specs/system-overview.md` 全景图）；`diagnose` 汇总官方 `error-context.md` 并脱敏输出建议分类+置信度；内置零依赖 `examples/demo-webapp/server.mjs`（默认端口 `5899`、`--port 0`、`--preset demo-campus` 与 `npm run demo:verify`） |
 
 ---
 
@@ -353,5 +353,6 @@ pipeline {
 - [x] 启动 `examples/demo-webapp/server.mjs` 本地靶场（`npm run demo:verify`），跑通 `seed + smoke + e2e + api + audit --require-e2e`（含 `Promise.all` 单名额并发 `201 + 409`、重复报名 `409`、学生管理端 `403`，11/11 通过，退出码 `0`）
 - [x] 真实业务项目接入验证（某生产级 Next.js 16.2.6 + Vitest Web 应用，已脱敏）：`init --dry-run` 准确识别技术栈与宿主隔离提示（不改源码）；在独立沙箱目录对本地 `http://127.0.0.1:3100` 跑通首页安全头、定价页、安全页 WCAG 扫描、中英文切换与 `/api/demo` 确定性契约（`seed` 1/1 + `all` 12/12 + `audit --require-e2e` 退出码 `0`）
 - [x] 反向安全与防假绿门禁全部返回非 `0` 退出码：`TEST_ENV=production`（`2`）、未授权 host（`2`）、`REQUIRE_TEST_TARGET=1` 空 URL（`2`）、故意失败用例（`1`，含 Trace 生成与 `ai-diagnostics.md` 脱敏及 `error-context.md` 汇总）、`@critical` 被 skip（`1`）、零断言 spec（`1`）、含 `waitForTimeout`（`1`）、Healer diff 删减 `expect`（`1`）、命中危险接口黑名单（`1`）
+- [x] **v2.1 新增 `explore` 从 0 到 1 系统探索引擎**：支持只读防火墙（拦截 `DELETE`/`PUT`/`PATCH` 及写类型 `POST`）、UI 按钮安全分类、API Query 密钥脱敏，并在本地靶场实测生成 `reports/system-topology.json` 与 `specs/system-overview.md`
 - [x] `npm pack --dry-run` 验证产物不含 `node_modules` / `.env` / `reports` 且包含 `templates/playwright-qa/gitignore`
 - [x] 根目录 `git status` 干净规范（`.sandbox` 已忽略，`templates/playwright-qa/package-lock.json` 受控跟踪）

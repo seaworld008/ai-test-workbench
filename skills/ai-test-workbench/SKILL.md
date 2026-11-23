@@ -32,6 +32,10 @@ npx ai-test-workbench doctor
 npx ai-test-workbench init --name my-app --target /path/to/repo --loop codex --dry-run
 npx ai-test-workbench init --name my-app --target /path/to/repo --loop codex
 
+# 2.5 Optional for unfamiliar / multi-tenant SaaS: Login -> Explore 0-to-1 -> Generate specs/system-overview.md
+npx ai-test-workbench auth-login --target /path/to/repo --base-url https://staging.example.internal
+npx ai-test-workbench explore --target /path/to/repo --base-url https://staging.example.internal --max-pages 30
+
 # 3. Verify offline smoke + 3-layer quality gate
 npx ai-test-workbench run --target /path/to/repo --suite smoke --audit
 
@@ -49,6 +53,8 @@ npx ai-test-workbench diagnose --target /path/to/repo
 
 Start your coding agent **from `<repo>/qa/`** (`cd qa && codex` or `cd qa && claude`) unless `--bridge-root` was explicitly configured:
 
+0. **Zero-to-One System Atlas First (`explore`, recommended for existing / multi-portal SaaS)**:
+   - Run `aitest explore` and follow [references/zero-to-one-exploration.md](references/zero-to-one-exploration.md) to inventory Platform and Tenant/School switchers, routes, tables, APIs, and pre-existing runtime/a11y defects into `specs/system-overview.md` BEFORE writing functional specs.
 1. **Seed First (`--project=seed`)**:
    - Ensure `tests/seed.spec.ts` runs cleanly against the allowlisted `TEST_BASE_URL` without irreversible mutations.
 2. **Planner (`specs/*.md`)**:

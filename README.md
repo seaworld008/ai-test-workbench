@@ -103,17 +103,18 @@ npx ai-test-workbench run --target "/path/to/your-repo" --suite smoke --audit
 
 ---
 
-## 🔐 面对短信验证码 / SSO 测试环境的登录态捕获 (`auth-login`)
+## 🔐 面向多端 SaaS / 短信登录系统的“先探索再深测”闭环 (`auth-login` → `explore`)
 
-对于启用了手机验证码、企业 SSO 或防自动化的 Staging 测试系统：
+对于启用了短信验证码、SSO 或“平台端 + 租户/组织子工作台”多端架构的复杂系统：
 
 ```bash
-# 1. 打开真实浏览器窗口（支持可选预填账号，但绝不绕过验证码）
+# 1. 打开真实浏览器完成一次人工登录并捕获会话（绝不绕过验证码）
 npx ai-test-workbench auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal --account 13800138000
 
-# 2. 在弹出的浏览器中手动输入验证码并登录，点击右下角绿色按钮保存会话（生成 playwright/.auth/user.json 与 session.json）
+# 2. 只读模式从 0 到 1 全站探索（自动脱敏 API 参数，生成 specs/system-overview.md 系统全景图）
+npx ai-test-workbench explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
 
-# 3. 后续自动复用登录态运行 E2E 与 Seed
+# 3. 基于全景图编写并运行确定性 E2E + 三层质量门禁
 npx ai-test-workbench run --target "/path/to/your-repo" --suite e2e --base-url https://staging.example.internal --audit
 ```
 
@@ -143,6 +144,7 @@ npm run demo:verify
 | `doctor` | 探测本机环境、AI CLI 与浏览器缓存 | `--target <path>`、`--json` |
 | `init` | 幂等初始化 `<repo>/qa` 并检查宿主工程隔离冲突 | `--name`、`--target`、`--preset generic\|demo-campus`、`--loop codex,claude`、`--dry-run`、`--bridge-root` |
 | `auth-login` | 可视化登录并保存 `cookies/localStorage/sessionStorage` | `--target`、`--base-url`、`--account`、`--login-path`、`--timeout` |
+| `explore` | 登录后从 0 到 1 只读探索全站与多端切换器，生成 `system-overview.md` 全景图 | `--target`、`--base-url`、`--entry-path /`、`--max-pages 25` |
 | `run` | 按 Suite 执行测试并传播真实退出码 | `--suite smoke\|e2e\|api\|a11y\|critical\|seed\|impact\|all`、`--base-url`、`--allow-mutation`、`--audit`、`--last-failed` |
 | `impact` | 基于 Git Diff 分析受影响测试集（不确定自动退全量） | `--target`、`--base origin/main`、`--json` |
 | `audit` | 执行静态 ESLint/TSC + 运行时结果 + Healer Diff 门禁 | `--check-specs`、`--require-e2e`、`--diff-base HEAD`、`--max-flaky 0` |

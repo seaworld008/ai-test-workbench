@@ -4,6 +4,13 @@ All notable changes to `ai-test-workbench` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-11-23
+
+### Added
+- **Zero-to-One Read-Only Exploration Engine (`aitest explore`)**: Added `src/explore.mjs` and `aitest explore --target <repo> [--entry-path /] [--max-pages 25]` to crawl authenticated applications under strict zero-mutation guards (`DELETE`/`PUT`/`PATCH` and mutating `POST` paths aborted), auto-discover DOM/menu/Vue-Router routes, classify UI action safety (`readonly` vs `mutation`), redact sensitive API query parameters, detect page archetypes (`auth-portal`, `dashboard`, `crud-table`, `form-config`, `content-page`), and generate `reports/system-topology.json` + `specs/system-overview.md`.
+- **Multi-Portal 0→1 Exploration Guidance**: Added `skills/ai-test-workbench/references/zero-to-one-exploration.md` and `prompts/00-explore-and-atlas.md` covering the 4-stage flow: Login -> Multi-Portal 0-to-1 Exploration -> System Panorama (`system-overview.md`) -> Deep Functional Testing & Isolation Audits.
+- **Unit & Integration Tests (`test/explore.test.mjs`)**: Verified action safety classification, API query secret redaction, Markdown atlas generation, production blocking, and live `explore` execution against the local demo server.
+
 ## [2.0.0] - 2026-11-23
 
 ### Added

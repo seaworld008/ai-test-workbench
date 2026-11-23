@@ -67,13 +67,18 @@ npx ai-test-workbench run --target "/path/to/your-repo" --suite smoke --audit
 
 ---
 
-## Interactive Login Capture for SMS / SSO Staging Portals
+## Interactive Login & Zero-to-One System Exploration (`auth-login` -> `explore`)
+
+For complex multi-tenant SaaS apps protected by SMS OTP / SSO / CAPTCHA:
 
 ```bash
-# Opens headed Chromium, optionally pre-fills phone/username, saves storageState + sessionStorage
+# 1. Open headed Chromium, optionally pre-fill phone/username, save storageState + sessionStorage
 npx ai-test-workbench auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal --account 13800138000
 
-# Run E2E reusing captured session state
+# 2. Explore all reachable routes read-only (0 -> 1) and generate specs/system-overview.md + reports/system-topology.json
+npx ai-test-workbench explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
+
+# 3. Run deterministic E2E reusing captured session state
 npx ai-test-workbench run --target "/path/to/your-repo" --suite e2e --base-url https://staging.example.internal --audit
 ```
 

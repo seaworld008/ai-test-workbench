@@ -4,6 +4,7 @@ import { runAuditCommand } from './audit.mjs';
 import { runAuthLoginCommand } from './auth-login.mjs';
 import { runDiagnoseCommand } from './diagnose.mjs';
 import { runDoctor } from './doctor.mjs';
+import { runExploreCommand } from './explore.mjs';
 import { detectLang, t } from './i18n.mjs';
 import { runImpactCommand } from './impact.mjs';
 import { runInit } from './init.mjs';
@@ -16,6 +17,7 @@ function printHelp(lang) {
     'doctor',
     'init',
     'auth-login',
+    'explore',
     'run',
     'impact',
     'audit',
@@ -39,7 +41,9 @@ function printHelp(lang) {
   console.log('  --qa-dir <dir>        QA subdirectory name inside target repo (default: qa)');
   console.log('  --preset <name>       Template preset during init: generic (default) | demo-campus');
   console.log('  --suite <name>        Suite for run: smoke | e2e | api | a11y | critical | seed | impact | all');
-  console.log('  --base-url <url>      Override TEST_BASE_URL for run or auth-login (still verified against allowlist)');
+  console.log('  --base-url <url>      Override TEST_BASE_URL for run, explore, or auth-login (still verified against allowlist)');
+  console.log('  --entry-path <path>   Starting route path for explore (default: /)');
+  console.log('  --max-pages <n>       Maximum routes to visit during explore (default: 25)');
   console.log('  --account <user>      Optional phone/username to pre-fill in auth-login');
   console.log('  --login-path <path>   Optional login route path for auth-login (default: /)');
   console.log('  --timeout <sec>       Timeout seconds for interactive auth-login (default: 600)');
@@ -78,6 +82,8 @@ export async function runCli(argv = process.argv.slice(2)) {
         preset: { type: 'string' },
         suite: { type: 'string' },
         'base-url': { type: 'string' },
+        'entry-path': { type: 'string' },
+        'max-pages': { type: 'string' },
         account: { type: 'string' },
         'login-path': { type: 'string' },
         timeout: { type: 'string' },
@@ -156,6 +162,13 @@ export async function runCli(argv = process.argv.slice(2)) {
           account: v.account,
           loginPath: v['login-path'],
           timeout: v.timeout ? Number(v.timeout) : undefined,
+        });
+      case 'explore':
+        return await runExploreCommand({
+          ...common,
+          baseUrl: v['base-url'],
+          entryPath: v['entry-path'],
+          maxPages: v['max-pages'] ? Number(v['max-pages']) : undefined,
         });
       case 'run':
         return await runSuiteCommand({

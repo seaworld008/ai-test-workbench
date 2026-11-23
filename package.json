@@ -1,7 +1,7 @@
 {
   "name": "ai-test-workbench",
-  "version": "2.0.0",
-  "description": "Reusable local AI-driven E2E testing workbench and Agent Skill built on Playwright Test Agents (Planner/Generator/Healer), Diff-Impact selection, ESLint/TSC anti-fake-green gates, and WCAG 2.2 checks.",
+  "version": "2.1.0",
+  "description": "Reusable local AI-driven E2E testing workbench and Agent Skill built on Playwright Test Agents (Planner/Generator/Healer), zero-to-one system explorer, Diff-Impact selection, ESLint/TSC anti-fake-green gates, and WCAG 2.2 checks.",
   "license": "MIT",
   "author": "seaworld008",
   "homepage": "https://github.com/seaworld008/ai-test-workbench#readme",
