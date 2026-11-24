@@ -203,16 +203,28 @@ export function createMcpHttpServer(options = {}) {
         }
 
         const messages = Array.isArray(payload) ? payload : [payload];
-        for (const item of messages) {
-          const rpcRes = await handleMcpJsonRpcMessage(item, session.ctx, {
-            onNotification: session.ctx.sendNotification,
-          });
-          if (rpcRes !== null && !session.res.writableEnded) {
-            session.res.write(`event: message\ndata: ${JSON.stringify(rpcRes)}\n\n`);
-          }
-        }
         res.writeHead(202, { 'Content-Type': 'text/plain; charset=utf-8' });
         res.end('Accepted');
+
+        // Dispatch asynchronously per MCP 2024-11-05 HTTP+SSE spec so clients receive 202 immediately
+        // and can concurrently send notifications/cancelled while long tool calls run.
+        void (async () => {
+          for (const item of messages) {
+            try {
+              const rpcRes = await handleMcpJsonRpcMessage(item, session.ctx, {
+                onNotification: session.ctx.sendNotification,
+              });
+              if (rpcRes !== null && !session.res.writableEnded) {
+                session.res.write(`event: message\ndata: ${JSON.stringify(rpcRes)}\n\n`);
+              }
+            } catch (err) {
+              if (!session.res.writableEnded) {
+                const errFrame = rpcError(item?.id ?? null, -32603, `Internal SSE dispatch error: ${err?.message || String(err)}`);
+                session.res.write(`event: message\ndata: ${JSON.stringify(errFrame)}\n\n`);
+              }
+            }
+          }
+        })();
         return;
       }
 
@@ -341,9 +353,11 @@ export function createMcpHttpServer(options = {}) {
           }
 
           const accept = String(req.headers.accept || '');
-          const wantsSseOnly = accept.includes('text/event-stream') && !accept.includes('application/json');
+          const acceptsSse = accept.includes('text/event-stream');
+          const hasProgressToken = payload?.params?._meta?.progressToken !== undefined;
+          const wantsSseStream = acceptsSse && (!accept.includes('application/json') || hasProgressToken);
 
-          if (wantsSseOnly) {
+          if (wantsSseStream) {
             // Stream SSE notifications IMMEDIATELY per request without mutating shared session state (`M-06`)!
             const headers = {
               'Mcp-Session-Id': sid,

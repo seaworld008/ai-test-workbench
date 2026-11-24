@@ -144,6 +144,14 @@ flowchart TB
   node tools/aitest.mjs mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
   ```
 
+### 官方 MCP 协议合规性与三传输互操作验证
+
+- **零运行时依赖决策**：根包 `package.json` 保持零运行时 `dependencies`，不发布额外的 SDK 封装包；详细决策与重新评估触发条件（合规缺口、OAuth / Elicitation / Tasks 等）见 [ADR：MCP 协议层零依赖](./docs/adr/mcp-zero-dependency.md)。
+- **已通过官方 conformance 套件（`@modelcontextprotocol/conformance@0.1.16`）与官方 SDK 客户端（`@modelcontextprotocol/sdk@1.32.2`）验证**（隔离于 `conformance/`，不随 npm 包发布，由 CI `mcp-conformance` job 强制回归）：
+  - **官方 `conformance server`（Streamable HTTP `/mcp`，`active` 套件 30 场景）**：`8/8` 协议通用场景全部通过（`server-initialize`、`logging-set-level`、`ping`、`tools-list`、`server-sse-multiple-streams`、`resources-list`、`prompts-list`、`dns-rebinding-protection`，共 `9/9` checks 通过）；`22` 项已登记于 [`conformance/expected-failures.json`](./conformance/expected-failures.json)（3 项未声明的可选能力、4 项按 ADR-001 暂缓的 Sampling/Elicitation 能力、15 项上游 Everything Server 硬编码 `test_*` 夹具名场景），**`0` 项未登记失败、`0` 项过时基线**（注：官方 `conformance server` 仅支持 HTTP）。
+  - **官方 `@modelcontextprotocol/sdk@1.32.2` 参考 `Client`（`5/5` 通过）**：覆盖 **`stdio`**、**Streamable HTTP (`/mcp`)** 与 **Legacy SSE (`/sse` + `/messages`)** 三种传输，实测验证 `2024-11-05` 至 `2025-11-25` 协议版本协商、`tools/list` 精确 21 个工具与合法 JSON Schema、只读 `tools/call`（`aitest_doctor` / `aitest_mcp_hub`）返回 `structuredContent`、`notifications/progress` 实时进度通知与 `AbortController` 取消请求（`notifications/cancelled`）。
+  - 本机复现：`cd conformance && npm ci && npm test`。
+
 ### 方式二：复制即用的首次提示词
 
 > ```text
@@ -231,7 +239,7 @@ npm run bench
 |---|---|---|
 | **四层防假绿门禁与治理指南 (v5.0)** | [docs/governance.md](./docs/governance.md) | [docs/governance.en.md](./docs/governance.en.md) |
 | **v5.0 验证评分卡与审查路线图** | [scorecard](./docs/review/v5-verification-scorecard.md) · [review](./docs/review/architecture-code-review-2026-11.md) · [roadmap](./docs/review/optimization-roadmap-2026-2027.md) | [scorecard.en](./docs/review/v5-verification-scorecard.en.md) · [review.en](./docs/review/architecture-code-review-2026-11.en.md) · [roadmap.en](./docs/review/optimization-roadmap-2026-2027.en.md) |
-| **架构决策记录 (ADR)** | [ADR-0001 零依赖 MCP 内核 v2](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) | [ADR-0001 (EN)](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md) |
+| **架构决策记录 (ADR)** | [MCP 协议层零依赖](./docs/adr/mcp-zero-dependency.md) · [ADR-0001 内核演进](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) | [MCP Zero-Dep ADR (EN)](./docs/adr/mcp-zero-dependency.en.md) · [ADR-0001 (EN)](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md) |
 | **AI Agent 快速上手与规范** | [quickstart](./docs/ai-agent-quickstart.md) · [AGENTS.md](./AGENTS.md) · [CLAUDE.md](./CLAUDE.md) · [llms.txt](./llms.txt) | [quickstart.en](./docs/ai-agent-quickstart.en.md) · [AGENTS.en.md](./AGENTS.en.md) |
 | **系统架构、版本矩阵与蓝图** | [ARCHITECTURE.md](./ARCHITECTURE.md) · [VERSION.md](./VERSION.md) · [架构蓝图](./Playwright%20Test%20Agents%20+%20Codex%20%E5%8F%AF%E5%A4%8D%E7%94%A8%E6%9C%AC%E6%9C%BA%20AI%20%E8%87%AA%E5%8A%A8%E5%8C%96%E6%B5%8B%E8%AF%95%E5%B7%A5%E4%BD%9C%E5%8F%B0%E2%80%94%E2%80%94%E6%9E%B6%E6%9E%84%E8%AE%BE%E8%AE%A1%E4%B8%8E%E5%AE%9E%E6%96%BD%E6%8F%90%E7%A4%BA%E8%AF%8D.md) | [ARCHITECTURE.en.md](./ARCHITECTURE.en.md) · [VERSION.en.md](./VERSION.en.md) · [Blueprint (EN)](./docs/architecture-and-prompts-blueprint.en.md) |
 | **适配 / 安全 / 排查 / 升级 / 靶场** | [adapter](./docs/project-adapter.md) · [security](./docs/security.md) · [troubleshooting](./docs/troubleshooting.md) · [upgrade](./docs/upgrade.md) · [demo](./examples/demo-webapp/README.md) | [adapter.en](./docs/project-adapter.en.md) · [security.en](./docs/security.en.md) · [troubleshooting.en](./docs/troubleshooting.en.md) · [upgrade.en](./docs/upgrade.en.md) · [demo.en](./examples/demo-webapp/README.en.md) |

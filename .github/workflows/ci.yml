@@ -93,6 +93,30 @@ jobs:
             templates/playwright-qa/test-results/
           retention-days: 7
 
+  mcp-conformance:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: conformance/package-lock.json
+
+      - name: Install isolated MCP conformance & SDK reference dependencies
+        working-directory: conformance
+        run: npm ci --no-audit --no-fund
+
+      - name: Run Official @modelcontextprotocol/conformance & SDK 3-Transport Suite
+        working-directory: conformance
+        run: npm test
+
   self-bootstrap-verify:
     uses: ./.github/workflows/aitest-verify.yml
     permissions:

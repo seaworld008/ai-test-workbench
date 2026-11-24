@@ -1,0 +1,19 @@
+{
+  "name": "ai-test-workbench-mcp-conformance",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Isolated official MCP conformance & SDK interoperability test harness for ai-test-workbench (excluded from published npm package).",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "test": "node run-conformance.mjs",
+    "test:sdk": "node --test sdk-client.test.mjs",
+    "test:official": "node run-conformance.mjs --official-only"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/conformance": "0.1.16",
+    "@modelcontextprotocol/sdk": "1.32.2"
+  }
+}

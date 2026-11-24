@@ -142,6 +142,14 @@ flowchart TB
   node tools/aitest.mjs mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
   ```
 
+### Official MCP Conformance & 3-Transport Interoperability
+
+- **Zero-Dependency Decision**: Root `package.json` keeps zero runtime `dependencies` with no separate SDK wrapper package; see [ADR: Zero-Dependency MCP Layer](./docs/adr/mcp-zero-dependency.en.md) for rationale and re-evaluation triggers (conformance gaps, OAuth, Elicitation, Tasks).
+- **Verified with Official Conformance Suite (`@modelcontextprotocol/conformance@0.1.16`) & Official SDK Client (`@modelcontextprotocol/sdk@1.32.2`)** (isolated under `conformance/`, excluded from the npm tarball, enforced by CI `mcp-conformance`):
+  - **Official `conformance server` (Streamable HTTP `/mcp`, `active` suite — 30 scenarios)**: **8/8 protocol-level scenarios passed** (`server-initialize`, `logging-set-level`, `ping`, `tools-list`, `server-sse-multiple-streams`, `resources-list`, `prompts-list`, `dns-rebinding-protection`; 9/9 checks passed), **22 expected failures** documented with rationale & reference links in [`conformance/expected-failures.json`](./conformance/expected-failures.json) (3 undeclared optional capabilities, 4 deferred Sampling/Elicitation scenarios per ADR-001, 15 upstream Everything-Server hardcoded `test_*` fixture scenarios), **0 unexpected failures, 0 stale baselines** (note: official `conformance server` tests HTTP only).
+  - **Official `@modelcontextprotocol/sdk@1.32.2` Reference `Client` (5/5 suites passed)**: verified across **`stdio`**, **Streamable HTTP (`/mcp`)**, and **Legacy SSE (`/sse` + `/messages`)** for `2024-11-05`..`2025-11-25` version negotiation, exact 21 tools with valid JSON schemas, read-only `tools/call` (`aitest_doctor` / `aitest_mcp_hub`) returning `structuredContent`, `notifications/progress`, and `AbortController` cancellation (`notifications/cancelled`).
+  - Reproduce locally: `cd conformance && npm ci && npm test`.
+
 ---
 
 ## CLI Quick Start & Reproducible Benchmark
