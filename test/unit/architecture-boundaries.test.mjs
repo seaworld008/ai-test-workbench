@@ -201,3 +201,23 @@ test('Architecture boundary: zero src/scripts -> templates inversions and vendor
     `Circular imports inside src/** increased (${srcCycles.length} > ${MAX_ALLOWED_SRC_CYCLES}): ${JSON.stringify(srcCycles)}`
   );
 });
+
+test('Architecture boundary (WU-06): decomposed trust/explore/codemap/perf domains stay <= 500 LOC and auth-login has no temp-file codegen', () => {
+  for (const domain of ['trust', 'explore', 'codemap', 'perf']) {
+    const dir = path.join(REPO_ROOT, 'src', domain);
+    const files = walkMjs(dir);
+    assert.ok(files.length >= 2, `Expected decomposed modules under src/${domain}/`);
+    for (const file of files) {
+      const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
+      const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/).length;
+      assert.ok(lines <= 500, `Decomposed module ${rel} has ${lines} lines (> 500 ceiling)`);
+    }
+    const facadePath = path.join(REPO_ROOT, 'src', `${domain}.mjs`);
+    const facadeLines = fs.readFileSync(facadePath, 'utf8').split(/\r?\n/).length;
+    assert.ok(facadeLines <= 260, `Facade src/${domain}.mjs has ${facadeLines} lines (> 260 ceiling)`);
+  }
+
+  const authLoginText = fs.readFileSync(path.join(REPO_ROOT, 'src', 'auth-login.mjs'), 'utf8');
+  assert.equal(authLoginText.includes('mkdtempSync'), false, 'src/auth-login.mjs must not generate temp .mjs scripts');
+  assert.equal(authLoginText.includes('node:os'), false, 'src/auth-login.mjs must not write temp scripts into os.tmpdir()');
+});
