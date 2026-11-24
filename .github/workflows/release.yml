@@ -1,14 +1,11 @@
 name: Release npm Package
 
-# Triggered ONLY when a human pushes a semver release tag (e.g., v5.1.0).
-# Publishing instructions (human-operated):
-#   1. First publish: create a short-lived granular npm access token and add it as repo secret `NPM_TOKEN`.
-#   2. Push tag `v5.1.0` -> this workflow runs all 7 verification gates and runs `npm publish --provenance --access public`.
-#   3. After initial package creation on npmjs.com, configure npm Trusted Publisher:
-#        - Repository: seaworld008/ai-test-workbench
-#        - Workflow filename: release.yml
-#        - Environment: (leave empty or match if you add a GitHub Environment)
-#   4. Delete the temporary `NPM_TOKEN` secret immediately once Trusted Publishing is active.
+# Triggered ONLY when a human pushes a semver release tag (e.g., v5.1.1).
+# Trusted Publishing (OIDC) is active on npmjs.com:
+#   - Package: ai-test-workbench
+#   - Repository: seaworld008/ai-test-workbench
+#   - Workflow filename: release.yml
+#   - Authentication: GitHub Actions OIDC (id-token: write) via Node 24 (npm >= 11.5.1) — zero NPM_TOKEN secret required.
 
 on:
   push:
@@ -33,11 +30,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Setup Node.js 22 LTS with npm registry
+      - name: Setup Node.js 24 LTS (npm >= 11.5.1 for native OIDC Trusted Publishing)
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: '24'
 
       - name: Verify tag matches package.json version
         run: |
@@ -64,9 +60,7 @@ jobs:
           npm run bench
           npm pack --dry-run
 
-      - name: Publish to npm with Sigstore Provenance
-        env:
-          # Used ONLY for first-time publish before Trusted Publisher is configured on npmjs.com.
-          # Once Trusted Publisher (seaworld008/ai-test-workbench -> release.yml) is active, delete NPM_TOKEN.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --provenance --access public
+      - name: Publish to npm via OIDC Trusted Publishing with Sigstore Provenance
+        run: |
+          npm --version
+          npm publish --provenance --access public
