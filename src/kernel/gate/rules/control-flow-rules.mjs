@@ -1,0 +1,169 @@
+import { diffEventSnippets } from './governance-rules.mjs';
+
+/**
+ * AITEST-G105: Added `test.skip`, `test.fixme`, `test.only`, `test.fail`, or `testInfo.skip`.
+ */
+export const ruleG105 = {
+  code: 'AITEST-G105',
+  name: 'no-added-skip-or-fail',
+  description: 'Blocks adding test.skip, test.fixme, test.only, or expectation-inverting test.fail calls.',
+  waiverKey: 'skip',
+  defaultEnabled: true,
+  evaluate(ctx) {
+    const { file, baseSum, headSum, canWaive } = ctx;
+    const findings = [];
+    for (const ev of diffEventSnippets(baseSum?.events?.skips, headSum?.events?.skips)) {
+      if (canWaive(ev.snippet) || canWaive('AITEST-G105')) continue;
+      findings.push({
+        code: 'AITEST-G105',
+        severity: 'error',
+        file,
+        line: ev.line,
+        testTitle: ev.testTitle || undefined,
+        message: ev.message,
+        evidence: { calleeText: ev.calleeText, snippet: ev.snippet },
+      });
+    }
+    return findings;
+  },
+};
+
+/**
+ * AITEST-G106: Soft assertion weakening (`expect.soft(...)` or `expect.configure({ soft: true })`).
+ */
+export const ruleG106 = {
+  code: 'AITEST-G106',
+  name: 'no-soft-assertion-weakening',
+  description: 'Blocks introducing expect.soft() or expect.configure({ soft: true }).',
+  waiverKey: 'soft-assertion',
+  defaultEnabled: true,
+  evaluate(ctx) {
+    const { file, baseSum, headSum, canWaive } = ctx;
+    const findings = [];
+    for (const ev of diffEventSnippets(baseSum?.events?.softAssertions, headSum?.events?.softAssertions)) {
+      if (canWaive(ev.snippet) || canWaive('AITEST-G106')) continue;
+      findings.push({
+        code: 'AITEST-G106',
+        severity: 'error',
+        file,
+        line: ev.line,
+        testTitle: ev.testTitle || undefined,
+        message: ev.message,
+        evidence: { kind: ev.kind, snippet: ev.snippet },
+      });
+    }
+    return findings;
+  },
+};
+
+/**
+ * AITEST-G107: Swallowed exceptions in `try/catch`, `return` in `finally`, or non-rethrowing `.catch()`.
+ */
+export const ruleG107 = {
+  code: 'AITEST-G107',
+  name: 'no-swallowed-exceptions',
+  description: 'Blocks swallowing exceptions in try/catch, finally-return, or non-rethrowing .catch() handlers.',
+  waiverKey: 'swallowed-catch',
+  defaultEnabled: true,
+  evaluate(ctx) {
+    const { file, baseSum, headSum, canWaive } = ctx;
+    const findings = [];
+    for (const ev of diffEventSnippets(baseSum?.events?.swallowedCatches, headSum?.events?.swallowedCatches)) {
+      if (canWaive(ev.snippet) || canWaive('AITEST-G107')) continue;
+      findings.push({
+        code: 'AITEST-G107',
+        severity: 'error',
+        file,
+        line: ev.line,
+        testTitle: ev.testTitle || undefined,
+        message: ev.message,
+        evidence: { kind: ev.kind, scopeKind: ev.scopeKind, snippet: ev.snippet },
+      });
+    }
+    return findings;
+  },
+};
+
+/**
+ * AITEST-G108: Actionability bypass via `{ force: true }`.
+ */
+export const ruleG108 = {
+  code: 'AITEST-G108',
+  name: 'no-force-true',
+  description: 'Blocks adding { force: true } which bypasses Playwright actionability checks.',
+  waiverKey: 'force-true',
+  defaultEnabled: true,
+  evaluate(ctx) {
+    const { file, baseSum, headSum, canWaive } = ctx;
+    const findings = [];
+    for (const ev of diffEventSnippets(baseSum?.events?.forceTrue, headSum?.events?.forceTrue)) {
+      if (canWaive(ev.snippet) || canWaive('AITEST-G108')) continue;
+      findings.push({
+        code: 'AITEST-G108',
+        severity: 'error',
+        file,
+        line: ev.line,
+        testTitle: ev.testTitle || undefined,
+        message: ev.message,
+        evidence: { snippet: ev.snippet },
+      });
+    }
+    return findings;
+  },
+};
+
+/**
+ * AITEST-G109: Retry inflation (`retries >= 1`) or excessive timeout (`>= 60000ms` / `toPass >= 30000ms`).
+ */
+export const ruleG109 = {
+  code: 'AITEST-G109',
+  name: 'no-timeout-or-retry-inflation',
+  description: 'Blocks retry inflation and excessive timeout masks (timeout >= 60s, toPass timeout >= 30s).',
+  waiverKey: 'timeout-inflation',
+  defaultEnabled: true,
+  evaluate(ctx) {
+    const { file, baseSum, headSum, canWaive } = ctx;
+    const findings = [];
+    for (const ev of diffEventSnippets(baseSum?.events?.timeoutOrRetry, headSum?.events?.timeoutOrRetry)) {
+      if (canWaive(ev.snippet) || canWaive('AITEST-G109')) continue;
+      findings.push({
+        code: 'AITEST-G109',
+        severity: 'error',
+        file,
+        line: ev.line,
+        testTitle: ev.testTitle || undefined,
+        message: ev.message,
+        evidence: { snippet: ev.snippet },
+      });
+    }
+    return findings;
+  },
+};
+
+/**
+ * AITEST-G110: Conditional assertions (`if (...) { expect(...) }`, ternary `expect()`, early conditional `return`).
+ */
+export const ruleG110 = {
+  code: 'AITEST-G110',
+  name: 'no-conditional-assertions',
+  description: 'Blocks wrapping assertions in conditionals or bypassing assertions via conditional early returns.',
+  waiverKey: 'conditional-assertion',
+  defaultEnabled: true,
+  evaluate(ctx) {
+    const { file, baseSum, headSum, canWaive } = ctx;
+    const findings = [];
+    for (const ev of diffEventSnippets(baseSum?.events?.conditionalAssertions, headSum?.events?.conditionalAssertions)) {
+      if (canWaive(ev.snippet) || canWaive('AITEST-G110')) continue;
+      findings.push({
+        code: 'AITEST-G110',
+        severity: 'error',
+        file,
+        line: ev.line,
+        testTitle: ev.testTitle || undefined,
+        message: ev.message,
+        evidence: { kind: ev.kind, scopeKind: ev.scopeKind, snippet: ev.snippet },
+      });
+    }
+    return findings;
+  },
+};

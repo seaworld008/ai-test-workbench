@@ -1,0 +1,93 @@
+import { ruleG102, ruleG103, ruleG104, ruleG115 } from './assertion-rules.mjs';
+import { ruleG105, ruleG106, ruleG107, ruleG108, ruleG109, ruleG110 } from './control-flow-rules.mjs';
+import { ruleG101, ruleG113 } from './governance-rules.mjs';
+import { ruleG111, ruleG112, ruleG114 } from './locator-and-oracle-rules.mjs';
+
+/**
+ * Canonical registry of all 15 pluggable anti-fake-green gate rules (`AITEST-G101` .. `AITEST-G115`).
+ */
+export const ALL_GATE_RULES = Object.freeze([
+  ruleG101,
+  ruleG102,
+  ruleG103,
+  ruleG104,
+  ruleG105,
+  ruleG106,
+  ruleG107,
+  ruleG108,
+  ruleG109,
+  ruleG110,
+  ruleG111,
+  ruleG112,
+  ruleG113,
+  ruleG114,
+  ruleG115,
+]);
+
+/** @type {Map<string, (typeof ALL_GATE_RULES)[number]>} */
+const RULES_BY_CODE = new Map(ALL_GATE_RULES.map((r) => [r.code, r]));
+
+/**
+ * Looks up a gate rule definition by its code (`AITEST-G101`..`AITEST-G115`).
+ * @param {string} code
+ */
+export function getGateRuleByCode(code) {
+  return RULES_BY_CODE.get(code) || null;
+}
+
+/**
+ * Resolves whether a given rule code is enabled under `aitest.config.json#rules`.
+ * Note: `aitest.config.json` itself is protected by `.aitest/governance.lock`, so only
+ * human-approved governance configs may disable a rule.
+ * @param {string} code
+ * @param {Record<string, boolean | { enabled?: boolean, severity?: 'error' | 'off' }> | undefined} rulesConfig
+ */
+export function isRuleEnabled(code, rulesConfig) {
+  const rule = RULES_BY_CODE.get(code);
+  const defaultOn = rule ? rule.defaultEnabled !== false : true;
+  if (!rulesConfig || !(code in rulesConfig)) return defaultOn;
+  const entry = rulesConfig[code];
+  if (typeof entry === 'boolean') return entry;
+  if (entry && typeof entry === 'object') {
+    if (entry.severity === 'off') return false;
+    if (typeof entry.enabled === 'boolean') return entry.enabled;
+  }
+  return defaultOn;
+}
+
+/**
+ * Formats a structured `GateFinding` into the canonical `[Healer Diff Guard][AITEST-Gxxx] ...` diagnostic string.
+ * @param {{ code: string, message: string, rawFormatted?: string }} finding
+ */
+export function formatFinding(finding) {
+  if (finding.rawFormatted) return finding.rawFormatted;
+  return `[Healer Diff Guard][${finding.code}] ${finding.message}`;
+}
+
+/**
+ * Executes all enabled pluggable gate rules over a base/head comparison context,
+ * returning both structured `findings` and backward-compatible deduplicated `violations` strings.
+ * @param {Record<string, any>} ctx
+ */
+export function evaluateDiffRules(ctx) {
+  const rulesConfig = ctx.rulesConfig || {};
+  const findings = [];
+  const seenKeys = new Set();
+
+  for (const rule of ALL_GATE_RULES) {
+    if (!isRuleEnabled(rule.code, rulesConfig)) continue;
+    const emitted = rule.evaluate(ctx) || [];
+    for (const f of emitted) {
+      const formatted = formatFinding(f);
+      if (seenKeys.has(formatted)) continue;
+      seenKeys.add(formatted);
+      findings.push(f);
+    }
+  }
+
+  return {
+    ok: findings.length === 0,
+    findings,
+    violations: findings.map(formatFinding),
+  };
+}

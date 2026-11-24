@@ -128,6 +128,10 @@ test('Architecture boundary: src/kernel/** only imports node:*, src/core/*, or s
   const graph = new Map();
   for (const file of kernelFiles) {
     const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
+    if (rel.startsWith('src/kernel/gate/')) {
+      const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/).length;
+      assert.ok(lines <= 600, `Kernel gate module ${rel} has ${lines} lines (> 600 ceiling)`);
+    }
     const deps = [];
     for (const spec of extractImports(file)) {
       if (spec.startsWith('node:')) continue;

@@ -58,10 +58,17 @@ export {
 } from './gate/policy.mjs';
 
 export {
+  ALL_GATE_RULES,
   analyzeHealerDiffText,
   analyzeSourceAst,
   classifyAssertionStatement,
+  compareChangesetAst,
   compareSpecSourcesAst,
+  evaluateDiffRules,
+  formatFinding,
+  getGateRuleByCode,
+  isRuleEnabled,
+  parseUnifiedDiffByFile,
   resolveTypeScriptCompiler,
   runGitDiffGuard,
   runStaticSpecChecks,
