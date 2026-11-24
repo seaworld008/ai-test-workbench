@@ -23,7 +23,7 @@ import {
   scanSpecFilesFallback,
   verifyGovernanceLockInQaDir,
   verifyLedgerBindingInQaDir,
-} from '../templates/playwright-qa/scripts/audit-results.mjs';
+} from './kernel/gate-kernel.mjs';
 
 export {
   GATE_KERNEL_VERSION,
@@ -48,6 +48,28 @@ export {
   verifyLedgerBindingInQaDir,
 };
 
+/**
+ * @param {{
+ *   lang?: 'zh' | 'en' | string,
+ *   target?: string,
+ *   qaDir?: string,
+ *   results?: string,
+ *   waivers?: string,
+ *   expectedRunId?: string,
+ *   checkSpecs?: boolean,
+ *   requireE2e?: boolean,
+ *   staticOnly?: boolean,
+ *   allowUnboundResults?: boolean,
+ *   requireCompilers?: boolean,
+ *   maxFlaky?: number,
+ *   maxSkipped?: number,
+ *   diffBase?: string,
+ *   json?: boolean,
+ *   dryRun?: boolean,
+ *   force?: boolean,
+ * }} [options]
+ * @returns {Promise<number>}
+ */
 export async function runAuditCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   const target = options.target ? path.resolve(options.target) : null;
@@ -72,10 +94,12 @@ export async function runAuditCommand(options = {}) {
   const res = runAuditForQaDir(qaDir, {
     resultsPath: options.results,
     waiversPath: options.waivers,
+    expectedRunId: options.expectedRunId,
     checkSpecs: Boolean(options.checkSpecs),
     requireE2e: Boolean(options.requireE2e),
     staticOnly: Boolean(options.staticOnly),
     allowUnboundResults: allowUnbound,
+    ...(options.requireCompilers !== undefined ? { requireCompilers: Boolean(options.requireCompilers) } : {}),
     maxFlaky: options.maxFlaky,
     maxSkipped: options.maxSkipped,
     diffBase: options.diffBase,

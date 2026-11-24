@@ -1,0 +1,26 @@
+/**
+ * TypeScript Compiler API AST Semantic Rule Engine Facade (`AITEST-G101` .. `AITEST-G115`).
+ *
+ * Modularized into single-responsibility components (ADR-0004):
+ * - `ts-loader.mjs`     — TypeScript compiler resolution & AST utilities
+ * - `lattice.mjs`       — S0..S5 assertion strength lattice & oracle classifiers
+ * - `parser.mjs`        — Scope-aware AST fact extractor (`top-level/describe/hook/test/browser-evaluate`)
+ * - `rules/*.mjs`       — 15 pluggable, individually toggleable GateRule modules
+ * - `diff-parser.mjs`   — Unified diff hunk parser & text diff guard
+ * - `changeset.mjs`     — Single-file and commit-level multi-file AST diff guard
+ * - `static-runner.mjs` — Layer 2 tsc/eslint + AST static spec scanner
+ */
+
+export { resolveTypeScriptCompiler } from './ts-loader.mjs';
+export { classifyAssertionStatement } from './lattice.mjs';
+export { analyzeSourceAst } from './parser.mjs';
+export { analyzeHealerDiffText, parseUnifiedDiffByFile } from './diff-parser.mjs';
+export { compareChangesetAst, compareSpecSourcesAst, runGitDiffGuard } from './changeset.mjs';
+export { runStaticSpecChecks, scanSpecFilesFallback } from './static-runner.mjs';
+export {
+  ALL_GATE_RULES,
+  evaluateDiffRules,
+  formatFinding,
+  getGateRuleByCode,
+  isRuleEnabled,
+} from './rules/index.mjs';

@@ -16,10 +16,12 @@ import { parseWorkspaceRoots } from './security.mjs';
  * - Fail-closed workspace roots defaulting to `[defaultTarget || process.cwd()]`.
  * - Per-request error isolation so malformed frames never crash the server.
  * - Clean process-tree cleanup (`jobManager.killAll()`) on stdin EOF, SIGINT, or SIGTERM.
+ * @param {{ defaultTarget?: string | null, lang?: string | null, workspaceRoots?: string | string[] }} [options]
+ * @returns {Promise<number>}
  */
 export function startStdioMcpServer(options = {}) {
   const rawStdoutWrite = process.stdout.write.bind(process.stdout);
-  const sendFrame = (obj) => {
+  const sendFrame = (/** @type {unknown} */ obj) => {
     if (obj !== null && obj !== undefined) {
       rawStdoutWrite(JSON.stringify(obj) + '\n');
     }
@@ -36,7 +38,7 @@ export function startStdioMcpServer(options = {}) {
     defaultTarget,
     defaultLang: options.lang || null,
     workspaceRoots,
-    clientRoots: [],
+    clientRoots: /** @type {string[]} */ ([]),
     protocolVersion: SUPPORTED_MCP_VERSIONS[0],
     initialized: false,
     logLevel: 'info',
@@ -88,7 +90,13 @@ export function startStdioMcpServer(options = {}) {
         const res = await handleMcpJsonRpcMessage(payload, ctx, { onNotification: sendFrame });
         if (res !== null) sendFrame(res);
       } catch (err) {
-        sendFrame(rpcError(payload?.id ?? null, -32603, `Transport error: ${err?.message || String(err)}`));
+        sendFrame(
+          rpcError(
+            payload?.id ?? null,
+            -32603,
+            `Transport error: ${err instanceof Error && err.message ? err.message : String(err)}`
+          )
+        );
       }
     })();
   });

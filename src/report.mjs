@@ -3,7 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
 
+/**
+ * @param {string} dir
+ * @returns {string[]}
+ */
 function findTraceZips(dir) {
+  /** @type {string[]} */
   const found = [];
   if (!fs.existsSync(dir)) return found;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -14,6 +19,10 @@ function findTraceZips(dir) {
   return found;
 }
 
+/**
+ * @param {{ lang?: string, target?: string, qaDir?: string, dryRun?: boolean, force?: boolean, json?: boolean }} [options]
+ * @returns {Promise<number>}
+ */
 export async function runReportCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   if (!options.target) {
@@ -71,9 +80,10 @@ export async function runReportCommand(options = {}) {
       payload.verdictSummary
   );
 
+  const exitCode = hasAny ? 0 : 1;
   if (options.json) {
-    console.log(JSON.stringify(payload, null, 2));
-    return hasAny ? 0 : 1;
+    console.log(JSON.stringify({ ok: hasAny, exitCode, ...payload }, null, 2));
+    return exitCode;
   }
 
   console.log(`\n=== ${lang === 'zh' ? '本地测试报告、知识图谱与证据索引 (report)' : 'Local Test Reports, Code Map & Artifacts'} ===`);

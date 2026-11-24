@@ -7,7 +7,7 @@
     {
       "scenario": "completion-complete",
       "category": "optional-capability-not-implemented",
-      "reason": "Server intentionally does not declare or implement the optional MCP completion/complete capability; see ADR-001 (docs/adr/mcp-zero-dependency.md).",
+      "reason": "Server intentionally does not declare or implement the optional MCP completion/complete capability; see ADR-0001 (docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md).",
       "issue": "https://github.com/seaworld008/ai-test-workbench/issues"
     },
     {
@@ -49,37 +49,37 @@
     {
       "scenario": "tools-call-simple-text",
       "category": "conformance-fixture-not-applicable",
-      "reason": "Upstream conformance scenario invokes hardcoded Everything Server fixture tool 'test_simple_text'; production server exposes 21 aitest_* tools (verified directly via @modelcontextprotocol/sdk Client tests).",
+      "reason": "Upstream conformance scenario invokes hardcoded Everything Server fixture tool 'test_simple_text'; production server exposes 17 aitest_* tools (verified directly via @modelcontextprotocol/sdk Client tests).",
       "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
     },
     {
       "scenario": "tools-call-image",
       "category": "conformance-fixture-not-applicable",
-      "reason": "Upstream conformance scenario invokes hardcoded fixture tool 'test_image_content'; production server exposes 21 aitest_* tools and does not register dummy fixture tools.",
+      "reason": "Upstream conformance scenario invokes hardcoded fixture tool 'test_image_content'; production server exposes 17 aitest_* tools and does not register dummy fixture tools.",
       "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
     },
     {
       "scenario": "tools-call-audio",
       "category": "conformance-fixture-not-applicable",
-      "reason": "Upstream conformance scenario invokes hardcoded fixture tool 'test_audio_content'; production server exposes 21 aitest_* tools.",
+      "reason": "Upstream conformance scenario invokes hardcoded fixture tool 'test_audio_content'; production server exposes 17 aitest_* tools.",
       "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
     },
     {
       "scenario": "tools-call-embedded-resource",
       "category": "conformance-fixture-not-applicable",
-      "reason": "Upstream conformance scenario invokes hardcoded fixture tool 'test_embedded_resource'; production server exposes 21 aitest_* tools.",
+      "reason": "Upstream conformance scenario invokes hardcoded fixture tool 'test_embedded_resource'; production server exposes 17 aitest_* tools.",
       "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
     },
     {
       "scenario": "tools-call-mixed-content",
       "category": "conformance-fixture-not-applicable",
-      "reason": "Upstream conformance scenario invokes hardcoded fixture tool 'test_multiple_content_types'; production server exposes 21 aitest_* tools.",
+      "reason": "Upstream conformance scenario invokes hardcoded fixture tool 'test_multiple_content_types'; production server exposes 17 aitest_* tools.",
       "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
     },
     {
       "scenario": "tools-call-with-logging",
       "category": "conformance-fixture-not-applicable",
-      "reason": "Upstream conformance scenario invokes hardcoded fixture tool 'test_tool_with_logging'; production server exposes 21 aitest_* tools.",
+      "reason": "Upstream conformance scenario invokes hardcoded fixture tool 'test_tool_with_logging'; production server exposes 17 aitest_* tools.",
       "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
     },
     {

@@ -2,10 +2,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
-import { SCHEMA_VERSIONS } from './version.mjs';
+import { groupOutcomesBySpecFile } from './core/playwright-results.mjs';
+import { SCHEMA_VERSIONS } from './core/version.mjs';
 
 const REQ_ID_RE = /\b(REQ-[A-Z0-9]+(?:-[A-Z0-9]+)*)\b/g;
 
+/**
+ * @param {string} dir
+ * @param {(name: string) => boolean} extPredicate
+ * @param {string[]} [out]
+ * @returns {string[]}
+ */
 function walkFilesByExt(dir, extPredicate, out = []) {
   if (!fs.existsSync(dir)) return out;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -94,23 +101,7 @@ export function buildRequirementTraceMatrix(qaDir) {
   if (fs.existsSync(resultsPath)) {
     try {
       const resultsObj = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
-      /** @type {Map<string, { passed: number, failed: number }>} */
-      const fileStatus = new Map();
-      const walkSuite = (s, fileHint = '') => {
-        const cur = String(s.file || fileHint).replace(/\\/g, '/');
-        for (const sp of s.specs || []) {
-          const f = String(sp.file || cur).replace(/\\/g, '/');
-          const norm = f.startsWith('tests/') ? f : `tests/${f}`;
-          const prev = fileStatus.get(norm) || { passed: 0, failed: 0 };
-          for (const t of sp.tests || []) {
-            if (t.status === 'expected') prev.passed += 1;
-            else if (t.status === 'unexpected' || t.status === 'flaky') prev.failed += 1;
-          }
-          fileStatus.set(norm, prev);
-        }
-        for (const c of s.suites || []) walkSuite(c, cur);
-      };
-      for (const s of resultsObj.suites || []) walkSuite(s);
+      const fileStatus = groupOutcomesBySpecFile(resultsObj);
 
       for (const rec of requirements.values()) {
         if (rec.linkedTests.length === 0) continue;
@@ -119,7 +110,7 @@ export function buildRequirementTraceMatrix(qaDir) {
         for (const tf of rec.linkedTests) {
           const st = fileStatus.get(tf);
           if (!st) continue;
-          if (st.failed > 0) anyFail = true;
+          if (st.failed > 0 || st.flaky > 0) anyFail = true;
           else if (st.passed > 0) anyPass = true;
         }
         if (anyFail) rec.status = 'failed';
@@ -146,6 +137,11 @@ export function buildRequirementTraceMatrix(qaDir) {
   };
 }
 
+/**
+ * @param {{ generatedAt: string, coveredRequirements: number, totalRequirements: number, coveragePct: number, requirements: Array<{ reqId: string, specDoc: string, title: string, linkedTests: string[], status: string }> }} matrix
+ * @param {string} [lang]
+ * @returns {string}
+ */
 export function renderTraceMatrixMarkdown(matrix, lang = 'zh') {
   const isZh = lang === 'zh';
   const lines = [
@@ -167,6 +163,10 @@ export function renderTraceMatrixMarkdown(matrix, lang = 'zh') {
   return lines.join('\n');
 }
 
+/**
+ * @param {{ lang?: string, target?: string, qaDir?: string, dryRun?: boolean, force?: boolean, json?: boolean }} [options]
+ * @returns {Promise<number>}
+ */
 export async function runTraceMatrixCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   if (!options.target) {
@@ -188,7 +188,7 @@ export async function runTraceMatrixCommand(options = {}) {
   }
 
   if (options.json) {
-    console.log(JSON.stringify(matrix, null, 2));
+    console.log(JSON.stringify({ ok: true, exitCode: 0, ...matrix }, null, 2));
     return 0;
   }
   console.log(

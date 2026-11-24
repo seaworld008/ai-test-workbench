@@ -17,11 +17,13 @@ import {
   verifyBearerTokenConstantTime,
 } from './security.mjs';
 
+/** @param {http.IncomingMessage} req @param {number} [maxBytes] @returns {Promise<string>} */
 function readHttpBody(req, maxBytes = 2 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     let size = 0;
+    /** @type {Buffer[]} */
     const chunks = [];
-    req.on('data', (chunk) => {
+    req.on('data', (/** @type {Buffer} */ chunk) => {
       size += chunk.length;
       if (size > maxBytes) {
         reject(new Error('Request body too large'));
@@ -44,6 +46,11 @@ function readHttpBody(req, maxBytes = 2 * 1024 * 1024) {
  * - Legacy `/sse` sessions now enforce TTL + maxSessions cap.
  * - Per-request try/catch prevents malformed requests from crashing the server.
  * - Shutdown kills all running child job process trees and closes all open SSE sockets immediately.
+ * @param {{
+ *   host?: string, port?: number, authToken?: string, sessionTtlMs?: number, maxSessions?: number,
+ *   workspaceRoots?: string | string[], defaultTarget?: string | null, lang?: string | null,
+ *   allowedOrigins?: string[], jobManager?: McpJobManager,
+ * }} [options]
  */
 export function createMcpHttpServer(options = {}) {
   const host = options.host || '127.0.0.1';
@@ -58,12 +65,13 @@ export function createMcpHttpServer(options = {}) {
   }
 
   const sharedJobManager = options.jobManager || new McpJobManager();
+  /** @param {string} sessionId @param {((frame: any) => void) | null} [sendNotification] */
   const makeBaseCtx = (sessionId, sendNotification = null) => ({
     sessionId,
     defaultTarget: options.defaultTarget ? path.resolve(options.defaultTarget) : null,
     defaultLang: options.lang || null,
     workspaceRoots,
-    clientRoots: [],
+    clientRoots: /** @type {string[]} */ ([]),
     protocolVersion: SUPPORTED_MCP_VERSIONS[0],
     initialized: false,
     logLevel: 'info',
@@ -71,7 +79,9 @@ export function createMcpHttpServer(options = {}) {
     sendNotification,
   });
 
+  /** @type {Map<string, { ctx: Record<string, any>, sseRes: http.ServerResponse | null, sseKeepalive: NodeJS.Timeout | null, createdAt: number, lastActiveAt: number }>} */
   const streamableSessions = new Map();
+  /** @type {Map<string, { res: http.ServerResponse, ctx: Record<string, any>, keepalive: NodeJS.Timeout, createdAt: number, lastActiveAt: number }>} */
   const legacySseSessions = new Map();
 
   const pruneExpiredSessions = () => {
@@ -92,6 +102,7 @@ export function createMcpHttpServer(options = {}) {
   };
 
   // Evict LRU ONLY when allocating a new session (`M-09`)!
+  /** @template T @param {Map<string, T>} map @param {(entry: T | undefined) => void} closeEntry */
   const ensureCapacityForNewSession = (map, closeEntry) => {
     pruneExpiredSessions();
     while (map.size >= maxSessions) {
@@ -102,6 +113,7 @@ export function createMcpHttpServer(options = {}) {
     }
   };
 
+  /** @param {http.ServerResponse} res @param {number} status @param {unknown} body @param {Record<string, string>} [extraHeaders] */
   const sendJson = (res, status, body, extraHeaders = {}) => {
     if (res.writableEnded) return;
     const payload = JSON.stringify(body);
@@ -165,7 +177,7 @@ export function createMcpHttpServer(options = {}) {
         const keepalive = setInterval(() => {
           if (!res.writableEnded) res.write(': keepalive\n\n');
         }, 15_000);
-        const notifyFn = (frame) => {
+        const notifyFn = (/** @type {any} */ frame) => {
           if (!res.writableEnded) res.write(`event: message\ndata: ${JSON.stringify(frame)}\n\n`);
         };
         const now = Date.now();
@@ -198,7 +210,7 @@ export function createMcpHttpServer(options = {}) {
         try {
           payload = JSON.parse(await readHttpBody(req));
         } catch (err) {
-          sendJson(res, 400, rpcError(null, -32700, err.message));
+          sendJson(res, 400, rpcError(null, -32700, err instanceof Error ? err.message : String(err)));
           return;
         }
 
@@ -219,7 +231,8 @@ export function createMcpHttpServer(options = {}) {
               }
             } catch (err) {
               if (!session.res.writableEnded) {
-                const errFrame = rpcError(item?.id ?? null, -32603, `Internal SSE dispatch error: ${err?.message || String(err)}`);
+                const msg = err instanceof Error && err.message ? err.message : String(err);
+                const errFrame = rpcError(item?.id ?? null, -32603, `Internal SSE dispatch error: ${msg}`);
                 session.res.write(`event: message\ndata: ${JSON.stringify(errFrame)}\n\n`);
               }
             }
@@ -234,11 +247,11 @@ export function createMcpHttpServer(options = {}) {
 
         if (req.method === 'DELETE') {
           const sid = req.headers['mcp-session-id'] ? String(req.headers['mcp-session-id']) : null;
-          if (!sid || !streamableSessions.has(sid)) {
+          const s = sid ? streamableSessions.get(sid) : undefined;
+          if (!sid || !s) {
             sendJson(res, 404, { error: 'Unknown or expired Mcp-Session-Id' });
             return;
           }
-          const s = streamableSessions.get(sid);
           if (s.sseRes && !s.sseRes.writableEnded) s.sseRes.end();
           streamableSessions.delete(sid);
           sendJson(res, 200, { ok: true, closed: true });
@@ -247,11 +260,11 @@ export function createMcpHttpServer(options = {}) {
 
         if (req.method === 'GET') {
           const sid = req.headers['mcp-session-id'] ? String(req.headers['mcp-session-id']) : null;
-          if (!sid || !streamableSessions.has(sid)) {
+          const session = sid ? streamableSessions.get(sid) : undefined;
+          if (!sid || !session) {
             sendJson(res, 404, { error: 'Unknown or expired Mcp-Session-Id; initialize session first' });
             return;
           }
-          const session = streamableSessions.get(sid);
           session.lastActiveAt = Date.now();
           res.writeHead(200, {
             'Content-Type': 'text/event-stream; charset=utf-8',
@@ -274,12 +287,13 @@ export function createMcpHttpServer(options = {}) {
           try {
             payload = JSON.parse(await readHttpBody(req));
           } catch (err) {
-            sendJson(res, 400, rpcError(null, -32700, err.message));
+            sendJson(res, 400, rpcError(null, -32700, err instanceof Error ? err.message : String(err)));
             return;
           }
 
           const isInitCall = !Array.isArray(payload) && payload?.method === 'initialize';
           let sid = req.headers['mcp-session-id'] ? String(req.headers['mcp-session-id']) : null;
+          let session;
 
           if (isInitCall) {
             ensureCapacityForNewSession(streamableSessions, (s) => {
@@ -295,14 +309,16 @@ export function createMcpHttpServer(options = {}) {
               createdAt: Date.now(),
               lastActiveAt: Date.now(),
             };
-            sessionEntry.ctx = makeBaseCtx(sid, (frame) => {
+            sessionEntry.ctx = makeBaseCtx(sid, (/** @type {any} */ frame) => {
               if (sessionEntry.sseRes && !sessionEntry.sseRes.writableEnded) {
                 sessionEntry.sseRes.write(`event: message\ndata: ${JSON.stringify(frame)}\n\n`);
               }
             });
             streamableSessions.set(sid, sessionEntry);
+            session = sessionEntry;
           } else {
-            if (!sid || !streamableSessions.has(sid)) {
+            session = sid ? streamableSessions.get(sid) : undefined;
+            if (!sid || !session) {
               sendJson(res, 404, {
                 error: 'Missing or unknown Mcp-Session-Id. Streamable HTTP requires calling "initialize" first.',
               });
@@ -310,7 +326,6 @@ export function createMcpHttpServer(options = {}) {
             }
           }
 
-          const session = streamableSessions.get(sid);
           session.lastActiveAt = Date.now();
 
           if (Array.isArray(payload)) {
@@ -372,7 +387,7 @@ export function createMcpHttpServer(options = {}) {
                 sseHeadersSent = true;
               }
             };
-            const perRequestNotify = (frame) => {
+            const perRequestNotify = (/** @type {any} */ frame) => {
               ensureSseHeaders();
               if (!res.writableEnded) {
                 res.write(`event: message\ndata: ${JSON.stringify(frame)}\n\n`);
@@ -423,7 +438,8 @@ export function createMcpHttpServer(options = {}) {
 
       sendJson(res, 404, { error: 'Not Found' });
     } catch (err) {
-      sendJson(res, 500, rpcError(null, -32603, `Internal HTTP transport error: ${err?.message || String(err)}`));
+      const msg = err instanceof Error && err.message ? err.message : String(err);
+      sendJson(res, 500, rpcError(null, -32603, `Internal HTTP transport error: ${msg}`));
     }
   });
 

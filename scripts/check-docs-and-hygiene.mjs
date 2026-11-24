@@ -3,8 +3,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { CLI_COMMANDS } from '../src/cli/commands.mjs';
 import { TOOL_REGISTRY } from '../src/mcp/registry.mjs';
 import { WORKBENCH_VERSION } from '../src/version.mjs';
+import { GENERATED_DOC_TARGETS, syncGeneratedDocs } from './generate-docs.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_REPO_ROOT = path.resolve(__dirname, '..');
@@ -48,23 +50,44 @@ function loadOptionalExternalBlocklist() {
   }
 }
 
-const SPECIAL_EN_PAIRS = {
-  'Playwright Test Agents + Codex 可复用本机 AI 自动化测试工作台——架构设计与实施提示词.md':
-    'docs/architecture-and-prompts-blueprint.en.md',
-};
+const ACTIVE_MCP_TOOL_DOCS = new Set(GENERATED_DOC_TARGETS);
 
-const ACTIVE_MCP_TOOL_DOCS = new Set([
-  'AGENTS.md',
-  'AGENTS.en.md',
+/**
+ * Canonical MCP tool registry only (`v6.0.0`, 17 tools).
+ * Active Agent/MCP docs MUST NOT advertise deprecated v5 tool aliases (`aitest_heal_*` / `aitest_job_*`).
+ */
+const CANONICAL_MCP_TOOLS = new Set(TOOL_REGISTRY.map((t) => t.name));
+
+/**
+ * Core active bilingual pairs whose top-level `## ` heading counts must stay in strict 1:1 parity.
+ */
+const BILINGUAL_STRUCTURE_PAIRS = [
   'README.md',
-  'README.en.md',
-  'skills/ai-test-workbench/SKILL.md',
-  'skills/ai-test-workbench/SKILL.zh-CN.md',
+  'AGENTS.md',
+  'ARCHITECTURE.md',
+  'VERSION.md',
+  'docs/governance.md',
+  'docs/upgrade.md',
+  'docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md',
+  'docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.md',
+  'docs/adr/0003-strict-checkjs-type-safety.md',
+  'docs/adr/0004-pluggable-ast-gate-and-fp-governance.md',
+  'docs/adr/0005-mcp-surface-outcome-and-config.md',
+  'docs/review/v6-refactor-assessment.md',
   'skills/ai-test-workbench/references/mcp-server-protocol.md',
-  'skills/ai-test-workbench/references/mcp-server-protocol.en.md',
-]);
+  'skills/ai-test-workbench/references/healer-governance.md',
+];
 
-const REGISTERED_MCP_TOOLS = new Set(TOOL_REGISTRY.map((t) => t.name));
+const CODE_REF_VERIFIED_DOCS = new Set([
+  'ARCHITECTURE.md',
+  'ARCHITECTURE.en.md',
+  'VERSION.md',
+  'VERSION.en.md',
+  'docs/governance.md',
+  'docs/governance.en.md',
+  'docs/history/v5-verification-scorecard.md',
+  'docs/history/v5-verification-scorecard.en.md',
+]);
 
 const CHINESE_CHAR_RE = /[\u4e00-\u9fff]/;
 
@@ -101,6 +124,11 @@ function stripMarkdownFences(mdText) {
   return String(mdText || '').replace(/```[\s\S]*?```/g, '');
 }
 
+function countH2Headings(mdText) {
+  const cleaned = stripMarkdownFences(mdText);
+  return (cleaned.match(/^##\s+.+$/gm) || []).length;
+}
+
 function shouldEnforceBilingualPair(relPath) {
   const norm = relPath.replace(/\\/g, '/');
   if (!norm.endsWith('.md') || norm.endsWith('.en.md')) return false;
@@ -110,6 +138,17 @@ function shouldEnforceBilingualPair(relPath) {
     return false;
   }
   return true;
+}
+
+function isHistoricalOrExemptDoc(relPath) {
+  const norm = relPath.replace(/\\/g, '/');
+  return (
+    norm.startsWith('docs/review/') ||
+    norm.startsWith('docs/history/') ||
+    norm.startsWith('bench/real-world/') ||
+    norm === 'CHANGELOG.md' ||
+    norm === 'CHANGELOG.en.md'
+  );
 }
 
 function validateRelativeLinks(rootDir, relPath, mdText, errors) {
@@ -143,27 +182,26 @@ function validateRelativeLinks(rootDir, relPath, mdText, errors) {
 
 /**
  * Validates that every backticked `aitest_<tool>` identifier in active Agent/MCP docs exists
- * in the live MCP `TOOL_REGISTRY` (`Q-04`).
+ * in the canonical 17-tool MCP `TOOL_REGISTRY` (rejecting both unknown and deprecated v5 names).
  */
 function validateDocumentedMcpToolNames(relPath, mdText, errors) {
   const toolMentionRe = /`(aitest_[a-z][a-z0-9_]+)`/g;
   const seenUnknown = new Set();
   for (const m of mdText.matchAll(toolMentionRe)) {
     const name = m[1];
-    // Ignore wildcard documentation patterns like `aitest_heal_*` (won't match `[a-z0-9_]+` anyway)
-    if (!REGISTERED_MCP_TOOLS.has(name) && !seenUnknown.has(name)) {
+    if (!CANONICAL_MCP_TOOLS.has(name) && !seenUnknown.has(name)) {
       seenUnknown.add(name);
       errors.push(
-        `[Unknown MCP Tool in Docs] ${relPath} references \`${name}\`, which is NOT registered in TOOL_REGISTRY.`
+        `[Unknown MCP Tool in Docs] ${relPath} references \`${name}\`, which is NOT a canonical tool in TOOL_REGISTRY.`
       );
     }
   }
 }
 
 /**
- * Validates backticked `test/*.mjs` / `src/*.mjs` paths in scorecards exist on disk (`Q-05`).
+ * Validates backticked `src/*.mjs` / `test/*.mjs` / `scripts/*.mjs` paths in key technical docs exist on disk.
  */
-function validateScorecardFileRefs(rootDir, relPath, mdText, errors) {
+function validateCodeFileRefs(rootDir, relPath, mdText, errors) {
   const refRe = /`((?:src|test|scripts)\/[a-zA-Z0-9._/-]+\.mjs)`/g;
   for (const m of mdText.matchAll(refRe)) {
     const refPath = m[1];
@@ -176,9 +214,54 @@ function validateScorecardFileRefs(rootDir, relPath, mdText, errors) {
 }
 
 const CLI_SUBCOMMANDS_RE =
-  /(?:^|[\s`"'(\[])aitest\s+(?:doctor|init|auth-login|explore|map|mcp|mcp-serve|perf|run|impact|audit|diagnose|verify-change|heal|flaky|trace-matrix|governance|report|update-agents|skill-install|attest|--help|--version|<cmd>|<command>)(?=[\s`"'.,;:)\]]|$)/m;
+  /(?:^|[\s`"'(\[])aitest\s+(?:doctor|init|upgrade|auth-login|explore|map|mcp|mcp-serve|perf|run|impact|audit|diagnose|verify-change|heal|flaky|trace-matrix|governance|report|update-agents|skill-install|attest|--help|--version|<cmd>|<command>)(?=[\s`"'.,;:)\]]|$)/m;
 const UNPINNED_NPX_RE = /\bnpx\s+(?:-y|--yes)\s+ai-test-workbench(?![@\d])/i;
 const PINNED_PKG_VER_RE = /ai-test-workbench@(\d+\.\d+\.\d+)/g;
+
+const CLI_INVOCATION_RE =
+  /(?:npx\s+(?:--package=[^\s]+\s+)?ai-test-workbench(?:@[\d.]+)?|(?<![a-zA-Z0-9_.-])aitw|node\s+tools\/aitest\.mjs)\s+([a-z][a-z0-9-]*)([^\n`]*)/g;
+
+/**
+ * Validates that every documented CLI invocation in active docs uses a registered subcommand
+ * and only flags declared in `CLI_COMMANDS[cmd].options` (rejecting invalid or deprecated flags).
+ */
+function validateCliFlagsInDocs(relPath, mdText, errors) {
+  if (isHistoricalOrExemptDoc(relPath)) return;
+  const joined = String(mdText || '').replace(/\\\r?\n[ \t]*/g, ' ');
+  const seen = new Set();
+
+  for (const m of joined.matchAll(CLI_INVOCATION_RE)) {
+    const cmd = m[1];
+    if (cmd === 'cmd' || cmd === 'command') continue;
+    const entry = CLI_COMMANDS[cmd];
+    if (!entry) {
+      const key = `${cmd}:unknown-cmd`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        errors.push(`[Invalid CLI Command in Docs] ${relPath} invokes unknown CLI subcommand "${cmd}".`);
+      }
+      continue;
+    }
+
+    // Stop at shell chaining operators or markdown table cell separator
+    const tail = m[2].split(/\s*(?:&&|\|\||;|\||#)\s*/)[0] || '';
+    const deprecated = new Set(Object.keys(entry.deprecatedAliases || {}));
+    const allowed = new Set(Object.keys(entry.options || {}).filter((k) => !deprecated.has(k)));
+    for (const fm of tail.matchAll(/(?:^|[\s\[])--([a-z][a-z0-9-]*)(?=[\s=\]]|$)/g)) {
+      const flag = fm[1];
+      if (!allowed.has(flag)) {
+        const key = `${cmd}:--${flag}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          const why = deprecated.has(flag)
+            ? `is deprecated in CLI_COMMANDS.${cmd} (use \`--${entry.deprecatedAliases[flag].replacement}\`)`
+            : `is not an active option in CLI_COMMANDS.${cmd}`;
+          errors.push(`[Invalid CLI Flag in Docs] ${relPath} uses \`--${flag}\` with \`${cmd}\`, which ${why}.`);
+        }
+      }
+    }
+  }
+}
 
 function readExpectedPackageVersion(rootDir) {
   const pkgPath = path.join(rootDir, 'package.json');
@@ -194,21 +277,13 @@ function readExpectedPackageVersion(rootDir) {
 }
 
 /**
- * Enforces Stage 1 release hygiene across active docs:
+ * Enforces release hygiene across active docs:
  * 1. Bans unpinned `npx -y ai-test-workbench` (must pin `@<version>`).
  * 2. Bans removed `aitest <cmd>` CLI binary in examples (use `npx ai-test-workbench@<ver>`, `aitw`, or `node tools/aitest.mjs`).
  * 3. Ensures every `ai-test-workbench@<x.y.z>` version pin matches `package.json` `version`.
  */
 function validateCliCommandAndVersionConsistency(relPath, mdText, expectedVersion, errors) {
-  const norm = relPath.replace(/\\/g, '/');
-  if (
-    norm.startsWith('docs/review/') ||
-    norm.startsWith('bench/real-world/') ||
-    norm === 'CHANGELOG.md' ||
-    norm === 'CHANGELOG.en.md'
-  ) {
-    return;
-  }
+  if (isHistoricalOrExemptDoc(relPath)) return;
   if (UNPINNED_NPX_RE.test(mdText)) {
     errors.push(
       `[Unpinned npx in Docs] ${relPath} uses bare \`npx -y ai-test-workbench\`; pin an exact version (\`npx ai-test-workbench@${expectedVersion}\`).`
@@ -227,6 +302,25 @@ function validateCliCommandAndVersionConsistency(relPath, mdText, expectedVersio
       seenMismatch.add(foundVer);
       errors.push(
         `[Doc Version Mismatch] ${relPath} pins \`ai-test-workbench@${foundVer}\`, which does not match package.json version \`${expectedVersion}\`.`
+      );
+    }
+  }
+}
+
+/**
+ * Enforces top-level `## ` heading parity between core Chinese docs and their paired `.en.md` docs.
+ */
+function validateBilingualStructureParity(rootDir, errors) {
+  for (const zhRel of BILINGUAL_STRUCTURE_PAIRS) {
+    const enRel = `${zhRel.slice(0, -3)}.en.md`;
+    const zhPath = path.join(rootDir, zhRel);
+    const enPath = path.join(rootDir, enRel);
+    if (!fs.existsSync(zhPath) || !fs.existsSync(enPath)) continue;
+    const zhCount = countH2Headings(fs.readFileSync(zhPath, 'utf8'));
+    const enCount = countH2Headings(fs.readFileSync(enPath, 'utf8'));
+    if (zhCount !== enCount) {
+      errors.push(
+        `[Bilingual Structure Drift] ${zhRel} has ${zhCount} H2 section(s) while ${enRel} has ${enCount}. Keep bilingual structure in sync.`
       );
     }
   }
@@ -279,25 +373,41 @@ export function checkDocsAndHygiene(rootDir = DEFAULT_REPO_ROOT) {
         checkedMd.push(rel);
         validateRelativeLinks(rootDir, rel, content, errors);
         validateCliCommandAndVersionConsistency(rel, content, expectedPkgVersion, errors);
+        validateCliFlagsInDocs(rel, content, errors);
 
         if (ACTIVE_MCP_TOOL_DOCS.has(rel)) {
           validateDocumentedMcpToolNames(rel, content, errors);
         }
 
-        if (rel === 'docs/review/v5-verification-scorecard.md' || rel === 'docs/review/v5-verification-scorecard.en.md') {
-          validateScorecardFileRefs(rootDir, rel, content, errors);
+        if (CODE_REF_VERIFIED_DOCS.has(rel)) {
+          validateCodeFileRefs(rootDir, rel, content, errors);
         }
 
         if (shouldEnforceBilingualPair(rel)) {
           if (!CHINESE_CHAR_RE.test(content)) {
             errors.push(`[Chinese Default Missing] ${rel} must default to Simplified Chinese.`);
           }
-          const expectedEn = SPECIAL_EN_PAIRS[rel] || `${rel.slice(0, -3)}.en.md`;
+          const expectedEn = `${rel.slice(0, -3)}.en.md`;
           if (!fs.existsSync(path.join(rootDir, expectedEn))) {
             errors.push(`[Missing English Pair] ${rel} requires paired English file: ${expectedEn}`);
           }
         }
       }
+    }
+  }
+
+  // Enforce bilingual H2 structure parity across core paired docs
+  validateBilingualStructureParity(rootDir, errors);
+
+  // Enforce generated MCP tool tables parity whenever the repository contains generated-doc markers
+  const readmePath = path.join(rootDir, 'README.md');
+  if (fs.existsSync(readmePath) && fs.readFileSync(readmePath, 'utf8').includes('BEGIN:GENERATED_MCP_TOOLS')) {
+    const genRes = syncGeneratedDocs({ rootDir, checkOnly: true });
+    for (const missing of genRes.missingMarkers) {
+      errors.push(`[Generated Docs Missing Marker] ${missing}`);
+    }
+    for (const drifted of genRes.drifted) {
+      errors.push(`[Generated Docs Drift] ${drifted} is out of date with src/mcp/registry.mjs; run "npm run docs:sync".`);
     }
   }
 
@@ -340,6 +450,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(1);
   }
   console.log(
-    `[Docs & Hygiene OK] Verified ${res.checkedMarkdownCount} Markdown doc(s) (Chinese-default + paired .en.md + valid links + MCP tool registry parity) and scanned ${res.hygieneScannedCount} file(s) with 0 hygiene issues.`
+    `[Docs & Hygiene OK] Verified ${res.checkedMarkdownCount} Markdown doc(s) (Chinese-default + paired .en.md + H2 parity + valid links + CLI flags + canonical 17-tool registry) and scanned ${res.hygieneScannedCount} file(s) with 0 hygiene issues.`
   );
 }

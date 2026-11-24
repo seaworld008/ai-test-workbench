@@ -27,7 +27,7 @@ Onboard AI Test Workbench onto this repository using MCP tools:
 ```text
 Run zero-to-one read-only exploration and create a deep test plan:
 1. If SMS OTP / SSO / CAPTCHA is required, prompt me to run:
-   `npx ai-test-workbench@5.1.1 auth-login --target . --base-url <STAGING_URL>`
+   `npx ai-test-workbench@6.0.0 auth-login --target . --base-url <STAGING_URL>`
 2. Once authenticated, call `aitest_explore(target=".", baseUrl="<STAGING_URL>", maxPages=30)` strictly read-only to map portals/switchers, routes, tables, and API errors.
 3. Call `aitest_map_sync` to fuse source code and runtime telemetry into `knowledge/SYSTEM_MAP.md`, then read the `system-overview` and `system-map` resources.
 4. Draft prioritized test plans in `qa/specs/` covering 0/1 empty states, pagination, cross-tenant isolation, and pre-existing bugs without normalizing defects.
@@ -59,7 +59,7 @@ Or `.mcp.json` (always pin an exact version when using `npx` once published):
   "mcpServers": {
     "ai-test-workbench": {
       "command": "npx",
-      "args": ["--package=ai-test-workbench@5.1.1", "ai-test-workbench", "mcp-serve"]
+      "args": ["--package=ai-test-workbench@6.0.0", "ai-test-workbench", "mcp-serve"]
     }
   }
 }
@@ -70,7 +70,7 @@ Or `.mcp.json` (always pin an exact version when using `npx` once published):
 ```toml
 [mcp_servers.ai-test-workbench]
 command = "npx"
-args = ["--package=ai-test-workbench@5.1.1", "ai-test-workbench", "mcp-serve"]
+args = ["--package=ai-test-workbench@6.0.0", "ai-test-workbench", "mcp-serve"]
 ```
 
 ### 3. Cursor / Windsurf / VS Code Copilot / Gemini CLI / Antigravity
@@ -82,7 +82,7 @@ args = ["--package=ai-test-workbench@5.1.1", "ai-test-workbench", "mcp-serve"]
   "mcpServers": {
     "ai-test-workbench": {
       "command": "npx",
-      "args": ["--package=ai-test-workbench@5.1.1", "ai-test-workbench", "mcp-serve"]
+      "args": ["--package=ai-test-workbench@6.0.0", "ai-test-workbench", "mcp-serve"]
     }
   }
 }
@@ -96,7 +96,7 @@ args = ["--package=ai-test-workbench@5.1.1", "ai-test-workbench", "mcp-serve"]
     "ai-test-workbench": {
       "type": "stdio",
       "command": "npx",
-      "args": ["--package=ai-test-workbench@5.1.1", "ai-test-workbench", "mcp-serve"]
+      "args": ["--package=ai-test-workbench@6.0.0", "ai-test-workbench", "mcp-serve"]
     }
   }
 }
@@ -106,10 +106,10 @@ args = ["--package=ai-test-workbench@5.1.1", "ai-test-workbench", "mcp-serve"]
 
 ```bash
 # Local loopback HTTP server (enforces Origin DNS-rebinding protection)
-npx ai-test-workbench@5.1.1 mcp-serve --transport http --port 3847 --target /path/to/your-repo
+npx ai-test-workbench@6.0.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo
 
 # Non-loopback binding requires Bearer token authentication:
-npx ai-test-workbench@5.1.1 mcp-serve --transport http --host 0.0.0.0 --port 3847 --auth-token "$AITEST_MCP_TOKEN"
+npx ai-test-workbench@6.0.0 mcp-serve --transport http --host 0.0.0.0 --port 3847 --auth-token "$AITEST_MCP_TOKEN"
 ```
 
 ```json

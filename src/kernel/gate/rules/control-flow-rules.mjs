@@ -1,0 +1,246 @@
+import { diffEventSnippets } from './governance-rules.mjs';
+
+/**
+ * @typedef {import('./governance-rules.mjs').GateFinding} GateFinding
+ * @typedef {import('./governance-rules.mjs').RuleEvalCtx} RuleEvalCtx
+ * @typedef {import('../parser.mjs').AstEvent} AstEvent
+ */
+
+/**
+ * Counts events per lexical scope key (`testTitle || '<top-level>'`).
+ * @param {AstEvent[] | undefined} events
+ * @param {(ev: AstEvent) => boolean} [predicate]
+ * @returns {Map<string, number>}
+ */
+function countByScope(events, predicate) {
+  /** @type {Map<string, number>} */
+  const counts = new Map();
+  for (const ev of events || []) {
+    if (predicate && !predicate(ev)) continue;
+    const key = ev.testTitle || '<top-level>';
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * AITEST-G105: Added `test.skip`, `test.fixme`, `test.only`, `test.fail`, or `testInfo.skip`.
+ * Distinguishes newly added skips from rewriting the condition of an ALREADY-existing
+ * standalone `test.skip(cond)` in the same scope, and allows runtime capability guards
+ * (`!globalThis.WebSocket`, `process.platform`, `browserName`).
+ */
+export const ruleG105 = {
+  code: 'AITEST-G105',
+  name: 'no-added-skip-or-fail',
+  description: 'Blocks adding test.skip, test.fixme, test.only, or expectation-inverting test.fail calls.',
+  waiverKey: 'skip',
+  defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
+  evaluate(ctx) {
+    const { file = '', baseSum, headSum, canWaive = () => false } = ctx;
+    /** @type {GateFinding[]} */
+    const findings = [];
+    const baseStandaloneByScope = countByScope(
+      baseSum?.events?.skips,
+      (e) => e.kind === 'skip' && Boolean(e.isStandaloneGuard)
+    );
+    const headStandaloneByScope = countByScope(
+      headSum?.events?.skips,
+      (e) => e.kind === 'skip' && Boolean(e.isStandaloneGuard)
+    );
+
+    for (const ev of diffEventSnippets(baseSum?.events?.skips, headSum?.events?.skips)) {
+      if (canWaive(ev.snippet) || canWaive('AITEST-G105')) continue;
+      // Runtime capability guard (`test.skip(!globalThis.WebSocket, ...)`) is not test disabling
+      if (ev.kind === 'skip' && ev.isStandaloneGuard && ev.isCapabilityGuard) continue;
+      // Rewriting an already-existing standalone skip guard condition in the same scope without increasing skip count
+      if (ev.kind === 'skip' && ev.isStandaloneGuard) {
+        const scopeKey = ev.testTitle || '<top-level>';
+        const baseCnt = baseStandaloneByScope.get(scopeKey) || 0;
+        const headCnt = headStandaloneByScope.get(scopeKey) || 0;
+        if (baseCnt > 0 && headCnt <= baseCnt) continue;
+      }
+      findings.push({
+        code: 'AITEST-G105',
+        severity: 'error',
+        file,
+        line: ev.line,
+        testTitle: ev.testTitle || undefined,
+        message: ev.message,
+        evidence: { calleeText: ev.calleeText, snippet: ev.snippet },
+      });
+    }
+    return findings;
+  },
+};
+
+/**
+ * AITEST-G106: Soft assertion weakening (`expect.soft(...)` or `expect.configure({ soft: true })`).
+ */
+export const ruleG106 = {
+  code: 'AITEST-G106',
+  name: 'no-soft-assertion-weakening',
+  description: 'Blocks introducing expect.soft() or expect.configure({ soft: true }).',
+  waiverKey: 'soft-assertion',
+  defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
+  evaluate(ctx) {
+    const { file = '', baseSum, headSum, canWaive = () => false } = ctx;
+    /** @type {GateFinding[]} */
+    const findings = [];
+    for (const ev of diffEventSnippets(baseSum?.events?.softAssertions, headSum?.events?.softAssertions)) {
+      if (canWaive(ev.snippet) || canWaive('AITEST-G106')) continue;
+      findings.push({
+        code: 'AITEST-G106',
+        severity: 'error',
+        file,
+        line: ev.line,
+        testTitle: ev.testTitle || undefined,
+        message: ev.message,
+        evidence: { kind: ev.kind, snippet: ev.snippet },
+      });
+    }
+    return findings;
+  },
+};
+
+/**
+ * AITEST-G107: Swallowed exceptions in `try/catch`, `return` in `finally`, or non-rethrowing `.catch()`.
+ * Scope-aware: ignores browser-context `try/catch` inside `page.evaluate()`/`addInitScript()` and
+ * negative error-assertion blocks (`try { await invalidOp(); } catch (err) { expect(err)... }`).
+ */
+export const ruleG107 = {
+  code: 'AITEST-G107',
+  name: 'no-swallowed-exceptions',
+  description: 'Blocks swallowing exceptions in try/catch, finally-return, or non-rethrowing .catch() handlers.',
+  waiverKey: 'swallowed-catch',
+  defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
+  evaluate(ctx) {
+    const { file = '', baseSum, headSum, canWaive = () => false } = ctx;
+    /** @type {GateFinding[]} */
+    const findings = [];
+    for (const ev of diffEventSnippets(baseSum?.events?.swallowedCatches, headSum?.events?.swallowedCatches)) {
+      if (canWaive(ev.snippet) || canWaive('AITEST-G107')) continue;
+      // Browser-executed helper code inside page.evaluate() cannot swallow Node-side Playwright assertions
+      if (ev.insideBrowserEvaluate) continue;
+      // Negative error-assertion pattern: try invokes action under test (no expect inside try), catch asserts on error
+      if (ev.kind === 'try-catch' && ev.hasAssertionInCatch && !ev.tryContainsAssert) continue;
+      findings.push({
+        code: 'AITEST-G107',
+        severity: 'error',
+        file,
+        line: ev.line,
+        testTitle: ev.testTitle || undefined,
+        message: ev.message,
+        evidence: { kind: ev.kind, scopeKind: ev.scopeKind, snippet: ev.snippet },
+      });
+    }
+    return findings;
+  },
+};
+
+/**
+ * AITEST-G108: Actionability bypass via `{ force: true }`.
+ */
+export const ruleG108 = {
+  code: 'AITEST-G108',
+  name: 'no-force-true',
+  description: 'Blocks adding { force: true } which bypasses Playwright actionability checks.',
+  waiverKey: 'force-true',
+  defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
+  evaluate(ctx) {
+    const { file = '', baseSum, headSum, canWaive = () => false } = ctx;
+    /** @type {GateFinding[]} */
+    const findings = [];
+    for (const ev of diffEventSnippets(baseSum?.events?.forceTrue, headSum?.events?.forceTrue)) {
+      if (canWaive(ev.snippet) || canWaive('AITEST-G108')) continue;
+      findings.push({
+        code: 'AITEST-G108',
+        severity: 'error',
+        file,
+        line: ev.line,
+        testTitle: ev.testTitle || undefined,
+        message: ev.message,
+        evidence: { snippet: ev.snippet },
+      });
+    }
+    return findings;
+  },
+};
+
+/**
+ * AITEST-G109: Retry inflation (`retries >= 1`) or excessive timeout (`>= 60000ms` / `toPass >= 30000ms`).
+ */
+export const ruleG109 = {
+  code: 'AITEST-G109',
+  name: 'no-timeout-or-retry-inflation',
+  description: 'Blocks retry inflation and excessive timeout masks (timeout >= 60s, toPass timeout >= 30s).',
+  waiverKey: 'timeout-inflation',
+  defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
+  evaluate(ctx) {
+    const { file = '', baseSum, headSum, canWaive = () => false } = ctx;
+    /** @type {GateFinding[]} */
+    const findings = [];
+    for (const ev of diffEventSnippets(baseSum?.events?.timeoutOrRetry, headSum?.events?.timeoutOrRetry)) {
+      if (canWaive(ev.snippet) || canWaive('AITEST-G109')) continue;
+      findings.push({
+        code: 'AITEST-G109',
+        severity: 'error',
+        file,
+        line: ev.line,
+        testTitle: ev.testTitle || undefined,
+        message: ev.message,
+        evidence: { snippet: ev.snippet },
+      });
+    }
+    return findings;
+  },
+};
+
+/**
+ * AITEST-G110: Conditional assertions (`if (...) { expect(...) }`, ternary `expect()`, early conditional `return`).
+ * Scope-aware: distinguishes file/describe-level conditional test registration (`if (!isBuild) { test(...) }`)
+ * from in-test conditional assertion wrapping, and distinguishes rewriting an already-existing early-return guard
+ * in the same scope from introducing a new early-return bypass.
+ */
+export const ruleG110 = {
+  code: 'AITEST-G110',
+  name: 'no-conditional-assertions',
+  description: 'Blocks wrapping assertions in conditionals or bypassing assertions via conditional early returns.',
+  waiverKey: 'conditional-assertion',
+  defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
+  evaluate(ctx) {
+    const { file = '', baseSum, headSum, canWaive = () => false } = ctx;
+    /** @type {GateFinding[]} */
+    const findings = [];
+    const baseEarlyByScope = countByScope(baseSum?.events?.conditionalAssertions, (e) => e.kind === 'early-return');
+    const headEarlyByScope = countByScope(headSum?.events?.conditionalAssertions, (e) => e.kind === 'early-return');
+
+    for (const ev of diffEventSnippets(baseSum?.events?.conditionalAssertions, headSum?.events?.conditionalAssertions)) {
+      if (canWaive(ev.snippet) || canWaive('AITEST-G110')) continue;
+      // File/describe-level conditional test registration (`if (!isBuild) { test(...) }`) is NOT an in-test conditional expect
+      if (ev.kind === 'if-wrap' && ev.insideIfInTest === false) continue;
+      // Rewriting an already-existing early-return condition in the same scope without adding new early returns
+      if (ev.kind === 'early-return') {
+        const scopeKey = ev.testTitle || '<top-level>';
+        const baseCnt = baseEarlyByScope.get(scopeKey) || 0;
+        const headCnt = headEarlyByScope.get(scopeKey) || 0;
+        if (baseCnt > 0 && headCnt <= baseCnt) continue;
+      }
+      findings.push({
+        code: 'AITEST-G110',
+        severity: 'error',
+        file,
+        line: ev.line,
+        testTitle: ev.testTitle || undefined,
+        message: ev.message,
+        evidence: { kind: ev.kind, scopeKind: ev.scopeKind, snippet: ev.snippet },
+      });
+    }
+    return findings;
+  },
+};

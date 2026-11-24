@@ -2,34 +2,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
-import { redactSecrets } from './proc.mjs';
-
-function flattenFailedTests(suites, parents = [], fileHint = '') {
-  const failures = [];
-  const nextParents = suites.title ? [...parents, suites.title] : parents;
-  const currentFile = suites.file || fileHint;
-
-  for (const spec of suites.specs || []) {
-    const title = [...nextParents, spec.title].filter(Boolean).join(' > ');
-    for (const testItem of spec.tests || []) {
-      const retryPassed = testItem.status === 'expected' && Array.isArray(testItem.results) && testItem.results.length > 1;
-      if (testItem.status === 'unexpected' || testItem.status === 'flaky' || retryPassed) {
-        failures.push({
-          title,
-          file: spec.file || currentFile || 'unknown',
-          line: spec.line || 0,
-          projectName: testItem.projectName || '',
-          status: retryPassed ? 'flaky' : testItem.status,
-          results: testItem.results || [],
-        });
-      }
-    }
-  }
-  for (const child of suites.suites || []) {
-    failures.push(...flattenFailedTests(child, nextParents, currentFile));
-  }
-  return failures;
-}
+import { flattenPlaywrightResults } from './core/playwright-results.mjs';
+import { redactSecrets } from './core/redact.mjs';
 
 /**
  * Selects the FIRST failing attempt from Playwright `test.results[]` (`D-03`).
@@ -332,7 +306,7 @@ export function suggestFailureCategory(errorText, guardSignals = null, errorObj 
       candidates: ['A'],
       evidence: ['locator-or-action-drift'],
       guidance:
-        'Inspect ARIA snapshot in error-context.md. If UI locator drifted legitimately without business regression, repair semantic locator (max 3 attempts via aitest_heal_begin).',
+        'Inspect ARIA snapshot in error-context.md. If UI locator drifted legitimately without business regression, repair semantic locator (max 3 attempts via aitest_heal(action="begin"|"attempt")).',
     };
   }
 
@@ -348,12 +322,51 @@ export function suggestFailureCategory(errorText, guardSignals = null, errorObj 
   };
 }
 
+/**
+ * @typedef {{
+ *   testId: string,
+ *   title: string,
+ *   file: string,
+ *   line: number,
+ *   projectName: string,
+ *   status: string,
+ *   categoryCode: string,
+ *   category: string,
+ *   confidence: string,
+ *   candidates: string[],
+ *   evidence: string[],
+ *   guidance: string,
+ *   traceId: string | null,
+ *   traceIds: string[],
+ *   traceZipPath: string | null,
+ *   timeWindow: { startedAt?: string, finishedAt?: string } | null,
+ *   errorSnippet: string,
+ *   codeCorrelation: {
+ *     routes: string[],
+ *     frontendFiles: string[],
+ *     backendFiles: string[],
+ *     dbTables: string[],
+ *     apis: string[],
+ *   } | null,
+ * }} DiagnosedFailure
+ */
+
+/**
+ * @param {Record<string, any>} resultObj
+ * @param {string} qaDir
+ */
 function extractAttachmentsAndErrorContext(resultObj, qaDir) {
+  /** @type {string | null} */
   let tracePath = null;
+  /** @type {string | null} */
   let errorContextText = null;
+  /** @type {string[]} */
   let traceIds = [];
+  /** @type {string | null} */
   let injectedTraceId = null;
+  /** @type {{ startedAt?: string, finishedAt?: string } | null} */
   let timeWindow = null;
+  /** @type {{ serverErrors: string[], blockedRequests: string[], pageErrors: string[] } | null} */
   let guardSignals = null;
 
   for (const att of resultObj.attachments || []) {
@@ -410,6 +423,10 @@ function extractAttachmentsAndErrorContext(resultObj, qaDir) {
   };
 }
 
+/**
+ * @param {string} qaDir
+ * @param {string} specFile
+ */
 function loadCodeMapCorrelations(qaDir, specFile) {
   const cmPath = path.join(qaDir, 'knowledge', 'code-map.json');
   if (!fs.existsSync(cmPath)) return null;
@@ -417,15 +434,15 @@ function loadCodeMapCorrelations(qaDir, specFile) {
     const cm = JSON.parse(fs.readFileSync(cmPath, 'utf8'));
     const normalizedSpec = String(specFile || '').replace(/\\/g, '/');
     const matchedRoutes = Object.values(cm.routes || {}).filter((r) =>
-      (r.coveringSpecs || []).some((s) => normalizedSpec.endsWith(s) || s.endsWith(normalizedSpec))
+      (r.coveringSpecs || []).some((/** @type {string} */ s) => normalizedSpec.endsWith(s) || s.endsWith(normalizedSpec))
     );
     if (matchedRoutes.length === 0) return null;
     return {
-      routes: matchedRoutes.map((r) => r.route),
-      frontendFiles: [...new Set(matchedRoutes.map((r) => r.frontendFile).filter(Boolean))],
-      backendFiles: [...new Set(matchedRoutes.flatMap((r) => r.linkedBackendFiles || []))],
-      dbTables: [...new Set(matchedRoutes.flatMap((r) => r.linkedDbTables || []))],
-      apis: [...new Set(matchedRoutes.flatMap((r) => r.linkedApis || []))],
+      routes: /** @type {string[]} */ (matchedRoutes.map((r) => r.route)),
+      frontendFiles: /** @type {string[]} */ ([...new Set(matchedRoutes.map((r) => r.frontendFile).filter(Boolean))]),
+      backendFiles: /** @type {string[]} */ ([...new Set(matchedRoutes.flatMap((r) => r.linkedBackendFiles || []))]),
+      dbTables: /** @type {string[]} */ ([...new Set(matchedRoutes.flatMap((r) => r.linkedDbTables || []))]),
+      apis: /** @type {string[]} */ ([...new Set(matchedRoutes.flatMap((r) => r.linkedApis || []))]),
     };
   } catch {
     return null;
@@ -434,32 +451,42 @@ function loadCodeMapCorrelations(qaDir, specFile) {
 
 /**
  * Structured failure diagnosis returning both Markdown report and typed `diagnosedFailures` array (`D-01..D-03`).
+ * @param {string} qaDir
+ * @param {string} resultsPath
+ * @returns {{ failureCount: number, failures: DiagnosedFailure[], markdown: string }}
  */
 export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
   if (!fs.existsSync(resultsPath)) {
     throw new Error(`Results file not found: ${resultsPath}`);
   }
   const resultsJson = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
-  const failures = [];
-  for (const suite of resultsJson.suites || []) {
-    failures.push(...flattenFailedTests(suite));
-  }
+  const failures = flattenPlaywrightResults(resultsJson)
+    .filter((t) => t.status === 'unexpected' || t.status === 'flaky' || t.retryPassed)
+    .map((t) => ({
+      title: t.title,
+      file: t.file || 'unknown',
+      line: t.line,
+      projectName: t.projectName,
+      status: t.status,
+      results: t.results,
+    }));
 
   const lines = [
     '# AI Test Workbench — Failure Diagnostics Summary (Redacted)',
     '',
     `> Generated at: ${new Date().toISOString()}`,
     '> **Security & Governance Notice**: Credentials in text snippets are automatically redacted, but raw `trace.zip` and video files may still contain rendered session data — treat report directories as sensitive artifacts.',
-    '> **Triage Notice**: Categories below follow evidence-first runtime-guard + matcher triage (Class C value regressions always take precedence over locator Call log). Use `aitest_heal_begin` to enforce A/B/C/D governance; NEVER use `test.skip`, `test.fixme`, or assertion weakening.',
+    '> **Triage Notice**: Categories below follow evidence-first runtime-guard + matcher triage (Class C value regressions always take precedence over locator Call log). Use `aitest_heal(action="begin")` to enforce A/B/C/D governance; NEVER use `test.skip`, `test.fixme`, or assertion weakening.',
     '',
   ];
 
   if (failures.length === 0) {
     lines.push('No unexpected or flaky test failures found in `results.json`.');
-    return { failureCount: 0, failures: [], markdown: lines.join('\n') + '\n' };
+    return { failureCount: 0, failures: /** @type {DiagnosedFailure[]} */ ([]), markdown: lines.join('\n') + '\n' };
   }
 
   lines.push(`Total Failing / Flaky Specs: **${failures.length}**`, '');
+  /** @type {DiagnosedFailure[]} */
   const diagnosedFailures = [];
 
   failures.forEach((f, idx) => {
@@ -469,7 +496,7 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
     const rawErr =
       failedResult.error?.stack ||
       failedResult.error?.message ||
-      (failedResult.errors || []).map((e) => e.stack || e.message).join('\n') ||
+      (failedResult.errors || []).map((/** @type {any} */ e) => e.stack || e.message).join('\n') ||
       'No error message recorded';
     const cleanErr = redactSecrets(rawErr);
     const { tracePath, errorContextText, traceIds, injectedTraceId, timeWindow, guardSignals } =
@@ -561,6 +588,10 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
   return { failureCount: failures.length, failures: diagnosedFailures, markdown: lines.join('\n') + '\n' };
 }
 
+/**
+ * @param {{ lang?: string, target?: string, qaDir?: string, results?: string, output?: string, dryRun?: boolean, force?: boolean, json?: boolean }} [options]
+ * @returns {Promise<number>}
+ */
 export async function runDiagnoseCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   if (!options.target) {

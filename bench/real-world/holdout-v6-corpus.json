@@ -1,0 +1,545 @@
+{
+  "protocolVersion": "1.1.0-holdout",
+  "preregistrationDoc": "bench/real-world/PREREGISTRATION.md",
+  "samplingSeed": 20261125,
+  "prng": "mulberry32",
+  "disjointFrom": "bench/real-world/corpus.json",
+  "collectedAt": "2026-11-24T08:28:00.818Z",
+  "targetSampleSize": 50,
+  "actualSampleSize": 50,
+  "repositories": [
+    {
+      "repo": "actualbudget/actual",
+      "license": "MIT",
+      "sampledCommits": 11,
+      "unseenEligiblePoolSize": 31
+    },
+    {
+      "repo": "microsoft/playwright-mcp",
+      "license": "Apache-2.0",
+      "sampledCommits": 11,
+      "unseenEligiblePoolSize": 31
+    },
+    {
+      "repo": "sveltejs/kit",
+      "license": "MIT",
+      "sampledCommits": 11,
+      "unseenEligiblePoolSize": 161
+    },
+    {
+      "repo": "vuejs/vitepress",
+      "license": "MIT",
+      "sampledCommits": 7,
+      "unseenEligiblePoolSize": 7
+    },
+    {
+      "repo": "vitejs/vite",
+      "license": "MIT",
+      "sampledCommits": 10,
+      "unseenEligiblePoolSize": 100
+    }
+  ],
+  "commits": [
+    {
+      "repo": "actualbudget/actual",
+      "sha": "1df18bc60be475e04e308f496d0208d59fa301ce",
+      "parentSha": "6e761b42c2c4a0c9326dfb6af787fe81e0b66bc2",
+      "license": "MIT",
+      "testPaths": [
+        "packages/desktop-client/e2e/payees.test.ts"
+      ]
+    },
+    {
+      "repo": "microsoft/playwright-mcp",
+      "sha": "8ee8445342667babfd12d981196c08a1a3c6d198",
+      "parentSha": "ac6e678135035cd59ba18324d232dd7434818ebf",
+      "license": "Apache-2.0",
+      "testPaths": [
+        "tests/click.spec.ts"
+      ]
+    },
+    {
+      "repo": "sveltejs/kit",
+      "sha": "014dfec3df98be8edf6e217e98309c12ba51b4cf",
+      "parentSha": "879c2c0aed2652189ebcaf2ac751ae1220cf63dc",
+      "license": "MIT",
+      "testPaths": [
+        "packages/kit/test/apps/basics/test/vitest/server.spec.js"
+      ]
+    },
+    {
+      "repo": "vuejs/vitepress",
+      "sha": "0d646a66cd44e97adef516a6a36e03365f179906",
+      "parentSha": "d4796a0373eb486766cf48e63fdf461681424d43",
+      "license": "MIT",
+      "testPaths": [
+        "__tests__/e2e/local-search/local-search.test.ts"
+      ]
+    },
+    {
+      "repo": "vitejs/vite",
+      "sha": "a579e352a66fbdce6a51d4e1f67006ccf4f91343",
+      "parentSha": "483512809bbdb399d66be59af0f5aeb01ccb7181",
+      "license": "MIT",
+      "testPaths": [
+        "playground/client-reload/__tests__/client-reload.spec.ts",
+        "playground/hmr-full-bundle-mode/__tests__/build-hooks.spec.ts"
+      ]
+    },
+    {
+      "repo": "actualbudget/actual",
+      "sha": "3290ebee7348b778fb9641d3dc089099a28ea023",
+      "parentSha": "26352c32d69223cecdefb6360c099fd28162885f",
+      "license": "MIT",
+      "testPaths": [
+        "packages/desktop-client/e2e/accounts.test.ts"
+      ]
+    },
+    {
+      "repo": "microsoft/playwright-mcp",
+      "sha": "6a7808848c7119021cdbc3ec3629585ea2a7edc5",
+      "parentSha": "36ec986b8b1fc6b4d11f2b6971147755e1b0bc84",
+      "license": "Apache-2.0",
+      "testPaths": [
+        "tests/capabilities.spec.ts"
+      ]
+    },
+    {
+      "repo": "sveltejs/kit",
+      "sha": "1527cf75d00bfd26c42de82c01e8c62cf2054724",
+      "parentSha": "9766d28fb23140397958e0d8ac57704290bda2c6",
+      "license": "MIT",
+      "testPaths": [
+        "packages/kit/test/apps/basics/test/server.test.js"
+      ]
+    },
+    {
+      "repo": "vuejs/vitepress",
+      "sha": "b7602df1cdee75d0814cf3f131b4906a31841851",
+      "parentSha": "08cc11092b14f1fb97b36dcb1f6b8c61ad823c62",
+      "license": "MIT",
+      "testPaths": [
+        "__tests__/e2e/multi-sidebar/index.test.ts"
+      ]
+    },
+    {
+      "repo": "vitejs/vite",
+      "sha": "53f1ce7bfe38426861f6da572ef0e3359f6a80cd",
+      "parentSha": "744269e5b2a155074910ddd275aecf2b83938496",
+      "license": "MIT",
+      "testPaths": [
+        "playground/assets/__tests__/assets.spec.ts"
+      ]
+    },
+    {
+      "repo": "actualbudget/actual",
+      "sha": "2c86a2e2ceafc68276869e91c02727706639b42f",
+      "parentSha": "160b2c99aa285362523eef4b63cb355778fcd954",
+      "license": "MIT",
+      "testPaths": [
+        "packages/desktop-client/e2e/accounts.mobile.test.ts"
+      ]
+    },
+    {
+      "repo": "microsoft/playwright-mcp",
+      "sha": "efe3ff0c7c10f55373adaacea7f22fc82334fa6c",
+      "parentSha": "e3df209b96631c593f250818e09e0f1617825b6e",
+      "license": "Apache-2.0",
+      "testPaths": [
+        "tests/evaluate.spec.ts"
+      ]
+    },
+    {
+      "repo": "sveltejs/kit",
+      "sha": "4dddf589ef5cb528c1902cf7a2d30ccae98b6345",
+      "parentSha": "c461956c444220749f55f3c96901a59111603b09",
+      "license": "MIT",
+      "testPaths": [
+        "packages/adapter-auto/test/index.spec.js"
+      ]
+    },
+    {
+      "repo": "vuejs/vitepress",
+      "sha": "08ca6991758862d2571b9156578d8542f7c3ea2d",
+      "parentSha": "09a6db645f25b3e74fa86c193e0e1eff8429315c",
+      "license": "MIT",
+      "testPaths": [
+        "__tests__/e2e/data-loading/data.test.ts"
+      ]
+    },
+    {
+      "repo": "vitejs/vite",
+      "sha": "b78e2f1bc1cba404c4bd9faf518d26ec85e89fc7",
+      "parentSha": "a500deeb6f52d93ca501a0fc612a5392b939f2f5",
+      "license": "MIT",
+      "testPaths": [
+        "playground/dynamic-import/__tests__/dynamic-import.spec.ts"
+      ]
+    },
+    {
+      "repo": "actualbudget/actual",
+      "sha": "f72498016e2ab96700cc655b0c932773747823de",
+      "parentSha": "98ee00e015c36bf4d03b14dc903723f9e2fd6bf6",
+      "license": "MIT",
+      "testPaths": [
+        "packages/desktop-client/e2e/accounts.test.ts",
+        "packages/desktop-client/e2e/transactions.test.ts"
+      ]
+    },
+    {
+      "repo": "microsoft/playwright-mcp",
+      "sha": "1eee30fd45530927aedbb79e7621ec950c595690",
+      "parentSha": "29ac29e6bb6371cc7d1879185eb492e71cdde6d3",
+      "license": "Apache-2.0",
+      "testPaths": [
+        "tests/screenshot.spec.ts"
+      ]
+    },
+    {
+      "repo": "sveltejs/kit",
+      "sha": "b790c32555c3beb80a9a54a2a3b47a589238ee18",
+      "parentSha": "80858374c4bc304d424f72024aea1daca01fa143",
+      "license": "MIT",
+      "testPaths": [
+        "packages/kit/test/apps/async/test/client.test.js"
+      ]
+    },
+    {
+      "repo": "vuejs/vitepress",
+      "sha": "a1eb28496e67f881fc50da776c11aa45a73c4f40",
+      "parentSha": "73bbaea02860197a5d6df12d8b2dac0131fab9c2",
+      "license": "MIT",
+      "testPaths": [
+        "__tests__/e2e/local-search/local-search.test.ts"
+      ]
+    },
+    {
+      "repo": "vitejs/vite",
+      "sha": "278dc80436919b09473581ab45913c006779c54c",
+      "parentSha": "89620f09afcfef6b35e7bb8660132ab5b4d0cd3b",
+      "license": "MIT",
+      "testPaths": [
+        "playground/dynamic-import/__tests__/dynamic-import.spec.ts",
+        "playground/env/__tests__/env.spec.ts",
+        "playground/environment-react-ssr/__tests__/environment-react-ssr.spec.ts",
+        "playground/json/__tests__/csr/json-csr.spec.ts",
+        "playground/legacy/__tests__/legacy.spec.ts",
+        "playground/module-graph/__tests__/module-graph.spec.ts",
+        "playground/resolve/__tests__/resolve.spec.ts",
+        "playground/tsconfig-json-load-error/__tests__/tsconfig-json-load-error.spec.ts",
+        "playground/wasm/__tests__/wasm.spec.ts"
+      ]
+    },
+    {
+      "repo": "actualbudget/actual",
+      "sha": "1372f7b56484b991f531c2df25ee0eefb0df48ed",
+      "parentSha": "543622a5bb8e13d44d230c4e12243df54022979a",
+      "license": "MIT",
+      "testPaths": [
+        "packages/desktop-client/e2e/accounts.test.ts"
+      ]
+    },
+    {
+      "repo": "microsoft/playwright-mcp",
+      "sha": "b1761118919faeac069de5782beb6c5342f8228a",
+      "parentSha": "29d468dac7107890ea276ee593528a9b29b77d1b",
+      "license": "Apache-2.0",
+      "testPaths": [
+        "tests/verify.spec.ts"
+      ]
+    },
+    {
+      "repo": "sveltejs/kit",
+      "sha": "6f14f6f647297a769ef3e4fec42f91edb9e18cac",
+      "parentSha": "0fa4ee030dab2a4b821f59d13cce086e1859fd67",
+      "license": "MIT",
+      "testPaths": [
+        "packages/kit/test/types/request-event.test.ts"
+      ]
+    },
+    {
+      "repo": "vuejs/vitepress",
+      "sha": "e635e9e5ea2876a293954970c6a00d6e09cb50a5",
+      "parentSha": "ea93b5fec8559cfa8f356b71aa91185b9734fb8b",
+      "license": "MIT",
+      "testPaths": [
+        "__tests__/e2e/local-search/local-search.test.ts"
+      ]
+    },
+    {
+      "repo": "vitejs/vite",
+      "sha": "8c2a87d41fb24536e59643351758084cde4d0dd7",
+      "parentSha": "d17d739eedc4e8ede5973f1533826f27554c2078",
+      "license": "MIT",
+      "testPaths": [
+        "playground/optimize-deps/__tests__/optimize-deps.spec.ts"
+      ]
+    },
+    {
+      "repo": "actualbudget/actual",
+      "sha": "93655d6059abe87adfa282136f8026d257a47af1",
+      "parentSha": "6edd224acc29ac9aa8b412e22636d97d86d779de",
+      "license": "MIT",
+      "testPaths": [
+        "packages/desktop-client/e2e/transactions.test.ts"
+      ]
+    },
+    {
+      "repo": "microsoft/playwright-mcp",
+      "sha": "059ff380e8d1fafccb2b92ef2aa57188de50f8fa",
+      "parentSha": "8a13ef8e9f7385a0f89477922127f31cbfde9761",
+      "license": "Apache-2.0",
+      "testPaths": [
+        "tests/capabilities.spec.ts"
+      ]
+    },
+    {
+      "repo": "sveltejs/kit",
+      "sha": "d2e108c13925559c3433b9b46a71174a0f271253",
+      "parentSha": "1c7a8dca3216b42ff4f69a712e794a485de4d4ee",
+      "license": "MIT",
+      "testPaths": [
+        "packages/kit/test/apps/async/test/client.test.js"
+      ]
+    },
+    {
+      "repo": "vuejs/vitepress",
+      "sha": "1ade7bd422e18e2aee6086939fb16f10b8b74f99",
+      "parentSha": "e6e90ed5a9b8939f28619e7c964077a155b3996f",
+      "license": "MIT",
+      "testPaths": [
+        "__tests__/e2e/data-loading/data.test.ts"
+      ]
+    },
+    {
+      "repo": "vitejs/vite",
+      "sha": "16944824fd5fae014101737ec0029ab6a58e774b",
+      "parentSha": "de041a79b05a0be965c874592fe2c1505bcd48df",
+      "license": "MIT",
+      "testPaths": [
+        "playground/hmr/__tests__/hmr.spec.ts"
+      ]
+    },
+    {
+      "repo": "actualbudget/actual",
+      "sha": "bc9bba67f306de78ea4ad4dceec0c324777250c9",
+      "parentSha": "f95e66b85ed89a2bf3d58d43084a893e30a1990a",
+      "license": "MIT",
+      "testPaths": [
+        "packages/desktop-client/e2e/reports.test.ts"
+      ]
+    },
+    {
+      "repo": "microsoft/playwright-mcp",
+      "sha": "16f35233171f377204383cd37b42e03e4ff7f8d9",
+      "parentSha": "6c2dda31ad8df560278a65e13f7cee58a3d8135f",
+      "license": "Apache-2.0",
+      "testPaths": [
+        "tests/screenshot.spec.ts"
+      ]
+    },
+    {
+      "repo": "sveltejs/kit",
+      "sha": "ccbbea64660dcf407bc700be1c2e9fc9accda982",
+      "parentSha": "c3f58bb0eb6bde790897f1e8b89019bc39a062e5",
+      "license": "MIT",
+      "testPaths": [
+        "packages/kit/test/apps/async/test/client.test.js",
+        "packages/kit/test/apps/basics/test/client.test.js"
+      ]
+    },
+    {
+      "repo": "vuejs/vitepress",
+      "sha": "a425113572d94c39d0c3369eac5adb7a87cfb798",
+      "parentSha": "51ff681f4e5caf7dfff1f5c1c79a70aaf4785081",
+      "license": "MIT",
+      "testPaths": [
+        "__tests__/e2e/local-search/local-search.test.ts"
+      ]
+    },
+    {
+      "repo": "vitejs/vite",
+      "sha": "ce979e4c4be5f48c5862445ef124d863853e39b1",
+      "parentSha": "a3b28e8744ffae9abd018696ad4fc01b27ac71ce",
+      "license": "MIT",
+      "testPaths": [
+        "playground/dynamic-import/__tests__/dynamic-import.spec.ts",
+        "playground/fs-serve/__tests__/fs-serve.spec.ts",
+        "playground/hmr-ssr/__tests__/hmr-ssr.spec.ts",
+        "playground/hmr/__tests__/hmr.spec.ts",
+        "playground/optimize-deps/__tests__/optimize-deps.spec.ts"
+      ]
+    },
+    {
+      "repo": "actualbudget/actual",
+      "sha": "935d2b5064e0e83a347df88f5b73030ebb42ed52",
+      "parentSha": "2ffb81f72b7992d1cfd7a5e7c4b1c26301a7a68a",
+      "license": "MIT",
+      "testPaths": [
+        "packages/desktop-client/e2e/transactions.test.ts"
+      ]
+    },
+    {
+      "repo": "microsoft/playwright-mcp",
+      "sha": "29ac29e6bb6371cc7d1879185eb492e71cdde6d3",
+      "parentSha": "9f8441daa54f1f0bd5515204e4ada80e53b4cce9",
+      "license": "Apache-2.0",
+      "testPaths": [
+        "tests/config.spec.ts"
+      ]
+    },
+    {
+      "repo": "sveltejs/kit",
+      "sha": "cded491689ff39201db1f2cea34e1498a6830a86",
+      "parentSha": "0107721dbdde1310d4c5427f7ad33a2ee5593d3e",
+      "license": "MIT",
+      "testPaths": [
+        "packages/adapter-bun/test/adapter.spec.ts",
+        "packages/adapter-node/test/apps/basic/build.test.js"
+      ]
+    },
+    {
+      "repo": "vitejs/vite",
+      "sha": "928e721b36690ac0f3f118290a21fc0cc4349055",
+      "parentSha": "8d7623d9b5647714a5b20cbd787a5401ca846229",
+      "license": "MIT",
+      "testPaths": [
+        "playground/hmr-ssr/__tests__/hmr-ssr.spec.ts"
+      ]
+    },
+    {
+      "repo": "actualbudget/actual",
+      "sha": "5ffb72ad659cca65aa056f4a3239976464bf4868",
+      "parentSha": "277c8afec3e2699d7d6f29df889dc6cdc8f11f83",
+      "license": "MIT",
+      "testPaths": [
+        "packages/desktop-client/e2e/accounts.test.ts"
+      ]
+    },
+    {
+      "repo": "microsoft/playwright-mcp",
+      "sha": "4df162aff5849cecb15ffd7635506dfa58ca6b4f",
+      "parentSha": "65d99fe5957f368387d0f61362338917b2ce3391",
+      "license": "Apache-2.0",
+      "testPaths": [
+        "tests/cdp.spec.ts",
+        "tests/click.spec.ts",
+        "tests/config.spec.ts",
+        "tests/console.spec.ts",
+        "tests/core.spec.ts",
+        "tests/device.spec.ts",
+        "tests/dialogs.spec.ts",
+        "tests/evaluate.spec.ts",
+        "tests/files.spec.ts",
+        "tests/headed.spec.ts",
+        "tests/iframes.spec.ts",
+        "tests/install.spec.ts",
+        "tests/launch.spec.ts",
+        "tests/network.spec.ts",
+        "tests/pdf.spec.ts",
+        "tests/screenshot.spec.ts",
+        "tests/tabs.spec.ts",
+        "tests/trace.spec.ts",
+        "tests/type.spec.ts",
+        "tests/wait.spec.ts",
+        "tests/webdriver.spec.ts"
+      ]
+    },
+    {
+      "repo": "sveltejs/kit",
+      "sha": "f499a455fe43e89caf37f23bc101734e61b17d62",
+      "parentSha": "463fab79781b7028ae0de36c2600a5c691399742",
+      "license": "MIT",
+      "testPaths": [
+        "packages/kit/test/apps/async/test/client.test.js",
+        "packages/kit/test/types/remote.test.ts"
+      ]
+    },
+    {
+      "repo": "vitejs/vite",
+      "sha": "60c260dea1fa9f628c22e32b14dddf6ca3088f2b",
+      "parentSha": "a3792697fe6dd6a75ed1f9bf769864f831e93a25",
+      "license": "MIT",
+      "testPaths": [
+        "playground/assets/__tests__/assets.spec.ts"
+      ]
+    },
+    {
+      "repo": "actualbudget/actual",
+      "sha": "b396629f7ebeeb87b25c13b93f0f78374d4c7057",
+      "parentSha": "39955a46f8ecbdab56df64e0a540b81ee84b9422",
+      "license": "MIT",
+      "testPaths": [
+        "packages/desktop-client/e2e/api-keys.test.ts"
+      ]
+    },
+    {
+      "repo": "microsoft/playwright-mcp",
+      "sha": "601a74305c2a81582bb99114858003bac3601c52",
+      "parentSha": "c2b98dc70bac3b1dea41cd6e38f623b3ce2d5c2e",
+      "license": "Apache-2.0",
+      "testPaths": [
+        "tests/cdp.spec.ts",
+        "tests/console.spec.ts",
+        "tests/dialogs.spec.ts",
+        "tests/evaluate.spec.ts",
+        "tests/files.spec.ts",
+        "tests/install.spec.ts",
+        "tests/launch.spec.ts",
+        "tests/network.spec.ts",
+        "tests/pdf.spec.ts",
+        "tests/screenshot.spec.ts",
+        "tests/tabs.spec.ts"
+      ]
+    },
+    {
+      "repo": "sveltejs/kit",
+      "sha": "31a06c2684a5b8faf429497a601032986b3afc77",
+      "parentSha": "8efb90d1578c6c6b0d0b279570c57d27518eae01",
+      "license": "MIT",
+      "testPaths": [
+        "packages/adapter-auto/test/adapters.spec.js"
+      ]
+    },
+    {
+      "repo": "vitejs/vite",
+      "sha": "88c17415af221b3a13e778f4f2c0e907c8287baf",
+      "parentSha": "9944fa6033873f13ae88f59e023ab642c50fee2b",
+      "license": "MIT",
+      "testPaths": [
+        "playground/js-sourcemap/__tests__/js-sourcemap.spec.ts"
+      ]
+    },
+    {
+      "repo": "actualbudget/actual",
+      "sha": "d67ca574673fef386115fa5ebe26b62f0d6216e3",
+      "parentSha": "c4bc3e57c8bad37c4ebdf504fd2d08302ad29dce",
+      "license": "MIT",
+      "testPaths": [
+        "packages/desktop-client/e2e/onboarding.test.ts"
+      ],
+      "addedTestPaths": [
+        "packages/desktop-client/e2e/tour.test.ts"
+      ]
+    },
+    {
+      "repo": "microsoft/playwright-mcp",
+      "sha": "6618cdf8cb1d2034c4f8e5a8d227df7271c86afe",
+      "parentSha": "a62ea28698af6d9bc89438bcec50c63377cef957",
+      "license": "Apache-2.0",
+      "testPaths": [
+        "tests/cli.spec.ts"
+      ]
+    },
+    {
+      "repo": "sveltejs/kit",
+      "sha": "e75024c9fbc240e83b10c0cdabc2f542c71ab846",
+      "parentSha": "0cc67d9201a36ba3786a234f322f6fdd341619ea",
+      "license": "MIT",
+      "testPaths": [
+        "packages/kit/test/apps/async/test/client.test.js",
+        "packages/kit/test/types/remote.test.ts"
+      ]
+    }
+  ]
+}

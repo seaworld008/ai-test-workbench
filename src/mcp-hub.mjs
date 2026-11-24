@@ -3,209 +3,39 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
-import { SCHEMA_VERSIONS, WORKBENCH_VERSION } from './version.mjs';
+import { SCHEMA_VERSIONS } from './core/version.mjs';
+import {
+  MCP_PILLARS,
+  MCP_PRESETS,
+  MCP_PROFILES,
+  getMcpPresetsSummary,
+} from './mcp-hub/catalog.mjs';
 
-export const MCP_PILLARS = [
-  'orchestrator',
-  'browser',
-  'observability',
-  'database',
-  'middleware',
-  'performance',
-  'api-contract',
-];
+export { MCP_PILLARS, MCP_PRESETS, MCP_PROFILES, getMcpPresetsSummary };
 
 /**
- * 7-Pillar System MCP Presets with Supply-Chain Version Pinning (`S-06`) and
- * 3-Tier Risk Classification (`riskLevel: 'read' | 'local-write' | 'remote-effect'`, `S-07`).
+ * @typedef {{
+ *   pillar: string,
+ *   description: string,
+ *   command: string,
+ *   args: string[],
+ *   pinnedVersion: string,
+ *   riskLevel: string,
+ *   readonly: boolean,
+ *   env?: Record<string, string>,
+ *   envTemplate?: Record<string, string>,
+ * }} McpPreset
  */
-export const MCP_PRESETS = {
-  'ai-test-workbench': {
-    pillar: 'orchestrator',
-    description: 'AI Test Workbench native MCP Server (stdio/Streamable HTTP/SSE tools, Living Code Map & QA gates)',
-    command: 'npx',
-    args: [`--package=ai-test-workbench@${WORKBENCH_VERSION}`, 'ai-test-workbench', 'mcp-serve'],
-    pinnedVersion: WORKBENCH_VERSION,
-    riskLevel: 'local-write',
-    readonly: true,
-    envTemplate: {},
-  },
-  'playwright-test': {
-    pillar: 'browser',
-    description: 'Playwright built-in Test Agents MCP server (Planner / Generator / Healer)',
-    command: 'npx',
-    args: ['playwright@1.65.1', 'run-test-mcp-server'],
-    pinnedVersion: '1.65.1',
-    riskLevel: 'local-write',
-    readonly: false,
-    envTemplate: {},
-  },
-  'chrome-devtools': {
-    pillar: 'browser',
-    description: 'Chrome DevTools Protocol live DOM, console, network & performance trace inspection',
-    command: 'npx',
-    args: ['-y', 'chrome-devtools-mcp@0.18.0'],
-    pinnedVersion: '0.18.0',
-    riskLevel: 'local-write',
-    readonly: false,
-    envTemplate: {},
-  },
-  grafana: {
-    pillar: 'observability',
-    description: 'Read-only Grafana dashboards, alerts & correlated Prometheus/Loki datasource queries',
-    command: 'uvx',
-    args: ['mcp-grafana==0.7.8', '--disable-write'],
-    pinnedVersion: '0.7.8',
-    riskLevel: 'read',
-    readonly: true,
-    env: {
-      GRAFANA_URL: '${GRAFANA_URL}',
-      GRAFANA_SERVICE_ACCOUNT_TOKEN: '${GRAFANA_SERVICE_ACCOUNT_TOKEN}',
-    },
-    envTemplate: {
-      GRAFANA_URL: 'https://grafana.staging.internal',
-      GRAFANA_SERVICE_ACCOUNT_TOKEN: 'glsa_replace_with_readonly_viewer_token',
-    },
-  },
-  prometheus: {
-    pillar: 'observability',
-    description: 'Read-only PromQL metrics queries (latency P95/P99, CPU, DB pool saturation, 5xx rates)',
-    command: 'uvx',
-    args: ['prometheus-mcp-server==1.4.2'],
-    pinnedVersion: '1.4.2',
-    riskLevel: 'read',
-    readonly: true,
-    env: {
-      PROMETHEUS_URL: '${PROMETHEUS_URL}',
-    },
-    envTemplate: {
-      PROMETHEUS_URL: 'https://prometheus.staging.internal',
-    },
-  },
-  loki: {
-    pillar: 'observability',
-    description: 'Read-only LogQL microservice log search correlated by traceId & test time window',
-    command: 'uvx',
-    args: ['loki-mcp-server==0.3.1'],
-    pinnedVersion: '0.3.1',
-    riskLevel: 'read',
-    readonly: true,
-    env: {
-      LOKI_URL: '${LOKI_URL}',
-    },
-    envTemplate: {
-      LOKI_URL: 'https://loki.staging.internal',
-    },
-  },
-  sentry: {
-    pillar: 'observability',
-    description: 'Sentry exception stack traces, breadcrumbs, and frontend/backend issue correlation',
-    command: 'npx',
-    args: ['-y', '@sentry/mcp-server@0.29.0'],
-    pinnedVersion: '0.29.0',
-    riskLevel: 'read',
-    readonly: true,
-    env: {
-      SENTRY_ACCESS_TOKEN: '${SENTRY_ACCESS_TOKEN}',
-      SENTRY_HOST: '${SENTRY_HOST}',
-    },
-    envTemplate: {
-      SENTRY_HOST: 'https://sentry.staging.internal',
-      SENTRY_ACCESS_TOKEN: 'sntrys_replace_with_read_scoped_token',
-    },
-  },
-  'postgres-readonly': {
-    pillar: 'database',
-    description:
-      'PostgreSQL read-only SQL verification via maintained DBHub (--readonly; MUST also enforce read-only DB role)',
-    command: 'npx',
-    args: ['-y', '@bytebase/dbhub@0.15.0', '--readonly', '--dsn', '${POSTGRES_READONLY_URL}'],
-    pinnedVersion: '0.15.0',
-    riskLevel: 'read',
-    readonly: true,
-    envTemplate: {
-      POSTGRES_READONLY_URL: 'postgresql://qa_readonly:change_me@staging-db.internal:5432/app_staging',
-    },
-  },
-  'mysql-readonly': {
-    pillar: 'database',
-    description:
-      'MySQL read-only inspection (INSERT/UPDATE/DELETE disabled; MUST also enforce SELECT-only DB user)',
-    command: 'npx',
-    args: ['-y', '@benborla29/mcp-server-mysql@1.0.41'],
-    pinnedVersion: '1.0.41',
-    riskLevel: 'read',
-    readonly: true,
-    env: {
-      MYSQL_HOST: '${MYSQL_HOST}',
-      MYSQL_PORT: '${MYSQL_PORT}',
-      MYSQL_USER: '${MYSQL_READONLY_USER}',
-      MYSQL_PASS: '${MYSQL_READONLY_PASS}',
-      MYSQL_DB: '${MYSQL_DB}',
-      ALLOW_INSERT_OPERATION: 'false',
-      ALLOW_UPDATE_OPERATION: 'false',
-      ALLOW_DELETE_OPERATION: 'false',
-    },
-    envTemplate: {
-      MYSQL_HOST: 'staging-mysql.internal',
-      MYSQL_PORT: '3306',
-      MYSQL_READONLY_USER: 'qa_readonly',
-      MYSQL_READONLY_PASS: 'change_me',
-      MYSQL_DB: 'app_staging',
-    },
-  },
-  'redis-readonly': {
-    pillar: 'middleware',
-    description: 'Redis read-only cache, session & queue key inspection (--readonly enforced)',
-    command: 'uvx',
-    args: ['redis-mcp-server==0.3.0', '--readonly'],
-    pinnedVersion: '0.3.0',
-    riskLevel: 'read',
-    readonly: true,
-    env: {
-      REDIS_URL: '${REDIS_READONLY_URL}',
-    },
-    envTemplate: {
-      REDIS_READONLY_URL: 'redis://:change_me@staging-redis.internal:6379/0',
-    },
-  },
-  k6: {
-    pillar: 'performance',
-    description: 'Grafana k6 load, stress & soak script execution (remote-effect load generator: staging only)',
-    command: 'uvx',
-    args: ['mcp-k6==0.4.0'],
-    pinnedVersion: '0.4.0',
-    riskLevel: 'remote-effect',
-    readonly: false,
-    envTemplate: {
-      K6_PROMETHEUS_RW_SERVER_URL: 'https://prometheus.staging.internal/api/v1/write',
-    },
-  },
-  'openapi-contract': {
-    pillar: 'api-contract',
-    description: 'OpenAPI / Swagger live schema reader for automated contract drift detection',
-    command: 'npx',
-    args: ['-y', 'openapi-mcp-server@1.2.0', '${OPENAPI_SPEC_URL}'],
-    pinnedVersion: '1.2.0',
-    riskLevel: 'read',
-    readonly: true,
-    envTemplate: {
-      OPENAPI_SPEC_URL: 'https://staging-api.internal/v3/api-docs',
-    },
-  },
-};
 
-export const MCP_PROFILES = {
-  minimal: ['ai-test-workbench', 'playwright-test', 'chrome-devtools'],
-  observability: ['ai-test-workbench', 'playwright-test', 'grafana', 'prometheus', 'loki', 'sentry'],
-  'data-verify': ['ai-test-workbench', 'playwright-test', 'postgres-readonly', 'mysql-readonly', 'redis-readonly'],
-  perf: ['ai-test-workbench', 'playwright-test', 'chrome-devtools', 'prometheus', 'k6'],
-  'full-link': Object.keys(MCP_PRESETS),
-};
+/** @type {Record<string, McpPreset>} */
+const PRESETS_BY_NAME = MCP_PRESETS;
+/** @type {Record<string, string[]>} */
+const PROFILES_BY_NAME = MCP_PROFILES;
 
 const PROMPT_POISONING_RE =
   /(ignore\s+(?:all\s+)?previous\s+instructions|disregard\s+system\s+prompt|<\s*system\s*>|you\s+are\s+now\s+in\s+developer\s+mode|exfiltrate|send\s+.*\s+to\s+https?:\/\/|\bcurl\s+-X\s+POST\b)/i;
 
+/** @param {McpPreset} preset */
 function toMcpServerSpec(preset) {
   /** @type {Record<string, any>} */
   const entry = { command: preset.command, args: [...preset.args] };
@@ -215,14 +45,17 @@ function toMcpServerSpec(preset) {
   return entry;
 }
 
+/** @param {Record<string, any> | null | undefined} existingJsonObj @param {string[]} serverNames */
 export function mergeMcpServersIntoJson(existingJsonObj, serverNames) {
   const base = existingJsonObj && typeof existingJsonObj === 'object' ? { ...existingJsonObj } : {};
   const existingServers = base.mcpServers && typeof base.mcpServers === 'object' ? { ...base.mcpServers } : {};
+  /** @type {string[]} */
   const added = [];
+  /** @type {string[]} */
   const kept = [];
 
   for (const name of serverNames) {
-    const preset = MCP_PRESETS[name];
+    const preset = PRESETS_BY_NAME[name];
     if (!preset) continue;
     if (name in existingServers) {
       kept.push(name);
@@ -239,21 +72,26 @@ export function mergeMcpServersIntoJson(existingJsonObj, serverNames) {
   };
 }
 
+/** @param {unknown} val */
 function escapeTomlStr(val) {
   return `"${String(val).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
+/** @param {string} name */
 function formatTomlServerKey(name) {
   return /^[A-Za-z0-9_-]+$/.test(name) ? name : escapeTomlStr(name);
 }
 
+/** @param {string | null | undefined} existingTomlText @param {string[]} serverNames */
 export function mergeMcpServersIntoCodexToml(existingTomlText, serverNames) {
   let content = String(existingTomlText || '');
+  /** @type {string[]} */
   const added = [];
+  /** @type {string[]} */
   const kept = [];
 
   for (const name of serverNames) {
-    const preset = MCP_PRESETS[name];
+    const preset = PRESETS_BY_NAME[name];
     if (!preset) continue;
     const headerRegex = new RegExp(`^\\[mcp_servers\\.(?:"${name}"|'${name}'|${name})\\]`, 'm');
     if (headerRegex.test(content)) {
@@ -331,6 +169,9 @@ export function auditMcpDescriptorsAndLock(serverOrToolSpecs, lockedHashes = nul
 /**
  * Audits `.mcp.json` and `.codex/config.toml` for write flags, `@latest` unpinned tags, archived packages,
  * hardcoded secrets, and `.aitest/mcp.lock` drift.
+ * @param {{ mcpServers?: Record<string, Record<string, any>> } | null | undefined} mcpJsonObj
+ * @param {string} [codexTomlText]
+ * @param {{ lockedHashes?: Record<string, string> | null }} [options]
  */
 export function auditMcpSafety(mcpJsonObj, codexTomlText = '', options = {}) {
   const issues = [];
@@ -344,7 +185,7 @@ export function auditMcpSafety(mcpJsonObj, codexTomlText = '', options = {}) {
     checkedServers.push(name);
     const argsStr = Array.isArray(cfg.args) ? cfg.args.join(' ') : '';
     const env = cfg.env || {};
-    riskByServer[name] = MCP_PRESETS[name]?.riskLevel || 'unknown';
+    riskByServer[name] = PRESETS_BY_NAME[name]?.riskLevel || 'unknown';
 
     if (/@latest\b/i.test(argsStr)) {
       issues.push(`[MCP Supply Chain] Server "${name}" uses floating "@latest" tag; pin an exact semver version.`);
@@ -407,6 +248,7 @@ export function auditMcpSafety(mcpJsonObj, codexTomlText = '', options = {}) {
   };
 }
 
+/** @param {string[]} serverNames */
 function buildMcpEnvTemplate(serverNames) {
   const lines = [
     '# Optional Read-Only Full-Link System MCP Credentials (NEVER commit real secrets to Git)',
@@ -416,7 +258,7 @@ function buildMcpEnvTemplate(serverNames) {
   ];
   const seen = new Set();
   for (const name of serverNames) {
-    const preset = MCP_PRESETS[name];
+    const preset = PRESETS_BY_NAME[name];
     if (!preset?.envTemplate) continue;
     for (const [k, v] of Object.entries(preset.envTemplate)) {
       if (seen.has(k)) continue;
@@ -428,36 +270,28 @@ function buildMcpEnvTemplate(serverNames) {
   return lines.join('\n') + '\n';
 }
 
+/**
+ * @param {{
+ *   lang?: string,
+ *   action?: string,
+ *   json?: boolean,
+ *   target?: string,
+ *   qaDir?: string,
+ *   lock?: boolean,
+ *   servers?: string,
+ *   profile?: string,
+ *   dryRun?: boolean,
+ *   force?: boolean,
+ * }} [options]
+ */
 export async function runMcpCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   const action = (options.action || 'presets').toLowerCase();
 
-  if (action === 'serve') {
-    const { runMcpServeCommand } = await import('./mcp-server.mjs');
-    return await runMcpServeCommand(options);
-  }
-
   if (action === 'presets') {
-    const summary = {
-      pillars: MCP_PILLARS,
-      profiles: MCP_PROFILES,
-      presets: Object.fromEntries(
-        Object.entries(MCP_PRESETS).map(([k, v]) => [
-          k,
-          {
-            pillar: v.pillar,
-            riskLevel: v.riskLevel,
-            pinnedVersion: v.pinnedVersion,
-            readonly: v.readonly,
-            command: v.command,
-            args: v.args,
-            description: v.description,
-          },
-        ])
-      ),
-    };
+    const summary = getMcpPresetsSummary();
     if (options.json) {
-      console.log(JSON.stringify(summary, null, 2));
+      console.log(JSON.stringify({ ok: true, exitCode: 0, ...summary }, null, 2));
       return 0;
     }
     console.log(
@@ -518,8 +352,9 @@ export async function runMcpCommand(options = {}) {
       );
     }
 
+    const exitCode = audit.ok ? 0 : 2;
     if (options.json) {
-      console.log(JSON.stringify({ ...audit, mcpLockPath: fs.existsSync(mcpLockPath) ? mcpLockPath : null }, null, 2));
+      console.log(JSON.stringify({ ...audit, exitCode, mcpLockPath: fs.existsSync(mcpLockPath) ? mcpLockPath : null }, null, 2));
     } else {
       console.log(
         lang === 'zh'
@@ -530,10 +365,11 @@ export async function runMcpCommand(options = {}) {
       for (const iss of audit.issues) console.error(`  [FAIL] ${iss}`);
       if (audit.ok) console.log('  [OK] All MCP configurations enforce supply-chain, read-only & secret hygiene guardrails.');
     }
-    return audit.ok ? 0 : 2;
+    return exitCode;
   }
 
   if (action === 'add') {
+    /** @type {string[]} */
     let selected = [];
     if (options.servers) {
       selected = String(options.servers)
@@ -542,14 +378,14 @@ export async function runMcpCommand(options = {}) {
         .filter(Boolean);
     } else {
       const profileName = (options.profile || 'full-link').toLowerCase();
-      if (!MCP_PROFILES[profileName]) {
+      if (!PROFILES_BY_NAME[profileName]) {
         console.error(`Unknown MCP profile "${profileName}". Valid: ${Object.keys(MCP_PROFILES).join(', ')}`);
         return 1;
       }
-      selected = MCP_PROFILES[profileName];
+      selected = PROFILES_BY_NAME[profileName];
     }
 
-    const unknown = selected.filter((s) => !MCP_PRESETS[s]);
+    const unknown = selected.filter((s) => !PRESETS_BY_NAME[s]);
     if (unknown.length > 0) {
       console.error(`Unknown MCP preset(s): ${unknown.join(', ')}. Valid: ${Object.keys(MCP_PRESETS).join(', ')}`);
       return 1;
@@ -569,7 +405,7 @@ export async function runMcpCommand(options = {}) {
     }
 
     if (options.json) {
-      console.log(JSON.stringify({ mcpJsonPath, codexTomlPath, envExamplePath, added: jsonMerge.added, kept: jsonMerge.kept }, null, 2));
+      console.log(JSON.stringify({ ok: true, exitCode: 0, mcpJsonPath, codexTomlPath, envExamplePath, added: jsonMerge.added, kept: jsonMerge.kept }, null, 2));
     } else {
       console.log(
         lang === 'zh'
@@ -583,6 +419,6 @@ export async function runMcpCommand(options = {}) {
     return 0;
   }
 
-  console.error(`Unknown mcp action "${action}". Use: presets | add | doctor`);
+  console.error(`Unknown mcp action "${action}". Use: presets | add | doctor | serve`);
   return 1;
 }

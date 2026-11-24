@@ -1,0 +1,186 @@
+{
+  "schemaVersion": "1.0.0",
+  "generatedAt": "2026-11-24T08:34:40.948Z",
+  "gateKernelVersion": "5.1.1",
+  "preregistrationDoc": "bench/real-world/PREREGISTRATION.md",
+  "samplingSeed": 20261124,
+  "mode": "pilot",
+  "evaluationScope": "offline-static-ast-only (Layer 3 AST Semantic Diff + Differential Layer 2 Static Checks; zero target code execution; zero target site network access)",
+  "formalEvaluation200Status": "pending",
+  "counts": {
+    "totalCommits": 50,
+    "passed": 46,
+    "flagged": 4,
+    "adjudicatedFP": 2,
+    "adjudicatedTP": 2,
+    "unreviewedFlagged": 0,
+    "normalCommits": 48
+  },
+  "metrics": {
+    "rawAlertRate": {
+      "k": 4,
+      "n": 50,
+      "rate": 0.08,
+      "lower": 0.03155,
+      "upper": 0.188382,
+      "percent": "8.0%",
+      "ci95Percent": "[3.2%, 18.8%]"
+    },
+    "adjudicatedFprOnNormal": {
+      "k": 2,
+      "n": 48,
+      "rate": 0.041667,
+      "lower": 0.011502,
+      "upper": 0.139757,
+      "percent": "4.2%",
+      "ci95Percent": "[1.2%, 14.0%]"
+    },
+    "adjudicatedFprOnAll": {
+      "k": 2,
+      "n": 50,
+      "rate": 0.04,
+      "lower": 0.011039,
+      "upper": 0.134601,
+      "percent": "4.0%",
+      "ci95Percent": "[1.1%, 13.5%]"
+    }
+  },
+  "violationsByRule": {
+    "AITEST-G110": 1,
+    "STATIC-WAIT-FOR-TIMEOUT": 1,
+    "AITEST-G107": 1,
+    "AITEST-G105": 1
+  },
+  "byRepository": {
+    "actualbudget/actual": {
+      "license": "MIT",
+      "total": 10,
+      "passed": 10,
+      "flagged": 0,
+      "fp": 0,
+      "tp": 0,
+      "unreviewed": 0
+    },
+    "microsoft/playwright-mcp": {
+      "license": "Apache-2.0",
+      "total": 10,
+      "passed": 10,
+      "flagged": 0,
+      "fp": 0,
+      "tp": 0,
+      "unreviewed": 0
+    },
+    "sveltejs/kit": {
+      "license": "MIT",
+      "total": 10,
+      "passed": 7,
+      "flagged": 3,
+      "fp": 2,
+      "tp": 1,
+      "unreviewed": 0
+    },
+    "vitejs/vite": {
+      "license": "MIT",
+      "total": 10,
+      "passed": 10,
+      "flagged": 0,
+      "fp": 0,
+      "tp": 0,
+      "unreviewed": 0
+    },
+    "vuejs/vitepress": {
+      "license": "MIT",
+      "total": 10,
+      "passed": 9,
+      "flagged": 1,
+      "fp": 0,
+      "tp": 1,
+      "unreviewed": 0
+    }
+  },
+  "flaggedCommits": [
+    {
+      "id": "sveltejs/kit@3d5800fad6000ea836eb41c8da6f83281e4326cf",
+      "repo": "sveltejs/kit",
+      "sha": "3d5800fad6000ea836eb41c8da6f83281e4326cf",
+      "commitUrl": "https://github.com/sveltejs/kit/commit/3d5800fad6000ea836eb41c8da6f83281e4326cf",
+      "testPaths": [
+        "packages/kit/test/apps/basics/test/playwright/client.test.js",
+        "packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js"
+      ],
+      "ruleCodes": [
+        "AITEST-G110"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G110] packages/kit/test/apps/basics/test/playwright/client.test.js: wrapping expect() inside conditional if-block is forbidden.",
+        "[Healer Diff Guard][AITEST-G110] packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js: wrapping expect() inside conditional if-block is forbidden."
+      ],
+      "adjudication": {
+        "label": "FP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "Normal diagnostic standardization refactoring (#17276). AITEST-G110 flagged env-guarded `if (process.env.DEV) { expect(...).toContainKitDiagnostic(...) }` paired with an unconditional length assertion; AITEST-G107 flagged an existing negative-test try/catch that asserts on expected error text."
+      }
+    },
+    {
+      "id": "sveltejs/kit@224e791cb05f95a5c2d881e5a7d5341352f3c052",
+      "repo": "sveltejs/kit",
+      "sha": "224e791cb05f95a5c2d881e5a7d5341352f3c052",
+      "commitUrl": "https://github.com/sveltejs/kit/commit/224e791cb05f95a5c2d881e5a7d5341352f3c052",
+      "testPaths": [
+        "packages/kit/test/apps/basics/test/playwright/client.test.js"
+      ],
+      "ruleCodes": [
+        "STATIC-WAIT-FOR-TIMEOUT"
+      ],
+      "violations": [
+        "[Static Check][STATIC-WAIT-FOR-TIMEOUT] packages/kit/test/apps/basics/test/playwright/client.test.js: newly introduced waitForTimeout() (26 -> 27)."
+      ],
+      "adjudication": {
+        "label": "TP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "Commit genuinely introduced a new hardcoded `await page.waitForTimeout(100)` sleep inside a newly added test (`packages/kit/test/apps/basics/test/playwright/client.test.js`), matching the pre-registered TP criterion for hardcoded sleeps."
+      }
+    },
+    {
+      "id": "sveltejs/kit@dd63fd1a2e52221e2024e3c59d6d15f7f0afca64",
+      "repo": "sveltejs/kit",
+      "sha": "dd63fd1a2e52221e2024e3c59d6d15f7f0afca64",
+      "commitUrl": "https://github.com/sveltejs/kit/commit/dd63fd1a2e52221e2024e3c59d6d15f7f0afca64",
+      "testPaths": [
+        "packages/kit/test/apps/basics/test/playwright/client.test.js"
+      ],
+      "ruleCodes": [
+        "AITEST-G107"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G107] packages/kit/test/apps/basics/test/playwright/client.test.js: swallowed exception via non-rethrowing .catch() (\"app.goto('/routing/..//attacker.example/x').catch(() => {})\")."
+      ],
+      "adjudication": {
+        "label": "FP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "Legitimate cross-origin security regression test: uses `page.route('**://attacker.example/**', ...route.fulfill(...))` as a honeypot trap to assert zero requests hit the external origin, and `.catch(() => {})` on an intentionally rejected navigation."
+      }
+    },
+    {
+      "id": "vuejs/vitepress@44457ff2cca18439496b954a727fc2e337d52c3c",
+      "repo": "vuejs/vitepress",
+      "sha": "44457ff2cca18439496b954a727fc2e337d52c3c",
+      "commitUrl": "https://github.com/vuejs/vitepress/commit/44457ff2cca18439496b954a727fc2e337d52c3c",
+      "testPaths": [
+        "__tests__/e2e/rtl/index.test.ts"
+      ],
+      "ruleCodes": [
+        "AITEST-G105"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G105] __tests__/e2e/rtl/index.test.ts: added skip/fixme/only (\"test.skip('mirrors the external link icon', async () => {\").",
+        "[Healer Diff Guard][AITEST-G105] __tests__/e2e/rtl/index.test.ts: added skip/fixme/only (\"test.skip('slides the mobile sidebar in from the right', async () => {\")."
+      ],
+      "adjudication": {
+        "label": "TP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "Icon update PR (#5506) directly disabled two existing passing E2E tests via unwaived `test.skip(...)` (`// FIXME: path data is updated...` and `// FIXME: flaky`) instead of fixing or waiving them — textbook True Positive for AITEST-G105."
+      }
+    }
+  ]
+}

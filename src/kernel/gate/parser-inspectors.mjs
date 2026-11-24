@@ -1,0 +1,317 @@
+import { extractExpectChainFromCall } from './lattice.mjs';
+import { getNodeLine, subtreeContainsKind, unwrapExpr } from './ts-loader.mjs';
+
+export const SEMANTIC_LOCATOR_METHODS = new Set([
+  'getByRole',
+  'getByLabel',
+  'getByText',
+  'getByTestId',
+  'getByPlaceholder',
+  'getByAltText',
+  'getByTitle',
+]);
+
+export const SUCCESS_STATUS_CODES = new Set([200, 201, 202, 204, 400, 401, 403, 404, 409]);
+
+export const BROWSER_EVAL_METHODS = new Set([
+  'evaluate',
+  'evaluateAll',
+  'evaluateHandle',
+  'addInitScript',
+  'addScriptTag',
+]);
+
+export const RUNTIME_CAPABILITY_RE =
+  /\b(?:globalThis|process\.platform|process\.versions|browserName|isWindows|isMac|isLinux|isMobile|headless|WebSocket|SharedArrayBuffer|Worker|Notification|Clipboard)\b/;
+
+/**
+ * @typedef {{
+ *   insideIf: boolean;
+ *   insideIfInTest: boolean;
+ *   insideTernary: boolean;
+ *   insideBrowserEvaluate: boolean;
+ *   scopeKind: string;
+ *   testTitle: string | null;
+ * }} ParserCtx
+ * @typedef {{
+ *   fileLabel: string;
+ *   wrapInAsyncFn: boolean;
+ *   isCustomAssertName: (name: string) => boolean;
+ *   summary: Record<string, any>;
+ *   pushViolation: (code: string, message: string, snippet?: string, meta?: Record<string, any>) => void;
+ * }} ParserState
+ */
+
+/** @param {any} ts @param {any} node @returns {boolean} */
+export function hasThrowStatement(ts, node) {
+  return subtreeContainsKind(ts, node, (n) => ts.isThrowStatement(n));
+}
+
+/** @param {any} ts @param {any} node @returns {boolean} */
+export function hasReturnStatement(ts, node) {
+  return subtreeContainsKind(ts, node, (n) => ts.isReturnStatement(n));
+}
+
+/** @param {any} ts @param {any} node @returns {boolean} */
+export function hasBareReturn(ts, node) {
+  return subtreeContainsKind(ts, node, (n) => ts.isReturnStatement(n) && !n.expression);
+}
+
+/** @param {any} ts @param {any} sf @param {any} node @param {(name: string) => boolean} isCustomAssertName @returns {boolean} */
+export function hasExpectOrAssertCall(ts, sf, node, isCustomAssertName) {
+  return subtreeContainsKind(ts, node, (n) => {
+    if (!ts.isCallExpression(n)) return false;
+    if (extractExpectChainFromCall(ts, sf, n)) return true;
+    const expr = n.expression;
+    if (ts.isIdentifier(expr) && (expr.text === 'expect' || expr.text === 'assert' || isCustomAssertName(expr.text))) {
+      return true;
+    }
+    if (ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.expression) && expr.expression.text === 'expect') {
+      return true;
+    }
+    return false;
+  });
+}
+
+/** @param {any} ts @param {any} rawNode @returns {string | null} */
+export function extractStringLiteralText(ts, rawNode) {
+  if (!rawNode) return null;
+  const node = unwrapExpr(ts, rawNode);
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return node.text;
+  }
+  return null;
+}
+
+/**
+ * Inspects a `route.fulfill(...)` handler subtree to classify status codes, fault injection (4xx/5xx),
+ * or security honeypot traps (callback mutating a flag / asserting not hit).
+ * @param {any} ts
+ * @param {any} sf
+ * @param {any} handlerNode
+ */
+export function inspectRouteFulfillHandler(ts, sf, handlerNode) {
+  /** @type {number[]} */
+  const statusCodes = [];
+  let hasFulfill = false;
+  let setsExternalTrapVar = false;
+
+  /** @param {any} n */
+  const inspect = (n) => {
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'fulfill') {
+      hasFulfill = true;
+      const arg0 = n.arguments[0] ? unwrapExpr(ts, n.arguments[0]) : null;
+      if (arg0 && ts.isObjectLiteralExpression(arg0)) {
+        for (const prop of arg0.properties) {
+          if (ts.isPropertyAssignment(prop)) {
+            const k = ts.isIdentifier(prop.name)
+              ? prop.name.text
+              : ts.isStringLiteral(prop.name)
+                ? prop.name.text
+                : '';
+            const v = unwrapExpr(ts, prop.initializer);
+            if (k === 'status' && ts.isNumericLiteral(v)) {
+              statusCodes.push(Number(v.text));
+            }
+          }
+        }
+      }
+    }
+    if (
+      ts.isBinaryExpression(n) &&
+      n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isIdentifier(n.left)
+    ) {
+      setsExternalTrapVar = true;
+    }
+    if (
+      ts.isCallExpression(n) &&
+      ts.isPropertyAccessExpression(n.expression) &&
+      n.expression.name.text === 'push'
+    ) {
+      setsExternalTrapVar = true;
+    }
+    ts.forEachChild(n, inspect);
+  };
+  inspect(handlerNode);
+
+  const isFaultInjection = statusCodes.length > 0 && statusCodes.every((c) => c >= 400);
+  return { hasFulfill, statusCodes, isFaultInjection, setsExternalTrapVar };
+}
+
+/**
+ * Inspects a block for conditional early returns preceding test assertions (`AITEST-G110`).
+ * @param {any} ts @param {any} sf @param {any} blockNode @param {ParserCtx} ctx @param {ParserState} state
+ */
+export function inspectEarlyReturnInBlock(ts, sf, blockNode, ctx, state) {
+  if (!blockNode || !Array.isArray(blockNode.statements)) return;
+  const { fileLabel, wrapInAsyncFn, isCustomAssertName, summary, pushViolation } = state;
+  const isSyntheticHunkBody =
+    Boolean(wrapInAsyncFn) &&
+    blockNode.parent &&
+    ts.isFunctionDeclaration(blockNode.parent) &&
+    blockNode.parent.name?.text === '__aitest_hunk__';
+  /** @type {string | null} */
+  let sawConditionalReturn = null;
+  let sawConditionalLine = 1;
+  for (const stmt of blockNode.statements) {
+    if (ts.isIfStatement(stmt) && hasReturnStatement(ts, stmt.thenStatement)) {
+      const snippet = stmt.getText(sf).trim().split(/\r?\n/)[0];
+      const line = getNodeLine(ts, sf, stmt);
+      if (isSyntheticHunkBody && hasBareReturn(ts, stmt.thenStatement)) {
+        const ev = {
+          kind: 'early-return',
+          line,
+          scopeKind: ctx.scopeKind,
+          testTitle: ctx.testTitle,
+          insideBrowserEvaluate: ctx.insideBrowserEvaluate,
+          snippet,
+          message: `${fileLabel}: early bare return inside conditional bypasses subsequent test assertions ("${snippet}").`,
+        };
+        summary.events.conditionalAssertions.push(ev);
+        pushViolation('AITEST-G110', ev.message, snippet, ev);
+        sawConditionalReturn = null;
+      } else {
+        sawConditionalReturn = snippet;
+        sawConditionalLine = line;
+      }
+    } else if (sawConditionalReturn && hasExpectOrAssertCall(ts, sf, stmt, isCustomAssertName)) {
+      const ev = {
+        kind: 'early-return',
+        line: sawConditionalLine,
+        scopeKind: ctx.scopeKind,
+        testTitle: ctx.testTitle,
+        insideBrowserEvaluate: ctx.insideBrowserEvaluate,
+        snippet: sawConditionalReturn,
+        message: `${fileLabel}: early return inside conditional before assertion bypasses test checks ("${sawConditionalReturn}").`,
+      };
+      summary.events.conditionalAssertions.push(ev);
+      pushViolation('AITEST-G110', ev.message, sawConditionalReturn, ev);
+      sawConditionalReturn = null;
+    }
+  }
+}
+
+/**
+ * Inspects object literal properties for `{ force: true }`, `retries`, `timeout`, `testIgnore`, and weakened ESLint rules.
+ * @param {any} ts @param {any} sf @param {any} node @param {number} line @param {ParserCtx} ctx @param {ParserState} state
+ */
+export function inspectPropertyAssignment(ts, sf, node, line, ctx, state) {
+  const { fileLabel, summary, pushViolation } = state;
+  const propName = ts.isIdentifier(node.name)
+    ? node.name.text
+    : ts.isStringLiteral(node.name)
+      ? node.name.text
+      : '';
+  const init = unwrapExpr(ts, node.initializer);
+  const propText = node.getText(sf);
+
+  if (propName === 'force' && init.kind === ts.SyntaxKind.TrueKeyword) {
+    const ev = {
+      line,
+      scopeKind: ctx.scopeKind,
+      testTitle: ctx.testTitle,
+      snippet: propText,
+      message: `${fileLabel}: added { force: true } bypassing actionability checks.`,
+    };
+    summary.events.forceTrue.push(ev);
+    pushViolation('AITEST-G108', ev.message, ev.snippet, ev);
+  }
+  if (propName === 'retries' && ts.isNumericLiteral(init) && Number(init.text) >= 1) {
+    const ev = {
+      line,
+      scopeKind: ctx.scopeKind,
+      testTitle: ctx.testTitle,
+      snippet: propText,
+      message: `${fileLabel}: added test retry inflation (retries: ${init.text}).`,
+    };
+    summary.events.timeoutOrRetry.push(ev);
+    pushViolation('AITEST-G109', ev.message, ev.snippet, ev);
+  }
+  if (propName === 'timeout' && ts.isNumericLiteral(init) && Number(init.text) >= 60_000) {
+    const ev = {
+      line,
+      scopeKind: ctx.scopeKind,
+      testTitle: ctx.testTitle,
+      snippet: propText,
+      message: `${fileLabel}: excessive timeout (${init.text}ms >= 60000ms).`,
+    };
+    summary.events.timeoutOrRetry.push(ev);
+    pushViolation('AITEST-G109', ev.message, ev.snippet, ev);
+  }
+  if (propName === 'testIgnore') {
+    const ev = {
+      line,
+      scopeKind: ctx.scopeKind,
+      testTitle: ctx.testTitle,
+      snippet: propText,
+      message: `${fileLabel}: added testIgnore exclusion.`,
+    };
+    summary.events.configTamper.push(ev);
+    pushViolation('AITEST-G101', ev.message, ev.snippet, ev);
+  }
+  if (
+    propName.startsWith('playwright/') &&
+    ts.isStringLiteral(init) &&
+    (init.text === 'off' || init.text === 'warn')
+  ) {
+    const ev = {
+      line,
+      scopeKind: ctx.scopeKind,
+      testTitle: ctx.testTitle,
+      snippet: propText,
+      message: `${fileLabel}: weakened eslint-plugin-playwright rule "${propName}: ${init.text}".`,
+    };
+    summary.events.configTamper.push(ev);
+    pushViolation('AITEST-G101', ev.message, ev.snippet, ev);
+  }
+}
+
+/**
+ * Inspects `try/catch/finally` blocks for swallowed exceptions (`AITEST-G107`) while recording
+ * browser-evaluate scope and negative-assertion catch clauses for FP analysis.
+ * @param {any} ts @param {any} sf @param {any} node @param {number} line @param {ParserCtx} ctx @param {ParserState} state
+ */
+export function inspectTryStatement(ts, sf, node, line, ctx, state) {
+  const { fileLabel, isCustomAssertName, summary, pushViolation } = state;
+  if (node.catchClause && !hasThrowStatement(ts, node.catchClause.block)) {
+    const snippet = node.catchClause.getText(sf).slice(0, 120);
+    const hasAssertionInCatch = hasExpectOrAssertCall(ts, sf, node.catchClause.block, isCustomAssertName);
+    const tryText = node.tryBlock ? node.tryBlock.getText(sf) : '';
+    const catchText = node.catchClause.block.getText(sf);
+    const capturesErrorFlag =
+      /\b(?:caught|threw|didThrow|hasError|error|err)\s*=\s*(?:true|e\b|err\b|error\b)/i.test(catchText) ||
+      /\.push\s*\(/.test(catchText);
+    const ev = {
+      kind: 'try-catch',
+      line,
+      scopeKind: ctx.scopeKind,
+      testTitle: ctx.testTitle,
+      insideBrowserEvaluate: ctx.insideBrowserEvaluate,
+      hasAssertionInCatch,
+      capturesErrorFlag,
+      tryContainsAssert: hasExpectOrAssertCall(ts, sf, node.tryBlock, isCustomAssertName),
+      tryTextSnippet: tryText.slice(0, 120),
+      snippet,
+      message: `${fileLabel}: swallowed exception in try/catch block without rethrow.`,
+    };
+    summary.events.swallowedCatches.push(ev);
+    pushViolation('AITEST-G107', ev.message, snippet, ev);
+  }
+  if (node.finallyBlock && hasReturnStatement(ts, node.finallyBlock)) {
+    const snippet = node.finallyBlock.getText(sf).slice(0, 120);
+    const ev = {
+      kind: 'finally-return',
+      line,
+      scopeKind: ctx.scopeKind,
+      testTitle: ctx.testTitle,
+      insideBrowserEvaluate: ctx.insideBrowserEvaluate,
+      hasAssertionInCatch: false,
+      capturesErrorFlag: false,
+      snippet,
+      message: `${fileLabel}: return inside finally block suppresses thrown assertion failures.`,
+    };
+    summary.events.swallowedCatches.push(ev);
+    pushViolation('AITEST-G107', ev.message, snippet, ev);
+  }
+}

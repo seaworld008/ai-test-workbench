@@ -22,14 +22,17 @@ import {
   resolveVerdictTrustTier,
   tryCosignKeylessSign,
 } from './trust.mjs';
-import { SCHEMA_VERSIONS, WORKBENCH_VERSION } from './version.mjs';
+import { SCHEMA_VERSIONS, WORKBENCH_VERSION } from './core/version.mjs';
 import {
   listChangedFilesUnderDir,
   resolveGitTreeSha,
   verifyPayloadT1,
-} from '../templates/playwright-qa/support/gate-kernel.mjs';
+} from './kernel/gate-kernel.mjs';
 
-function buildSarifReport(verdictObj) {
+/**
+ * @param {Record<string, any>} verdictObj
+ */
+export function buildSarifReport(verdictObj) {
   const results = [];
   for (const errMsg of verdictObj.gateErrors || []) {
     const codeMatch = /\[(AITEST-G\d+|Governance Tamper Blocked|Stale Results Blocked|Run Ledger Blocked|Heal Governance Blocked|Static Check)\]/.exec(
@@ -58,7 +61,12 @@ function buildSarifReport(verdictObj) {
   }
 
   const trustLevel = verdictObj.trustLevel || verdictObj.trustTier || 'T0';
-  const trustDef = TRUST_LEVEL_DEFINITIONS[trustLevel] || TRUST_LEVEL_DEFINITIONS.T0;
+  const trustDef =
+    trustLevel === 'T2'
+      ? TRUST_LEVEL_DEFINITIONS.T2
+      : trustLevel === 'T1'
+        ? TRUST_LEVEL_DEFINITIONS.T1
+        : TRUST_LEVEL_DEFINITIONS.T0;
 
   return {
     $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
@@ -89,7 +97,12 @@ function buildSarifReport(verdictObj) {
   };
 }
 
-function buildPrVerdictMarkdown(verdict, lang = 'zh') {
+/**
+ * @param {Record<string, any>} verdict
+ * @param {'zh' | 'en' | string} [lang]
+ * @returns {string}
+ */
+export function buildPrVerdictMarkdown(verdict, lang = 'zh') {
   const isZh = lang === 'zh';
   const badge =
     verdict.verdict === 'pass'
@@ -147,13 +160,18 @@ function buildPrVerdictMarkdown(verdict, lang = 'zh') {
  * Checks `.aitest/heals/*.json` against modified specs in the current diff (`T-07`):
  * If an active/unclosed B/C/D heal session exists AND its spec file was edited, block the verdict!
  * Also detects tampered heal session files via T1 HMAC.
+ * @param {string} qaDir
+ * @param {{ isGitRepo?: boolean, gitRoot?: string | null, resolved?: string | null }} baseResolution
+ * @returns {{ ok: boolean, errors: string[] }}
  */
-function checkHealSessionConflicts(qaDir, baseResolution) {
+export function checkHealSessionConflicts(qaDir, baseResolution) {
   const healsDir = path.join(qaDir, '.aitest', 'heals');
   if (!fs.existsSync(healsDir)) return { ok: true, errors: [] };
 
+  /** @type {string[]} */
   const errors = [];
-  let changedInsideQa = new Set();
+  /** @type {Set<string>} */
+  const changedInsideQa = new Set();
 
   if (baseResolution.isGitRepo && baseResolution.gitRoot && baseResolution.resolved) {
     const ch = listChangedFilesUnderDir(baseResolution.gitRoot, baseResolution.resolved, qaDir);
@@ -280,6 +298,7 @@ export async function verifyChangeCore(options = {}) {
   }
 
   // Step 2: Target Safety & Scope Resolution
+  /** @type {Record<string, string>} */
   const overrides = {};
   if (options.baseUrl) overrides.TEST_BASE_URL = options.baseUrl;
   const mergedEnv = loadMergedQaEnv(qaDir, { ...process.env, ...overrides });
@@ -365,6 +384,7 @@ export async function verifyChangeCore(options = {}) {
 
   // Step 5: Structured Diagnostics on Failures
   const resultsPath = path.join(qaDir, 'reports', 'results.json');
+  /** @type {Array<{ testId: string, title: string, file: string, line: number, categoryCode: string, category: string, confidence: string, candidates: string[], traceId: string | null, traceIds: string[], errorSnippet: string, evidence: string | null }>} */
   let diagFailures = [];
   if (fs.existsSync(resultsPath)) {
     const diag = generateDiagnosticsMarkdown(qaDir, resultsPath);
@@ -434,12 +454,12 @@ export async function verifyChangeCore(options = {}) {
   if (verdictStatus !== 'pass') {
     for (const f of diagFailures.slice(0, 5)) {
       if (f.categoryCode === 'A') {
-        nextActions.push({ tool: 'aitest_heal_begin', args: { target, testId: f.testId } });
+        nextActions.push({ tool: 'aitest_heal', args: { action: 'begin', target, testId: f.testId } });
       } else {
         nextActions.push({
-          tool: 'aitest_heal_begin',
+          tool: 'aitest_heal',
           note: `Category ${f.categoryCode}: open session and conclude as defect/escalation without editing assertions`,
-          args: { target, testId: f.testId },
+          args: { action: 'begin', target, testId: f.testId },
         });
       }
     }
@@ -562,6 +582,10 @@ export async function verifyChangeCore(options = {}) {
   };
 }
 
+/**
+ * @param {Record<string, any>} [options]
+ * @returns {Promise<number>}
+ */
 export async function runVerifyChangeCommand(options = {}) {
   /** @type {Record<string, any>} */
   const res = await verifyChangeCore(options);

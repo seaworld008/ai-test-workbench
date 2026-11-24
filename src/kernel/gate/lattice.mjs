@@ -1,0 +1,404 @@
+import { inspectMatcherExpectedArgAst, isConstantExpressionAst } from './constant-eval.mjs';
+import { resolveTypeScriptCompiler } from './ts-loader.mjs';
+
+export const S5_EXACT_MATCHERS = new Set([
+  'toEqual',
+  'toStrictEqual',
+  'toHaveText',
+  'toHaveValue',
+  'toHaveValues',
+  'toHaveURL',
+  'toMatchAriaSnapshot',
+  'toHaveScreenshot',
+  'toBe',
+]);
+
+export const S4_STRUCTURAL_MATCHERS = new Set([
+  'toHaveCount',
+  'toHaveAttribute',
+  'toHaveJSProperty',
+  'toHaveCSS',
+  'toHaveClass',
+  'toHaveRole',
+  'toHaveAccessibleName',
+  'toHaveAccessibleDescription',
+  'toHaveId',
+  'toHaveTitle',
+]);
+
+export const S3_PARTIAL_MATCHERS = new Set([
+  'toContainText',
+  'toContain',
+  'toContainEqual',
+  'toMatch',
+  'toMatchObject',
+  'toHaveProperty',
+]);
+
+export const S3_WEB_FIRST_STATE_MATCHERS = new Set([
+  'toBeFocused',
+  'toBeChecked',
+  'toBeDisabled',
+  'toBeEnabled',
+  'toBeEditable',
+  'toBeEmpty',
+  'toBeHidden',
+  'toBeOK',
+]);
+
+export const S2_STATE_MATCHERS = new Set([
+  'toBeVisible',
+  'toBeAttached',
+  'toBeInViewport',
+]);
+
+export const S1_WEAK_MATCHERS = new Set([
+  'toBeTruthy',
+  'toBeFalsy',
+  'toBeDefined',
+  'toBeNull',
+  'toBeUndefined',
+  'toBeNaN',
+  'toBeGreaterThan',
+  'toBeGreaterThanOrEqual',
+  'toBeLessThan',
+  'toBeLessThanOrEqual',
+  'toBeCloseTo',
+]);
+
+export const DOMAIN_HELPERS = new Set(['expectAccessible', 'expectPerformanceBudget', 'expectApiContract']);
+
+/**
+ * Unwraps an `expect(...)[.not].matcher(...)` AST `CallExpression`.
+ * @param {any} ts
+ * @param {any} sf
+ * @param {any} callNode
+ */
+export function extractExpectChainFromCall(ts, sf, callNode) {
+  if (!ts.isCallExpression(callNode)) return null;
+  const callee = callNode.expression;
+
+  if (ts.isIdentifier(callee) && DOMAIN_HELPERS.has(callee.text)) {
+    return {
+      kind: 'domainHelper',
+      matcher: callee.text,
+      actualNode: callNode.arguments[0] || null,
+      expectedNode: callNode.arguments[1] || null,
+      isSoft: false,
+      isPoll: false,
+      isNegated: false,
+    };
+  }
+
+  if (!ts.isPropertyAccessExpression(callee)) return null;
+  const matcher = callee.name.text;
+
+  let cur = callee.expression;
+  let isNegated = false;
+  while (cur && ts.isPropertyAccessExpression(cur)) {
+    const propName = cur.name.text;
+    if (propName === 'not') {
+      isNegated = !isNegated;
+      cur = cur.expression;
+    } else if (propName === 'resolves' || propName === 'rejects') {
+      cur = cur.expression;
+    } else {
+      break;
+    }
+  }
+
+  if (!cur || !ts.isCallExpression(cur)) return null;
+  const rootCallee = cur.expression;
+  let isExpect = false;
+  let isSoft = false;
+  let isPoll = false;
+
+  if (ts.isIdentifier(rootCallee) && rootCallee.text === 'expect') {
+    isExpect = true;
+  } else if (
+    ts.isPropertyAccessExpression(rootCallee) &&
+    ts.isIdentifier(rootCallee.expression) &&
+    rootCallee.expression.text === 'expect' &&
+    (rootCallee.name.text === 'soft' || rootCallee.name.text === 'poll')
+  ) {
+    isExpect = true;
+    isSoft = rootCallee.name.text === 'soft';
+    isPoll = rootCallee.name.text === 'poll';
+  }
+
+  if (!isExpect) return null;
+
+  return {
+    kind: 'expect',
+    matcher,
+    actualNode: cur.arguments[0] || null,
+    expectedNode: callNode.arguments[0] || null,
+    matcherArgs: callNode.arguments,
+    isSoft,
+    isPoll,
+    isNegated,
+  };
+}
+
+/**
+ * Classifies an AST expect chain on the S0..S5 strength lattice with full negation,
+ * constant-folding, self-referential oracle, and vacuous regex/predicate handling.
+ * @param {any} ts
+ * @param {any} sf
+ * @param {{ kind: string, matcher: string, actualNode: any, expectedNode: any, matcherArgs?: any, isSoft: boolean, isPoll: boolean, isNegated: boolean }} chain
+ * @param {string} rawText
+ */
+export function classifyExpectChainAst(ts, sf, chain, rawText) {
+  if (chain.kind === 'domainHelper') {
+    return {
+      tier: 5,
+      label: 'S5-domain-contract',
+      matcher: chain.matcher,
+      isSoft: false,
+      isNegated: false,
+      isTautology: false,
+      isSelfReferential: false,
+      isVacuous: false,
+      isAriaSnapshot: false,
+      numericExpected: null,
+      actualExpr: '',
+      expectedArg: '',
+      raw: rawText,
+    };
+  }
+
+  const matcher = chain.matcher;
+  const actualExpr = chain.actualNode ? chain.actualNode.getText(sf).trim() : '';
+  const expectedArg = chain.expectedNode ? chain.expectedNode.getText(sf).trim() : '';
+
+  if (isConstantExpressionAst(ts, sf, chain.actualNode)) {
+    return {
+      tier: 0,
+      label: 'S0-tautology',
+      matcher,
+      isSoft: chain.isSoft,
+      isNegated: chain.isNegated,
+      isTautology: true,
+      isSelfReferential: false,
+      isVacuous: false,
+      isAriaSnapshot: false,
+      numericExpected: null,
+      actualExpr,
+      expectedArg,
+      raw: rawText,
+    };
+  }
+
+  const expInfo = inspectMatcherExpectedArgAst(ts, sf, matcher, chain.expectedNode, chain.actualNode);
+
+  if (expInfo.isSelfReferential) {
+    return {
+      tier: 0,
+      label: 'S0-self-referential-oracle',
+      matcher,
+      isSoft: chain.isSoft,
+      isNegated: chain.isNegated,
+      isTautology: true,
+      isSelfReferential: true,
+      isVacuous: false,
+      isAriaSnapshot: false,
+      numericExpected: expInfo.numericValue,
+      actualExpr,
+      expectedArg,
+      raw: rawText,
+    };
+  }
+
+  if (expInfo.isVacuous) {
+    return {
+      tier: 0,
+      label: 'S0-vacuous-matcher',
+      matcher,
+      isSoft: chain.isSoft,
+      isNegated: chain.isNegated,
+      isTautology: true,
+      isSelfReferential: false,
+      isVacuous: true,
+      isAriaSnapshot: false,
+      numericExpected: expInfo.numericValue,
+      actualExpr,
+      expectedArg,
+      raw: rawText,
+    };
+  }
+
+  let baseTier = 3;
+  let label = 'S3-other';
+
+  if (expInfo.isNonEmptyRegex) {
+    baseTier = 1;
+    label = 'S1-nonempty-regex';
+  } else if (S5_EXACT_MATCHERS.has(matcher)) {
+    if ((matcher === 'toHaveText' || matcher === 'toHaveURL') && expInfo.isRegex) {
+      baseTier = 3;
+      label = 'S3-regex-match';
+    } else if (
+      matcher === 'toBe' &&
+      /^(true|false)$/.test(expectedArg) &&
+      !/\.(status|ok|isDisabled|isChecked|isVisible)\b/.test(actualExpr) &&
+      !/\bArray\.isArray\b|\btypeof\b/.test(actualExpr)
+    ) {
+      baseTier = 2;
+      label = 'S2-boolean-check';
+    } else if (
+      matcher === 'toBe' &&
+      /\bevaluate\s*\(/.test(actualExpr) &&
+      /\b(?:activeElement|nodeName|tagName|checked|disabled|hidden|focused)\b/.test(actualExpr)
+    ) {
+      baseTier = 3;
+      label = 'S3-dom-eval-probe';
+    } else {
+      baseTier = 5;
+      label = 'S5-exact';
+    }
+  } else if (S4_STRUCTURAL_MATCHERS.has(matcher)) {
+    if (matcher === 'toHaveTitle' && expInfo.isRegex) {
+      baseTier = 3;
+      label = 'S3-regex-title';
+    } else {
+      baseTier = 4;
+      label = 'S4-structural';
+    }
+  } else if (S3_PARTIAL_MATCHERS.has(matcher)) {
+    baseTier = 3;
+    label = 'S3-partial';
+  } else if (S3_WEB_FIRST_STATE_MATCHERS.has(matcher)) {
+    baseTier = 3;
+    label = 'S3-web-first-state';
+  } else if (S2_STATE_MATCHERS.has(matcher)) {
+    baseTier = 2;
+    label = 'S2-state';
+  } else if (S1_WEAK_MATCHERS.has(matcher)) {
+    baseTier = 1;
+    label = 'S1-weak';
+  }
+
+  const finalTier = chain.isNegated ? Math.max(1, baseTier - 2) : baseTier;
+  if (chain.isNegated) {
+    label = `S${finalTier}-negated(${matcher})`;
+  }
+
+  return {
+    tier: finalTier,
+    label,
+    matcher,
+    isSoft: chain.isSoft,
+    isNegated: chain.isNegated,
+    isTautology: false,
+    isSelfReferential: false,
+    isVacuous: false,
+    isAriaSnapshot: matcher === 'toMatchAriaSnapshot',
+    numericExpected: expInfo.numericValue,
+    actualExpr,
+    expectedArg,
+    raw: rawText,
+  };
+}
+
+/**
+ * Classifies an assertion statement or expression on the S0..S5 strength lattice.
+ * @param {string} stmt
+ * @param {string} [qaDir]
+ */
+export function classifyAssertionStatement(stmt, qaDir) {
+  const clean = String(stmt || '').trim();
+  const ts = resolveTypeScriptCompiler(qaDir);
+  if (ts && clean) {
+    try {
+      const wrapped = `async function __expr__() {\n${clean}\n}`;
+      const sf = ts.createSourceFile('__stmt__.ts', wrapped, ts.ScriptTarget.Latest, true);
+      /** @type {ReturnType<typeof classifyExpectChainAst> | null} */
+      let found = null;
+      /** @param {any} node */
+      const visit = (node) => {
+        if (found) return;
+        if (ts.isCallExpression(node)) {
+          const chain = extractExpectChainFromCall(ts, sf, node);
+          if (chain) {
+            found = classifyExpectChainAst(ts, sf, chain, clean);
+            return;
+          }
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sf);
+      if (found) return found;
+    } catch {
+      // fall back to regex classifier below
+    }
+  }
+
+  const isSoft = /\bexpect\.soft\s*\(/.test(clean);
+  if (/\b(?:expectAccessible|expectPerformanceBudget|expectApiContract)\s*\(/.test(clean)) {
+    return { tier: 5, label: 'S5-domain-contract', matcher: 'domainHelper', isSoft, isNegated: false, isTautology: false, raw: clean };
+  }
+  const expMatch =
+    /\bexpect(?:\.(?:soft|poll))?\s*\(\s*([\s\S]*?)\s*\)\s*(\.\s*not\s*)?\.\s*([a-zA-Z0-9_]+)\s*\(([\s\S]*?)\)/.exec(
+      clean
+    );
+  if (!expMatch) {
+    return { tier: 3, label: 'S3-custom-helper', matcher: 'custom', isSoft, isNegated: false, isTautology: false, raw: clean };
+  }
+  const actualExpr = expMatch[1].trim().replace(/^\(+|\)+$/g, '').trim();
+  const isNegated = Boolean(expMatch[2]);
+  const matcher = expMatch[3].trim();
+  const expectedArg = expMatch[4].trim();
+
+  if (
+    /^(true|false|null|undefined|NaN|\d[\d_.]*|'[^']*'|"[^"]*"|`[^`$]*`|\{\s*\}|\[\s*\])$/.test(actualExpr) ||
+    /^(true|false|null|undefined|\d+)\s*,/.test(actualExpr)
+  ) {
+    return { tier: 0, label: 'S0-tautology', matcher, isSoft, isNegated, isTautology: true, expectedArg, actualExpr, raw: clean };
+  }
+
+  let baseTier = S5_EXACT_MATCHERS.has(matcher)
+    ? 5
+    : S4_STRUCTURAL_MATCHERS.has(matcher)
+      ? 4
+      : S3_PARTIAL_MATCHERS.has(matcher) || S3_WEB_FIRST_STATE_MATCHERS.has(matcher)
+        ? 3
+        : S2_STATE_MATCHERS.has(matcher)
+          ? 2
+          : S1_WEAK_MATCHERS.has(matcher)
+            ? 1
+            : 3;
+  const finalTier = isNegated ? Math.max(1, baseTier - 2) : baseTier;
+  return {
+    tier: finalTier,
+    label: isNegated ? `S${finalTier}-negated` : `S${finalTier}`,
+    matcher,
+    isSoft,
+    isNegated,
+    isTautology: false,
+    expectedArg,
+    actualExpr,
+    raw: clean,
+  };
+}
+
+/** @param {string[]} assertPatterns @returns {RegExp} */
+export function buildAssertRegex(assertPatterns) {
+  const safePatterns = assertPatterns.filter((p) => p && p !== '*');
+  if (safePatterns.length === 0) return /\bexpect\s*\(/;
+  const parts = safePatterns.map((pat) => {
+    const escaped = pat.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[a-zA-Z0-9_$]*');
+    return `\\b${escaped}\\s*\\(`;
+  });
+  return new RegExp(parts.join('|'));
+}
+
+/** @param {string[] | undefined} assertFunctionNames @returns {(fnName: string) => boolean} */
+export function buildCustomAssertNameMatcher(assertFunctionNames) {
+  const customPatterns = (assertFunctionNames || [])
+    .filter((p) => p && p !== '*' && p !== 'expect' && p !== 'expect*')
+    .map((pat) => {
+      const escaped = pat.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[a-zA-Z0-9_$]*');
+      return new RegExp(`^${escaped}$`);
+    });
+  return (fnName) => customPatterns.some((re) => re.test(fnName));
+}

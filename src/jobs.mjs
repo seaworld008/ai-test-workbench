@@ -53,6 +53,7 @@ export function buildSafeChildEnv(baseEnv = process.env) {
 /** @type {Map<string, Promise<any>>} */
 const workspaceLocks = new Map();
 
+/** @param {string} workspaceKey */
 function normalizeLockKey(workspaceKey) {
   const resolved = path.resolve(workspaceKey);
   let real = resolved;
@@ -70,6 +71,7 @@ function normalizeLockKey(workspaceKey) {
   return process.platform === 'win32' ? canonical.toLowerCase() : canonical;
 }
 
+/** @param {number} pid */
 function isProcessAlive(pid) {
   if (!pid || typeof pid !== 'number') return false;
   try {
@@ -83,6 +85,8 @@ function isProcessAlive(pid) {
 /**
  * Acquires a best-effort cross-process lockfile inside `<qaDir>/.aitest/.write.lock` (`M-13`)
  * so multiple IDE stdio MCP servers targeting the same QA directory serialize writes cleanly.
+ * @param {string} lockDir
+ * @param {number} [timeoutMs]
  */
 async function acquireDiskLock(lockDir, timeoutMs = 15_000) {
   if (!lockDir || !fs.existsSync(lockDir)) return () => {};
@@ -105,7 +109,8 @@ async function acquireDiskLock(lockDir, timeoutMs = 15_000) {
         }
       };
     } catch (err) {
-      if (err && err.code !== 'EEXIST') return () => {};
+      const errCode = err && typeof err === 'object' && 'code' in err ? err.code : undefined;
+      if (err && errCode !== 'EEXIST') return () => {};
       // Recover stale lock from dead PID or >15 min old
       try {
         const raw = JSON.parse(fs.readFileSync(lockFile, 'utf8'));
@@ -219,6 +224,7 @@ export class McpJobManager {
     this.waitQueue = [];
   }
 
+  /** @param {string | number} requestId @param {string | null} [sessionId] */
   _makeRequestKey(requestId, sessionId = 'default') {
     return `${sessionId || 'default'}:${String(requestId)}`;
   }
@@ -366,7 +372,7 @@ export class McpJobManager {
                 }, timeoutMs)
               : null;
 
-          child.stdout?.on('data', (chunk) => {
+          child.stdout?.on('data', (/** @type {Buffer} */ chunk) => {
             const text = chunk.toString('utf8');
             jobRecord.rawStdout = appendBoundedBuffer(jobRecord.rawStdout, text, this.maxOutputBytes);
             const lines = text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
@@ -382,7 +388,7 @@ export class McpJobManager {
             }
           });
 
-          child.stderr?.on('data', (chunk) => {
+          child.stderr?.on('data', (/** @type {Buffer} */ chunk) => {
             jobRecord.stderr = appendBoundedBuffer(jobRecord.stderr, chunk.toString('utf8'), this.maxOutputBytes);
           });
 
@@ -455,6 +461,7 @@ export class McpJobManager {
     return { backgrounded: false, job: jobRecord };
   }
 
+  /** @param {string} jobId @param {string | null} [callerSessionId] */
   _getOwnedJob(jobId, callerSessionId = null) {
     const j = this.jobs.get(jobId);
     if (!j) return null;
@@ -464,6 +471,7 @@ export class McpJobManager {
     return j;
   }
 
+  /** @param {string} jobId @param {string | null} [callerSessionId] */
   getPublicStatus(jobId, callerSessionId = null) {
     const j = this._getOwnedJob(jobId, callerSessionId);
     if (!j) return null;
@@ -480,6 +488,7 @@ export class McpJobManager {
     };
   }
 
+  /** @param {string} jobId @param {number} [waitMs] @param {string | null} [callerSessionId] */
   async waitForResult(jobId, waitMs = 0, callerSessionId = null) {
     const j = this._getOwnedJob(jobId, callerSessionId);
     if (!j) return null;
@@ -500,6 +509,7 @@ export class McpJobManager {
     };
   }
 
+  /** @param {string} jobId @param {string | null} [callerSessionId] */
   cancelByJobId(jobId, callerSessionId = null) {
     const j = this._getOwnedJob(jobId, callerSessionId);
     if (!j) return { found: false, cancelled: false };
@@ -515,6 +525,7 @@ export class McpJobManager {
     return { found: true, cancelled: true, jobId, killedPid: j.pid };
   }
 
+  /** @param {string | number} requestId @param {string | null} [callerSessionId] */
   cancelByRequestId(requestId, callerSessionId = 'default') {
     const scopedKey = this._makeRequestKey(requestId, callerSessionId);
     const jobId = this.requestToJob.get(scopedKey);

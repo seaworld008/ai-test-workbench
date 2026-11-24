@@ -5,7 +5,7 @@ import {
   SUPPORTED_MCP_VERSIONS,
   handleMcpJsonRpcMessage,
 } from './mcp/protocol.mjs';
-import { TOOL_REGISTRY, getMcpToolDefinitions } from './mcp/registry.mjs';
+import { DEPRECATED_TOOL_ALIASES, TOOL_REGISTRY, getMcpToolDefinitions } from './mcp/registry.mjs';
 import {
   getMcpPromptDefinitions,
   getMcpResourceDefinitions,
@@ -35,6 +35,7 @@ import { startStdioMcpServer } from './mcp/transport-stdio.mjs';
  */
 
 export {
+  DEPRECATED_TOOL_ALIASES,
   MCP_SERVER_INFO,
   SUPPORTED_MCP_VERSIONS,
   TOOL_REGISTRY,
@@ -53,6 +54,21 @@ export {
   verifyBearerTokenConstantTime,
 };
 
+/**
+ * @param {{
+ *   transport?: string,
+ *   target?: string,
+ *   qaDir?: string,
+ *   lang?: string,
+ *   workspaceRoots?: string | string[],
+ *   host?: string,
+ *   port?: number | string,
+ *   authToken?: string,
+ *   dryRun?: boolean,
+ *   force?: boolean,
+ *   json?: boolean,
+ * }} [options]
+ */
 export async function runMcpServeCommand(options = {}) {
   const transport = String(options.transport || 'stdio').toLowerCase();
   if (!['stdio', 'http', 'sse'].includes(transport)) {
@@ -61,8 +77,10 @@ export async function runMcpServeCommand(options = {}) {
   }
 
   // Guard process-level unhandled rejections so a stray async rejection never crashes long-lived MCP servers (`M-04`)
-  const onUnhandledRejection = (reason) => {
-    console.error(`[AI Test Workbench MCP Error] Unhandled rejection: ${reason?.message || String(reason)}`);
+  const onUnhandledRejection = (/** @type {unknown} */ reason) => {
+    console.error(
+      `[AI Test Workbench MCP Error] Unhandled rejection: ${reason instanceof Error && reason.message ? reason.message : String(reason)}`
+    );
   };
   process.on('unhandledRejection', onUnhandledRejection);
 

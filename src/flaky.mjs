@@ -2,9 +2,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
+import { computeFlakyStats } from './core/playwright-results.mjs';
+import { SCHEMA_VERSIONS } from './core/version.mjs';
 import { readPerTestLedgerRuns } from './ledger.mjs';
-import { SCHEMA_VERSIONS } from './version.mjs';
-import { signPayloadT1 } from '../templates/playwright-qa/support/gate-kernel.mjs';
+import { signPayloadT1 } from './kernel/gate-kernel.mjs';
 
 /**
  * Computes historical flaky & failure rates per test from Run Ledger (`R1-2`).
@@ -18,7 +19,7 @@ export function computeFlakyReport(qaDir, options = {}) {
   const releasePassStreak = options.releasePassStreak ?? 5;
 
   const runs = readPerTestLedgerRuns(qaDir, windowSize);
-  /** @type {Map<string, { testId: string, file: string, title: string, totalRuns: number, passed: number, failed: number, flaky: number, durations: number[], consecutivePasses: number }>} */
+  /** @type {Map<string, { testId: string, file: string, title: string, observations: Array<{ status?: string, retryPassed?: boolean }>, durations: number[] }>} */
   const byTest = new Map();
 
   for (const run of runs) {
@@ -30,53 +31,37 @@ export function computeFlakyReport(qaDir, options = {}) {
           testId: t.testId,
           file: t.file,
           title: t.title,
-          totalRuns: 0,
-          passed: 0,
-          failed: 0,
-          flaky: 0,
+          observations: [],
           durations: [],
-          consecutivePasses: 0,
         };
         byTest.set(t.testId, rec);
       }
-      rec.totalRuns += 1;
+      rec.observations.push({ status: t.status, retryPassed: t.retryPassed });
       if (typeof t.durationMs === 'number') rec.durations.push(t.durationMs);
-      if (t.status === 'expected' && !t.retryPassed) {
-        rec.passed += 1;
-        rec.consecutivePasses += 1;
-      } else if (t.status === 'flaky' || t.retryPassed) {
-        rec.flaky += 1;
-        rec.consecutivePasses = 0;
-      } else if (t.status === 'unexpected') {
-        rec.failed += 1;
-        rec.consecutivePasses = 0;
-      }
     }
   }
 
   const metrics = [...byTest.values()].map((r) => {
-    const flakyEvents = r.flaky + (r.passed > 0 && r.failed > 0 ? Math.min(r.passed, r.failed) : 0);
-    const flakyRate = r.totalRuns > 0 ? Number((flakyEvents / r.totalRuns).toFixed(4)) : 0;
-    const failRate = r.totalRuns > 0 ? Number((r.failed / r.totalRuns).toFixed(4)) : 0;
+    const stats = computeFlakyStats(r.observations);
     const avgDurationMs =
       r.durations.length > 0 ? Math.round(r.durations.reduce((a, b) => a + b, 0) / r.durations.length) : 0;
     const shouldQuarantine =
-      r.totalRuns >= minRuns &&
-      flakyRate >= flakyThreshold &&
-      r.consecutivePasses < releasePassStreak &&
+      stats.totalRuns >= minRuns &&
+      stats.flakyRate >= flakyThreshold &&
+      stats.consecutivePasses < releasePassStreak &&
       !/@critical|@smoke/.test(r.title);
-    const readyToRelease = r.consecutivePasses >= releasePassStreak;
+    const readyToRelease = stats.consecutivePasses >= releasePassStreak;
     return {
       testId: r.testId,
       file: r.file,
       title: r.title,
-      totalRuns: r.totalRuns,
-      passed: r.passed,
-      failed: r.failed,
-      flaky: r.flaky,
-      flakyRate,
-      failRate,
-      consecutivePasses: r.consecutivePasses,
+      totalRuns: stats.totalRuns,
+      passed: stats.passed,
+      failed: stats.failed,
+      flaky: stats.flaky,
+      flakyRate: stats.flakyRate,
+      failRate: stats.failRate,
+      consecutivePasses: stats.consecutivePasses,
       avgDurationMs,
       shouldQuarantine,
       readyToRelease,
@@ -86,6 +71,7 @@ export function computeFlakyReport(qaDir, options = {}) {
   metrics.sort((a, b) => b.flakyRate - a.flakyRate || b.failRate - a.failRate);
 
   const qPath = path.join(qaDir, '.aitest', 'quarantine.json');
+  /** @type {{ schemaVersion: number, entries: Array<Record<string, any>> }} */
   let quarantine = { schemaVersion: SCHEMA_VERSIONS.quarantine, entries: [] };
   if (fs.existsSync(qPath)) {
     try {
@@ -192,6 +178,10 @@ export function syncQuarantineFromLedger(qaDir, options = {}) {
   };
 }
 
+/**
+ * @param {{ lang?: string, target?: string, qaDir?: string, syncQuarantine?: boolean, dryRun?: boolean, force?: boolean, json?: boolean }} [options]
+ * @returns {Promise<number>}
+ */
 export async function runFlakyCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   if (!options.target) {
@@ -212,7 +202,7 @@ export async function runFlakyCommand(options = {}) {
   const out = { ...report, syncResult };
 
   if (options.json) {
-    console.log(JSON.stringify(out, null, 2));
+    console.log(JSON.stringify({ ok: true, exitCode: 0, ...out }, null, 2));
     return 0;
   }
 

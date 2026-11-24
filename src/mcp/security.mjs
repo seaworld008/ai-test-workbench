@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
  *    via `realpath` and checked against boundary containment (forbidding absolute or `..` escapes).
  */
 
+/** @param {string | string[] | null | undefined} rawInput @returns {string[]} */
 export function parseWorkspaceRoots(rawInput) {
   const roots = [];
   const items = Array.isArray(rawInput)
@@ -37,6 +38,7 @@ export function parseWorkspaceRoots(rawInput) {
   return [...new Set(roots)];
 }
 
+/** @param {string} p @returns {string} */
 export function resolveComparableRealPath(p) {
   const resolved = path.resolve(p);
   try {
@@ -57,6 +59,7 @@ export function resolveComparableRealPath(p) {
   }
 }
 
+/** @param {string} targetPath @param {string} rootPath @returns {boolean} */
 export function isPathWithinRoot(targetPath, rootPath) {
   const normTarget = resolveComparableRealPath(targetPath);
   const normRoot = resolveComparableRealPath(rootPath);
@@ -166,12 +169,16 @@ export function validateToolPathArgs(args, target, allowedRoots) {
   return { ok: true, error: null };
 }
 
+/** @param {string | null | undefined} host @returns {boolean} */
 export function isLoopbackHost(host) {
   return ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(String(host || '127.0.0.1').toLowerCase());
 }
 
 /**
  * Constant-time Bearer token check via SHA-256 digest (`M-09`).
+ * @param {string | string[] | null | undefined} authHeader
+ * @param {string} expectedToken
+ * @returns {boolean}
  */
 export function verifyBearerTokenConstantTime(authHeader, expectedToken) {
   const expectedFull = `Bearer ${expectedToken}`;
@@ -180,6 +187,7 @@ export function verifyBearerTokenConstantTime(authHeader, expectedToken) {
   return crypto.timingSafeEqual(actualHash, expectedHash);
 }
 
+/** @param {string | null | undefined} originHeader @param {string[]} [extraOrigins] @returns {boolean} */
 export function isAllowedHttpOrigin(originHeader, extraOrigins = []) {
   if (!originHeader) return true;
   try {

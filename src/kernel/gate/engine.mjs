@@ -1,0 +1,238 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { mergeOutcomes } from '../../core/outcome.mjs';
+import { WORKBENCH_VERSION } from '../../core/version.mjs';
+import { runGitDiffGuard, runStaticSpecChecks } from './ast-analyzer.mjs';
+import { computeWorkspaceInputHash } from './git-utils.mjs';
+import {
+  auditResultsJson,
+  countMutationSpecsInFiles,
+  verifyLedgerBindingInQaDir,
+} from './ledger-verify.mjs';
+import {
+  loadActiveQuarantine,
+  loadAitestConfig,
+  loadAndValidateWaivers,
+  verifyGovernanceLockInQaDir,
+} from './policy.mjs';
+
+export const GATE_KERNEL_VERSION = WORKBENCH_VERSION;
+
+/**
+ * Unified 3-State Quality Gate Engine (`pass | fail | blocked`, `X-5` / `A-1`).
+ *
+ * Invariant:
+ * - Any required gate that cannot execute (missing lock, missing ledger, missing results,
+ *   broken git base) returns `'blocked'` and NEVER silently passes.
+ * - `outcome` is `'blocked'` if any gate is `'blocked'`, `'fail'` if any gate is `'fail'`
+ *   or errors exist, and `'pass'` only when zero errors and zero blocked gates exist.
+ * @param {string} qaDir
+ * @param {{
+ *   resultsPath?: string;
+ *   waiversPath?: string;
+ *   maxFlaky?: number;
+ *   maxSkipped?: number;
+ *   checkSpecs?: boolean;
+ *   requireE2e?: boolean;
+ *   staticOnly?: boolean;
+ *   diffBase?: string | null;
+ *   requireDiff?: boolean;
+ *   allowMutation?: boolean;
+ *   skipGovernanceCheck?: boolean;
+ *   requireT1Mac?: boolean;
+ *   allowUninitialized?: boolean;
+ *   legacyWaiverCompat?: boolean;
+ *   allowUnboundResults?: boolean;
+ *   expectedRunId?: string;
+ *   requireCompilers?: boolean;
+ *   env?: Record<string, string | undefined>;
+ * }} [options]
+ */
+export function runAuditForQaDir(qaDir, options = {}) {
+  const resultsPath = options.resultsPath
+    ? path.resolve(qaDir, options.resultsPath)
+    : path.join(qaDir, 'reports', 'results.json');
+  const waiversPath = options.waiversPath
+    ? path.resolve(qaDir, options.waiversPath)
+    : path.join(qaDir, 'waivers.json');
+
+  const cfg = loadAitestConfig(qaDir);
+  const maxFlaky = options.maxFlaky !== undefined ? Number(options.maxFlaky) : cfg.maxFlaky;
+  const maxSkipped =
+    options.maxSkipped !== undefined ? Number(options.maxSkipped) : cfg.maxSkipped ?? 0;
+  const checkSpecs = Boolean(options.checkSpecs);
+  const requireE2e = Boolean(options.requireE2e);
+  const staticOnly = Boolean(options.staticOnly);
+  const diffBase = options.diffBase || null;
+  const requireDiff = Boolean(options.requireDiff);
+  const allowMutation =
+    options.allowMutation !== undefined
+      ? Boolean(options.allowMutation)
+      : process.env.TEST_ALLOW_MUTATION === '1' || process.env.TEST_ALLOW_MUTATION === 'true';
+
+  /** @type {string[]} */
+  const allErrors = [];
+  /** @type {string[]} */
+  const allWarnings = [];
+  /** @type {ReturnType<typeof auditResultsJson>['stats'] | null} */
+  let stats = null;
+  /** @type {string[]} */
+  let policyExcludedTitles = [];
+  /** @type {string | null} */
+  let boundRunId = null;
+  /** @type {string | null} */
+  let resultsDigest = null;
+  /** @type {string | null} */
+  let ledgerMac = null;
+  /** @type {string | null} */
+  let lockDigest = null;
+  /** @type {'T0' | 'T1'} */
+  let govTrustTier = 'T0';
+  /** @type {'T0' | 'T1'} */
+  let ledgerTrustTier = 'T0';
+
+  // Layer 0: Governance Integrity + Config Schema (Fail-Closed on malformed config or missing lock!)
+  /** @type {'pass' | 'fail' | 'blocked' | 'skipped'} */
+  let governanceStatus = 'skipped';
+  if (cfg._configError) {
+    allErrors.push(`[Config Blocked] Invalid aitest.config.json: ${cfg._configError}`);
+    governanceStatus = 'blocked';
+  }
+  if (options.skipGovernanceCheck !== true) {
+    const govRes = verifyGovernanceLockInQaDir(qaDir, {
+      requireT1Mac: Boolean(options.requireT1Mac),
+      allowUninitialized: Boolean(options.allowUninitialized),
+    });
+    lockDigest = govRes.lockDigest || null;
+    govTrustTier = govRes.trustTier || 'T0';
+    if (govRes.enforced) {
+      const nextGov = /** @type {any} */ (govRes.status || (govRes.ok ? 'pass' : 'fail'));
+      governanceStatus = governanceStatus === 'blocked' ? 'blocked' : nextGov;
+      allErrors.push(...govRes.errors);
+      allWarnings.push(...govRes.warnings);
+    } else if (governanceStatus !== 'blocked') {
+      governanceStatus = 'pass';
+    }
+  }
+
+  const waiverCheck = loadAndValidateWaivers(waiversPath, Date.now(), {
+    maxWaiverDays: cfg.maxWaiverDays,
+    maxWaivers: cfg.maxWaivers,
+    legacyCompat: Boolean(options.legacyWaiverCompat),
+  });
+  if (!waiverCheck.ok) {
+    allErrors.push(...waiverCheck.errors);
+    if (governanceStatus === 'pass' || governanceStatus === 'skipped') governanceStatus = 'fail';
+  }
+
+  const quarantineCheck = loadActiveQuarantine(qaDir);
+  if (!quarantineCheck.ok) {
+    allErrors.push(...quarantineCheck.errors);
+    if (governanceStatus === 'pass' || governanceStatus === 'skipped') governanceStatus = 'fail';
+  }
+
+  // Layer 1: Runtime Results + Fail-Closed Run Ledger Binding
+  /** @type {'pass' | 'fail' | 'blocked' | 'skipped'} */
+  let runtimeStatus = staticOnly ? 'skipped' : 'pass';
+  if (!staticOnly) {
+    if (!fs.existsSync(resultsPath)) {
+      allErrors.push(`Missing test results JSON: ${resultsPath}`);
+      runtimeStatus = 'blocked';
+    } else {
+      try {
+        const rawResults = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
+        const currentWorktreeHash = computeWorkspaceInputHash(qaDir);
+        const binding = verifyLedgerBindingInQaDir(qaDir, resultsPath, rawResults, {
+          allowUnboundResults: Boolean(options.allowUnboundResults),
+          expectedRunId: options.expectedRunId,
+          currentWorktreeHash,
+          requireT1Mac: Boolean(options.requireT1Mac),
+        });
+        boundRunId = binding.runId;
+        resultsDigest = binding.resultsDigest || null;
+        ledgerMac = binding.ledgerMac || null;
+        ledgerTrustTier = binding.trustTier || 'T0';
+
+        if (!binding.ok) {
+          allErrors.push(...binding.errors);
+          runtimeStatus = binding.status === 'blocked' ? 'blocked' : 'fail';
+        }
+        allWarnings.push(...binding.warnings);
+
+        const mutationFileHints = !allowMutation ? countMutationSpecsInFiles(path.join(qaDir, 'tests')) : [];
+        const resAudit = auditResultsJson(rawResults, {
+          activeWaivers: waiverCheck.activeWaivers,
+          requireE2e,
+          maxFlaky,
+          maxSkipped,
+          allowMutation,
+          excludedMutationHints: mutationFileHints,
+          quarantinedTests: quarantineCheck.entries,
+        });
+        stats = resAudit.stats;
+        policyExcludedTitles = resAudit.policyExcludedTitles;
+        if (!resAudit.ok && runtimeStatus !== 'blocked') runtimeStatus = 'fail';
+        allErrors.push(...resAudit.errors);
+        allWarnings.push(...resAudit.warnings);
+      } catch (err) {
+        allErrors.push(`Failed to parse ${resultsPath}: ${err instanceof Error ? err.message : String(err)}`);
+        runtimeStatus = 'fail';
+      }
+    }
+  }
+
+  // Layer 2: Static Spec Checks (tsc + eslint + TS AST semantic scanner)
+  /** @type {'pass' | 'fail' | 'blocked' | 'skipped'} */
+  let staticStatus = checkSpecs ? 'pass' : 'skipped';
+  if (checkSpecs) {
+    const staticRes = runStaticSpecChecks(qaDir, {
+      activeWaivers: waiverCheck.activeWaivers,
+      ...(options.requireCompilers !== undefined ? { requireCompilers: Boolean(options.requireCompilers) } : {}),
+      ...(options.env ? { env: options.env } : {}),
+    });
+    staticStatus = /** @type {any} */ (staticRes.status);
+    allErrors.push(...staticRes.errors);
+    allWarnings.push(...staticRes.warnings);
+  }
+
+  // Layer 3: Full-File AST Semantic Diff Guard
+  /** @type {'pass' | 'fail' | 'blocked' | 'skipped'} */
+  let diffStatus = diffBase ? 'pass' : requireDiff ? 'blocked' : 'skipped';
+  if (diffBase) {
+    const diffRes = runGitDiffGuard(qaDir, diffBase, { activeWaivers: waiverCheck.activeWaivers });
+    diffStatus = /** @type {any} */ (diffRes.status || (diffRes.ok ? 'pass' : 'fail'));
+    allErrors.push(...diffRes.violations);
+  } else if (requireDiff) {
+    allErrors.push('[Healer Diff Guard Blocked] Layer 3 Semantic Diff Guard requires a valid Git diffBase; fail-closed.');
+  }
+
+  const outcome = mergeOutcomes([governanceStatus, runtimeStatus, staticStatus, diffStatus], allErrors.length > 0);
+
+  const trustTier =
+    outcome === 'pass' && govTrustTier === 'T1' && (staticOnly || ledgerTrustTier === 'T1')
+      ? 'T1'
+      : 'T0';
+
+  return {
+    ok: outcome === 'pass',
+    outcome,
+    trustTier,
+    gateKernelVersion: GATE_KERNEL_VERSION,
+    runId: boundRunId,
+    evidence: {
+      lockDigest,
+      resultsDigest,
+      ledgerMac,
+    },
+    gates: {
+      governance: governanceStatus,
+      runtime: runtimeStatus,
+      static: staticStatus,
+      semanticDiff: diffStatus,
+    },
+    errors: allErrors,
+    warnings: allWarnings,
+    stats,
+    policyExcludedTitles,
+  };
+}

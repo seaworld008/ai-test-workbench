@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "1.0.0",
+  "preregistrationDoc": "bench/real-world/PREREGISTRATION.md",
+  "corpus": "bench/real-world/holdout-v6-corpus.json",
+  "samplingSeed": 20261125,
+  "reviewedAt": "2026-11-24",
+  "protocolNote": "Blind holdout evaluation: all 5 v6 systemic FP improvements were designed from the pilot set (seed 20261124) and executed BEFORE inspecting any holdout diff. Adjudications below classify all 7 commits flagged in the BEFORE baseline (which is a superset of the 4 flagged in AFTER) objectively under PREREGISTRATION.md Section 6 without subsequent holdout tuning.",
+  "adjudications": {
+    "vitejs/vite@278dc80436919b09473581ab45913c006779c54c": {
+      "label": "FP",
+      "reviewedAt": "2026-11-24",
+      "rationale": "Un-skipped a test (`test.skipIf(isBundledDev)` -> `test(...)`) inside a file-level `if (!isBuild) { ... }` registration guard (#23082). Resolved in v6 by lexical scope tracking."
+    },
+    "vitejs/vite@16944824fd5fae014101737ec0029ab6a58e774b": {
+      "label": "FP",
+      "reviewedAt": "2026-11-24",
+      "rationale": "Upgraded assertion to `await expect.poll(...)` inside an existing file-level `if (!isBuild) { ... }` block (#23186). Resolved in v6 by lexical scope tracking."
+    },
+    "microsoft/playwright-mcp@601a74305c2a81582bb99114858003bac3601c52": {
+      "label": "FP",
+      "reviewedAt": "2026-11-24",
+      "rationale": "Normal architecture refactor introducing typed Response objects (#738); rewrote an existing conditional `test.skip` condition and migrated response assertions across specs. Resolved in v6."
+    },
+    "actualbudget/actual@935d2b5064e0e83a347df88f5b73030ebb42ed52": {
+      "label": "TP",
+      "reviewedAt": "2026-11-24",
+      "rationale": "AI-authored PR (#8759) directly introduced a new hardcoded `await page.waitForTimeout(700)` sleep in `transactions.test.ts`, matching the pre-registered True Positive criterion. Retained in both BEFORE and AFTER."
+    },
+    "sveltejs/kit@ccbbea64660dcf407bc700be1c2e9fc9accda982": {
+      "label": "FP",
+      "reviewedAt": "2026-11-24",
+      "rationale": "Legitimate deflake refactor (#16631) reducing total assertions in a 436-assertion file by 1 (`436 -> 435`) while switching from hardcoded `count: 0` to captured monotonic count regex + exact equality. Remaining v6 FP."
+    },
+    "microsoft/playwright-mcp@4df162aff5849cecb15ffd7635506dfa58ca6b4f": {
+      "label": "FP",
+      "reviewedAt": "2026-11-24",
+      "rationale": "Normal test matcher consolidation (#796) replacing multi-line `toHaveTextContent` assertions across 21 spec files with structured custom `toHaveResponse({ code, pageState })` calls. Remaining v6 FP."
+    },
+    "actualbudget/actual@b396629f7ebeeb87b25c13b93f0f78374d4c7057": {
+      "label": "FP",
+      "reviewedAt": "2026-11-24",
+      "rationale": "Feature PR (#9486) strengthened a pre-existing `expect(request.postDataJSON()).toEqual(...)` inside a pre-existing `if (request.method() === 'POST')` route handler by adding `permissions: key.permissions`; snippet-based diff treated the edited assertion as newly wrapped in `if`. Remaining v6 FP."
+    }
+  }
+}

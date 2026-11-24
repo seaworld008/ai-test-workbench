@@ -1,0 +1,215 @@
+{
+  "schemaVersion": "1.0.0",
+  "generatedAt": "2026-11-24T08:38:21.723Z",
+  "gateKernelVersion": "5.1.1",
+  "preregistrationDoc": "bench/real-world/PREREGISTRATION.md",
+  "samplingSeed": 20261125,
+  "mode": "pilot",
+  "evaluationScope": "offline-static-ast-only (Layer 3 AST Semantic Diff + Differential Layer 2 Static Checks; zero target code execution; zero target site network access)",
+  "formalEvaluation200Status": "pending",
+  "counts": {
+    "totalCommits": 50,
+    "passed": 46,
+    "flagged": 4,
+    "adjudicatedFP": 3,
+    "adjudicatedTP": 1,
+    "unreviewedFlagged": 0,
+    "normalCommits": 49
+  },
+  "metrics": {
+    "rawAlertRate": {
+      "k": 4,
+      "n": 50,
+      "rate": 0.08,
+      "lower": 0.03155,
+      "upper": 0.188382,
+      "percent": "8.0%",
+      "ci95Percent": "[3.2%, 18.8%]"
+    },
+    "adjudicatedFprOnNormal": {
+      "k": 3,
+      "n": 49,
+      "rate": 0.061224,
+      "lower": 0.02104,
+      "upper": 0.165205,
+      "percent": "6.1%",
+      "ci95Percent": "[2.1%, 16.5%]"
+    },
+    "adjudicatedFprOnAll": {
+      "k": 3,
+      "n": 50,
+      "rate": 0.06,
+      "lower": 0.020615,
+      "upper": 0.162171,
+      "percent": "6.0%",
+      "ci95Percent": "[2.1%, 16.2%]"
+    }
+  },
+  "violationsByRule": {
+    "AITEST-G102": 2,
+    "AITEST-G103": 2,
+    "STATIC-WAIT-FOR-TIMEOUT": 1,
+    "AITEST-G110": 1
+  },
+  "byRepository": {
+    "actualbudget/actual": {
+      "license": "MIT",
+      "total": 11,
+      "passed": 9,
+      "flagged": 2,
+      "fp": 1,
+      "tp": 1,
+      "unreviewed": 0
+    },
+    "microsoft/playwright-mcp": {
+      "license": "Apache-2.0",
+      "total": 11,
+      "passed": 10,
+      "flagged": 1,
+      "fp": 1,
+      "tp": 0,
+      "unreviewed": 0
+    },
+    "sveltejs/kit": {
+      "license": "MIT",
+      "total": 11,
+      "passed": 10,
+      "flagged": 1,
+      "fp": 1,
+      "tp": 0,
+      "unreviewed": 0
+    },
+    "vuejs/vitepress": {
+      "license": "MIT",
+      "total": 7,
+      "passed": 7,
+      "flagged": 0,
+      "fp": 0,
+      "tp": 0,
+      "unreviewed": 0
+    },
+    "vitejs/vite": {
+      "license": "MIT",
+      "total": 10,
+      "passed": 10,
+      "flagged": 0,
+      "fp": 0,
+      "tp": 0,
+      "unreviewed": 0
+    }
+  },
+  "flaggedCommits": [
+    {
+      "id": "sveltejs/kit@ccbbea64660dcf407bc700be1c2e9fc9accda982",
+      "repo": "sveltejs/kit",
+      "sha": "ccbbea64660dcf407bc700be1c2e9fc9accda982",
+      "commitUrl": "https://github.com/sveltejs/kit/commit/ccbbea64660dcf407bc700be1c2e9fc9accda982",
+      "testPaths": [
+        "packages/kit/test/apps/async/test/client.test.js",
+        "packages/kit/test/apps/basics/test/client.test.js"
+      ],
+      "ruleCodes": [
+        "AITEST-G102",
+        "AITEST-G103"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G102] packages/kit/test/apps/basics/test/client.test.js: net assertion reduction detected (base 436 -> head 435).",
+        "[Healer Diff Guard][AITEST-G103] packages/kit/test/apps/basics/test/client.test.js: assertion strength downgraded (max tier S5 -> S5, total strength 1918 -> 1911)."
+      ],
+      "adjudication": {
+        "label": "FP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "Legitimate deflake refactor (#16631) reducing total assertions in a 436-assertion file by 1 (`436 -> 435`) while switching from hardcoded `count: 0` to captured monotonic count regex + exact equality. Remaining v6 FP."
+      }
+    },
+    {
+      "id": "actualbudget/actual@935d2b5064e0e83a347df88f5b73030ebb42ed52",
+      "repo": "actualbudget/actual",
+      "sha": "935d2b5064e0e83a347df88f5b73030ebb42ed52",
+      "commitUrl": "https://github.com/actualbudget/actual/commit/935d2b5064e0e83a347df88f5b73030ebb42ed52",
+      "testPaths": [
+        "packages/desktop-client/e2e/transactions.test.ts"
+      ],
+      "ruleCodes": [
+        "STATIC-WAIT-FOR-TIMEOUT"
+      ],
+      "violations": [
+        "[Static Check][STATIC-WAIT-FOR-TIMEOUT] packages/desktop-client/e2e/transactions.test.ts: newly introduced waitForTimeout() (0 -> 1)."
+      ],
+      "adjudication": {
+        "label": "TP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "AI-authored PR (#8759) directly introduced a new hardcoded `await page.waitForTimeout(700)` sleep in `transactions.test.ts`, matching the pre-registered True Positive criterion. Retained in both BEFORE and AFTER."
+      }
+    },
+    {
+      "id": "microsoft/playwright-mcp@4df162aff5849cecb15ffd7635506dfa58ca6b4f",
+      "repo": "microsoft/playwright-mcp",
+      "sha": "4df162aff5849cecb15ffd7635506dfa58ca6b4f",
+      "commitUrl": "https://github.com/microsoft/playwright-mcp/commit/4df162aff5849cecb15ffd7635506dfa58ca6b4f",
+      "testPaths": [
+        "tests/cdp.spec.ts",
+        "tests/click.spec.ts",
+        "tests/config.spec.ts",
+        "tests/console.spec.ts",
+        "tests/core.spec.ts",
+        "tests/device.spec.ts",
+        "tests/dialogs.spec.ts",
+        "tests/evaluate.spec.ts",
+        "tests/files.spec.ts",
+        "tests/headed.spec.ts",
+        "tests/iframes.spec.ts",
+        "tests/install.spec.ts",
+        "tests/launch.spec.ts",
+        "tests/network.spec.ts",
+        "tests/pdf.spec.ts",
+        "tests/screenshot.spec.ts",
+        "tests/tabs.spec.ts",
+        "tests/trace.spec.ts",
+        "tests/type.spec.ts",
+        "tests/wait.spec.ts",
+        "tests/webdriver.spec.ts"
+      ],
+      "ruleCodes": [
+        "AITEST-G102",
+        "AITEST-G103"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G102] tests/click.spec.ts: net assertion reduction detected (base 4 -> head 3).",
+        "[Healer Diff Guard][AITEST-G103] tests/click.spec.ts: assertion strength downgraded (max tier S3 -> S3, total strength 12 -> 9).",
+        "[Healer Diff Guard][AITEST-G102] tests/dialogs.spec.ts: net assertion reduction detected (base 22 -> head 20).",
+        "[Healer Diff Guard][AITEST-G102] tests/headed.spec.ts: net assertion reduction detected (base 3 -> head 1).",
+        "[Healer Diff Guard][AITEST-G103] tests/headed.spec.ts: assertion strength downgraded (max tier S3 -> S3, total strength 7 -> 3).",
+        "[Healer Diff Guard][AITEST-G102] tests/tabs.spec.ts: net assertion reduction detected (base 12 -> head 8).",
+        "[Healer Diff Guard][AITEST-G103] tests/tabs.spec.ts: assertion strength downgraded (max tier S5 -> S5, total strength 40 -> 28).",
+        "[Healer Diff Guard][AITEST-G102] tests/type.spec.ts: net assertion reduction detected (base 12 -> head 9).",
+        "[Healer Diff Guard][AITEST-G103] tests/type.spec.ts: assertion strength downgraded (max tier S3 -> S3, total strength 34 -> 27)."
+      ],
+      "adjudication": {
+        "label": "FP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "Normal test matcher consolidation (#796) replacing multi-line `toHaveTextContent` assertions across 21 spec files with structured custom `toHaveResponse({ code, pageState })` calls. Remaining v6 FP."
+      }
+    },
+    {
+      "id": "actualbudget/actual@b396629f7ebeeb87b25c13b93f0f78374d4c7057",
+      "repo": "actualbudget/actual",
+      "sha": "b396629f7ebeeb87b25c13b93f0f78374d4c7057",
+      "commitUrl": "https://github.com/actualbudget/actual/commit/b396629f7ebeeb87b25c13b93f0f78374d4c7057",
+      "testPaths": [
+        "packages/desktop-client/e2e/api-keys.test.ts"
+      ],
+      "ruleCodes": [
+        "AITEST-G110"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G110] packages/desktop-client/e2e/api-keys.test.ts: wrapping expect() inside conditional if-block is forbidden."
+      ],
+      "adjudication": {
+        "label": "FP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "Feature PR (#9486) strengthened a pre-existing `expect(request.postDataJSON()).toEqual(...)` inside a pre-existing `if (request.method() === 'POST')` route handler by adding `permissions: key.permissions`; snippet-based diff treated the edited assertion as newly wrapped in `if`. Remaining v6 FP."
+      }
+    }
+  ]
+}

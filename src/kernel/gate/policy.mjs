@@ -1,0 +1,565 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { loadAndValidateAitestConfigFile } from '../../core/config.mjs';
+import { compileGlob } from '../../core/glob.mjs';
+import { computeFlakyStats } from '../../core/playwright-results.mjs';
+import { WORKBENCH_VERSION } from '../../core/version.mjs';
+import { sha256Hex } from './git-utils.mjs';
+import { verifyPayloadT1 } from './trust-hmac.mjs';
+
+/**
+ * Governance Policy, Protected File Manifests, Waivers & Quarantine Validation (`T-01`, `T-02`, `T-06`, `G-09`, `I-01`).
+ *
+ * Security invariants:
+ * 1. Declarative protected file set covers configs, lint, fixtures, setup specs, impact-map.json,
+ *    package.json, .gitignore, and support/** (including support/gate/**).
+ * 2. Fail-closed on missing `.aitest/governance.lock` in any initialized QA workspace.
+ * 3. T1 HMAC verification detects local lock forgery when T1 key is available.
+ * 4. Quarantine requires TTL <= 7d, cap <= 5, no @critical/@smoke, T1 MAC, and real ledger flaky evidence.
+ */
+
+export const DEFAULT_PROTECTED_GLOBS = Object.freeze([
+  'playwright.config.ts',
+  'playwright.config.js',
+  'eslint.config.mjs',
+  'eslint.config.js',
+  'eslint.config.ts',
+  'aitest.config.json',
+  'waivers.json',
+  'tsconfig.json',
+  'perf-budget.json',
+  'impact-map.json',
+  'package.json',
+  '.gitignore',
+  'support/**',
+  'scripts/audit-results.mjs',
+  'tests/fixtures/**',
+  'tests/*.setup.ts',
+  'tests/*.setup.js',
+]);
+
+// Static list preserved for backward compatibility with callers inspecting PROTECTED_GOVERNANCE_REL_FILES
+export const PROTECTED_GOVERNANCE_REL_FILES = Object.freeze([
+  'playwright.config.ts',
+  'playwright.config.js',
+  'eslint.config.mjs',
+  'eslint.config.js',
+  'aitest.config.json',
+  'waivers.json',
+  'tsconfig.json',
+  'perf-budget.json',
+  'impact-map.json',
+  'package.json',
+  '.gitignore',
+  'support/target-guard.mjs',
+  'support/gate-kernel.mjs',
+  'support/schema-validator.mjs',
+  'support/gate/trust-hmac.mjs',
+  'support/gate/git-utils.mjs',
+  'support/gate/policy.mjs',
+  'support/gate/ast-analyzer.mjs',
+  'support/gate/ledger-verify.mjs',
+  'support/gate/engine.mjs',
+  'scripts/audit-results.mjs',
+  'tests/fixtures/base.ts',
+  'tests/auth.setup.ts',
+]);
+
+/**
+ * Matches AI/bot identifiers anywhere as a whole token segment (`claude-code`, `codex-cli`, `ai-agent`, etc.).
+ */
+export const BOT_APPROVER_RE =
+  /(?:^|[-_.\s/])(ai|agent|bot|healer|codex|claude|cursor|copilot|gemini|antigravity|llm|gpt|auto|self)(?:$|[-_.\s/])/i;
+
+/**
+ * Converts a simple glob (`**`, `*`) to a case-insensitive RegExp anchored on POSIX relative paths.
+ * @param {string} glob
+ */
+export function compilePolicyGlob(glob) {
+  return compileGlob(glob);
+}
+
+/**
+ * Returns whether a diff file path (relative to repo root or qaDir) targets a protected governance file (`G-09`, `I-01`).
+ * @param {string} filePath
+ * @param {string[]} [extraGlobs]
+ */
+export function isProtectedDiffPath(filePath, extraGlobs = []) {
+  const norm = String(filePath || '').replace(/\\/g, '/').replace(/^\.\//, '');
+  if (!norm) return false;
+
+  // Always protect governance lock, quarantine, and .env files in QA diffs
+  if (/(^|\/)\.aitest\/(governance\.lock|quarantine\.json|governance-audit\.jsonl)$/i.test(norm)) {
+    return true;
+  }
+  if (/(^|\/)\.env(?:\.[^/]+)?$/i.test(norm) && !/\.env\.example$/i.test(norm) && !/\.env\.mcp\.example$/i.test(norm)) {
+    return true;
+  }
+
+  // Extract suffix relative to `qa/` if present, plus check full path directly
+  const qaIdx = norm.indexOf('/qa/');
+  const candidates = [norm];
+  if (norm.startsWith('qa/')) candidates.push(norm.slice(3));
+  if (qaIdx >= 0) candidates.push(norm.slice(qaIdx + 4));
+
+  const allGlobs = [...DEFAULT_PROTECTED_GLOBS, ...(Array.isArray(extraGlobs) ? extraGlobs : [])];
+  const regexes = allGlobs.map(compilePolicyGlob);
+
+  for (const cand of candidates) {
+    if (regexes.some((re) => re.test(cand))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** @param {string} qaDir */
+export function loadAitestConfig(qaDir) {
+  return loadAndValidateAitestConfigFile(qaDir).config;
+}
+
+/** @param {string[]} [assertFunctionNames] @returns {string[]} */
+export function validateAssertFunctionNames(assertFunctionNames = []) {
+  const errors = [];
+  for (const pat of assertFunctionNames) {
+    const trimmed = String(pat || '').trim();
+    if (!trimmed || trimmed === '*' || /^\*+$/.test(trimmed) || trimmed.replace(/\*/g, '').length < 3) {
+      errors.push(
+        `[AITEST-G113] Overly broad wildcard "${pat}" in assertFunctionNames is forbidden (minimum 3 literal identifier characters required).`
+      );
+    }
+  }
+  return errors;
+}
+
+/** @param {string} qaDir @param {readonly string[]} globs @returns {string[]} */
+function collectFilesMatchingGlobs(qaDir, globs) {
+  /** @type {Set<string>} */
+  const matched = new Set();
+  const compiled = globs.map(compilePolicyGlob);
+  const skipDirs = new Set(['node_modules', '.git', 'reports', 'playwright-report', 'test-results', 'knowledge', '.aitest']);
+
+  /** @param {string} dir */
+  const walk = (dir) => {
+    if (!fs.existsSync(dir)) return;
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory() && skipDirs.has(entry.name)) continue;
+      const full = path.join(dir, entry.name);
+      const rel = path.relative(qaDir, full).replace(/\\/g, '/');
+      if (entry.isDirectory()) {
+        walk(full);
+      } else if (entry.isFile()) {
+        if (compiled.some((re) => re.test(rel))) {
+          matched.add(rel);
+        }
+      }
+    }
+  };
+
+  walk(qaDir);
+  return [...matched].sort();
+}
+
+/**
+ * Computes normalized CRLF->LF SHA-256 hashes of all protected governance files inside `qaDir`.
+ * @param {string} qaDir
+ */
+export function computeProtectedFileHashes(qaDir) {
+  const cfg = loadAitestConfig(qaDir);
+  const globs = cfg.governance?.protected || [...DEFAULT_PROTECTED_GLOBS];
+  const matchedFiles = collectFilesMatchingGlobs(qaDir, globs);
+
+  /** @type {Record<string, string>} */
+  const files = {};
+  for (const rel of matchedFiles) {
+    const full = path.join(qaDir, rel);
+    if (fs.existsSync(full) && fs.statSync(full).isFile()) {
+      const normalized = fs.readFileSync(full, 'utf8').replace(/\r\n/g, '\n');
+      files[rel] = `sha256:${sha256Hex(normalized)}`;
+    }
+  }
+  return files;
+}
+
+/**
+ * Determines whether `qaDir` is an initialized QA workspace requiring a governance lock (`T-02`).
+ * @param {string} qaDir
+ */
+export function isInitializedQaWorkspace(qaDir) {
+  if (!qaDir || !fs.existsSync(qaDir)) return false;
+  return (
+    fs.existsSync(path.join(qaDir, 'aitest.config.json')) ||
+    fs.existsSync(path.join(qaDir, 'playwright.config.ts')) ||
+    fs.existsSync(path.join(qaDir, 'playwright.config.js')) ||
+    fs.existsSync(path.join(qaDir, '.aitest', 'governance-audit.jsonl'))
+  );
+}
+
+/**
+ * Fail-closed Layer 0 Governance Lock verification (`T-01`, `T-02`).
+ * - Missing `.aitest/governance.lock` in an initialized QA workspace returns `ok: false, status: 'blocked'`.
+ * - Verifies schema, non-bot approver, protected file hashes, and T1 HMAC when present.
+ * @param {string} qaDir
+ * @param {{ requireT1Mac?: boolean, allowUninitialized?: boolean }} [options]
+ * @returns {{ ok: boolean, status: 'pass' | 'fail' | 'blocked', enforced: boolean, trustTier: 'T0' | 'T1', lockPath: string, lockDigest?: string, errors: string[], warnings: string[], approvedBy?: string }}
+ */
+export function verifyGovernanceLockInQaDir(qaDir, options = {}) {
+  const aitestDir = path.join(qaDir, '.aitest');
+  const lockPath = path.join(aitestDir, 'governance.lock');
+  /** @type {string[]} */
+  const errors = [];
+  /** @type {string[]} */
+  const warnings = [];
+
+  if (!fs.existsSync(lockPath)) {
+    if (isInitializedQaWorkspace(qaDir)) {
+      errors.push(
+        `[Governance Tamper Blocked] Missing .aitest/governance.lock in initialized QA workspace (${qaDir}). Fail-closed: restore from Git or have a human run "npx ai-test-workbench@${WORKBENCH_VERSION} governance approve".`
+      );
+      return {
+        ok: false,
+        status: 'blocked',
+        enforced: true,
+        trustTier: 'T0',
+        lockPath,
+        errors,
+        warnings,
+      };
+    }
+    if (options.allowUninitialized === true) {
+      return {
+        ok: true,
+        status: 'pass',
+        enforced: false,
+        trustTier: 'T0',
+        lockPath,
+        errors,
+        warnings: ['Uninitialized QA workspace allowed by explicit allowUninitialized flag (T0 advisory).'],
+      };
+    }
+    errors.push(
+      `[Governance Blocked] Uninitialized QA workspace (${qaDir}) is missing playwright.config.* / aitest.config.json and .aitest/governance.lock. Fail-closed: run "npx ai-test-workbench@${WORKBENCH_VERSION} init" first.`
+    );
+    return {
+      ok: false,
+      status: 'blocked',
+      enforced: true,
+      trustTier: 'T0',
+      lockPath,
+      errors,
+      warnings,
+    };
+  }
+
+  let lockObj;
+  try {
+    lockObj = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+  } catch (err) {
+    return {
+      ok: false,
+      status: 'blocked',
+      enforced: true,
+      trustTier: 'T0',
+      lockPath,
+      errors: [`[Governance Tamper Blocked] Corrupted JSON in .aitest/governance.lock: ${err instanceof Error ? err.message : String(err)}`],
+      warnings,
+    };
+  }
+
+  if (!lockObj || typeof lockObj.files !== 'object' || !lockObj.approvedBy) {
+    errors.push('[Governance Tamper Blocked] Invalid .aitest/governance.lock schema (missing files or approvedBy).');
+    return { ok: false, status: 'blocked', enforced: true, trustTier: 'T0', lockPath, errors, warnings };
+  }
+
+  // Reject forged bot approvers even if hand-written directly into governance.lock
+  if (lockObj.source !== 'aitest-init' && BOT_APPROVER_RE.test(String(lockObj.approvedBy))) {
+    errors.push(
+      `[Governance Tamper Blocked] Lock approver "${lockObj.approvedBy}" matches reserved AI/bot identity.`
+    );
+  }
+
+  // Verify T1 HMAC tamper-evidence if present (or required)
+  const macCheck = verifyPayloadT1('governance.lock', lockObj, lockObj.mac, {
+    qaDir,
+    repoDir: path.dirname(qaDir),
+    requireMac: Boolean(options.requireT1Mac),
+  });
+  if (!macCheck.ok) {
+    errors.push(`[Governance Tamper Blocked] ${macCheck.reason}`);
+  } else if (!macCheck.verified) {
+    warnings.push(`[Governance T0 Advisory] ${macCheck.reason}`);
+  }
+
+  const currentHashes = computeProtectedFileHashes(qaDir);
+  const lockedFiles = lockObj.files || {};
+
+  for (const [rel, expectedHash] of Object.entries(lockedFiles)) {
+    const actualHash = currentHashes[rel];
+    if (!actualHash) {
+      errors.push(
+        `[Governance Tamper Blocked] Protected governance file "${rel}" was deleted. Human approval required via "npx ai-test-workbench@${WORKBENCH_VERSION} governance approve".`
+      );
+    } else if (actualHash !== expectedHash) {
+      errors.push(
+        `[Governance Tamper Blocked] Protected governance file "${rel}" was modified (${actualHash.slice(0, 19)} != ${String(expectedHash).slice(0, 19)}). Agents may NOT edit governance configs/waivers; a human must run "npx ai-test-workbench@${WORKBENCH_VERSION} governance approve --target <repo> --by <name> --reason <why>".`
+      );
+    }
+  }
+
+  for (const rel of Object.keys(currentHashes)) {
+    if (!(rel in lockedFiles)) {
+      errors.push(
+        `[Governance Tamper Blocked] Unapproved protected file "${rel}" added without updating .aitest/governance.lock. Human approval required via "npx ai-test-workbench@${WORKBENCH_VERSION} governance approve".`
+      );
+    }
+  }
+
+  return {
+    ok: errors.length === 0,
+    status: errors.length === 0 ? 'pass' : 'fail',
+    enforced: true,
+    trustTier: errors.length === 0 && macCheck.verified ? 'T1' : 'T0',
+    lockPath,
+    lockDigest: `sha256:${sha256Hex(fs.readFileSync(lockPath, 'utf8').replace(/\r\n/g, '\n'))}`,
+    errors,
+    warnings,
+    approvedBy: lockObj.approvedBy,
+  };
+}
+
+/**
+ * Validates `waivers.json` with anti-self-approval, issue/trace linkage, and <=14-day TTL enforcement.
+ * @param {string} waiversPath
+ * @param {number} [nowMs]
+ * @param {{ maxWaiverDays?: number, maxWaivers?: number, legacyCompat?: boolean }} [options]
+ */
+export function loadAndValidateWaivers(waiversPath, nowMs = Date.now(), options = {}) {
+  const maxWaiverDays = options.maxWaiverDays ?? 14;
+  const maxWaivers = options.maxWaivers ?? 5;
+  const legacyCompat = Boolean(options.legacyCompat);
+  /** @type {string[]} */
+  const errors = [];
+  /** @type {Array<Record<string, any>>} */
+  const activeWaivers = [];
+
+  if (!waiversPath || !fs.existsSync(waiversPath)) {
+    return { ok: true, errors, activeWaivers };
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(waiversPath, 'utf8'));
+  } catch (err) {
+    return { ok: false, errors: [`Invalid JSON in waivers file (${waiversPath}): ${err instanceof Error ? err.message : String(err)}`], activeWaivers };
+  }
+
+  const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed.waivers) ? parsed.waivers : [];
+  if (list.length > maxWaivers) {
+    errors.push(`Waiver count (${list.length}) exceeds maximum allowed active waivers (${maxWaivers}).`);
+  }
+
+  list.forEach((/** @type {any} */ w, /** @type {number} */ idx) => {
+    const label = `waiver[${idx}]`;
+    if (!w || typeof w !== 'object') {
+      errors.push(`${label}: entry must be an object.`);
+      return;
+    }
+    if (!w.titlePattern && !w.filePattern && !w.testId) {
+      errors.push(`${label}: requires "testId", "titlePattern", or "filePattern".`);
+    }
+    if (!w.owner || typeof w.owner !== 'string' || !w.owner.trim()) {
+      errors.push(`${label}: missing mandatory "owner".`);
+    } else if (BOT_APPROVER_RE.test(w.owner.trim())) {
+      errors.push(`${label}: owner "${w.owner}" cannot be an AI agent/bot identifier.`);
+    }
+    if (!w.reason || typeof w.reason !== 'string' || !w.reason.trim()) {
+      errors.push(`${label}: missing mandatory "reason".`);
+    }
+    if (!w.expiresAt || typeof w.expiresAt !== 'string') {
+      errors.push(`${label}: missing mandatory ISO date "expiresAt".`);
+      return;
+    }
+    const expMs = Date.parse(w.expiresAt);
+    if (Number.isNaN(expMs)) {
+      errors.push(`${label}: invalid date in "expiresAt": "${w.expiresAt}".`);
+      return;
+    }
+    if (expMs <= nowMs) {
+      errors.push(
+        `${label}: waiver for "${w.testId || w.titlePattern || w.filePattern}" owned by "${w.owner}" EXPIRED at ${w.expiresAt}.`
+      );
+      return;
+    }
+
+    if (!legacyCompat) {
+      if (!w.approvedBy || typeof w.approvedBy !== 'string' || !w.approvedBy.trim()) {
+        errors.push(`${label}: missing mandatory human "approvedBy" field (Agents cannot self-approve waivers).`);
+      } else if (BOT_APPROVER_RE.test(w.approvedBy.trim())) {
+        errors.push(`${label}: "approvedBy" ("${w.approvedBy}") must be a human reviewer, never an AI agent.`);
+      }
+
+      const hasLink = (typeof w.issue === 'string' && w.issue.trim()) || (typeof w.traceId === 'string' && w.traceId.trim());
+      if (!hasLink) {
+        errors.push(`${label}: requires linked "issue" or "traceId" for audit traceability.`);
+      }
+
+      const baseMs = w.createdAt ? Date.parse(w.createdAt) : nowMs;
+      if (Number.isNaN(baseMs)) {
+        errors.push(`${label}: invalid ISO date in "createdAt": "${w.createdAt}".`);
+      } else {
+        const maxDurationMs = maxWaiverDays * 24 * 60 * 60 * 1000;
+        if (expMs - baseMs > maxDurationMs || expMs - nowMs > maxDurationMs) {
+          errors.push(
+            `${label}: waiver TTL exceeds maximum ${maxWaiverDays}-day governance limit (expiresAt=${w.expiresAt}).`
+          );
+        }
+      }
+    }
+
+    activeWaivers.push(w);
+  });
+
+  return { ok: errors.length === 0, errors, activeWaivers };
+}
+
+/** @param {{ file?: string, title?: string, testId?: string }} item @param {Array<Record<string, any>>} activeWaivers @param {string} [scope] @returns {Record<string, any> | null} */
+export function isCoveredByWaiver(item, activeWaivers, scope = 'test') {
+  for (const w of activeWaivers) {
+    if (w.scope && w.scope !== scope && w.scope !== 'all') continue;
+    if (w.testId) {
+      const itemNormFile = String(item.file || '').replace(/\\/g, '/');
+      const itemTestId = `${itemNormFile}::${item.title || ''}`;
+      if (itemTestId === w.testId || item.testId === w.testId) return w;
+      continue;
+    }
+    const titleOk = w.titlePattern ? String(item.title || '').includes(w.titlePattern) : true;
+    const fileOk = w.filePattern ? String(item.file || '').replace(/\\/g, '/').includes(w.filePattern) : true;
+    if (titleOk && fileOk) return w;
+  }
+  return null;
+}
+
+/**
+ * Checks whether a test has genuine flaky evidence in `.aitest/runs/` ledger history (`T-06`).
+ * @param {string} qaDir
+ * @param {string} file
+ * @param {string} title
+ */
+function hasLedgerFlakyEvidence(qaDir, file, title) {
+  const indexPath = path.join(qaDir, '.aitest', 'runs', 'index.jsonl');
+  if (!fs.existsSync(indexPath)) return false;
+  const normFile = String(file || '').replace(/\\/g, '/');
+  const lines = fs
+    .readFileSync(indexPath, 'utf8')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(-20);
+
+  /** @type {Array<{ status?: string, retryPassed?: boolean }>} */
+  const observations = [];
+
+  for (const line of lines) {
+    try {
+      const row = JSON.parse(line);
+      const summaryPath = path.join(qaDir, '.aitest', 'runs', String(row.runId || ''), 'tests-summary.json');
+      if (!fs.existsSync(summaryPath)) continue;
+      const tests = JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
+      for (const t of tests) {
+        const tf = String(t.file || '').replace(/\\/g, '/');
+        if ((tf === normFile || tf.endsWith(`/${normFile}`) || normFile.endsWith(`/${tf}`)) && t.title === title) {
+          observations.push({ status: t.status, retryPassed: t.retryPassed });
+        }
+      }
+    } catch {
+      // skip malformed entry
+    }
+  }
+
+  const stats = computeFlakyStats(observations);
+  if (stats.totalRuns < 3) return false;
+  return stats.flakyRate >= 0.2;
+}
+
+/**
+ * Strict Quarantine Validation (`T-06`):
+ * Enforces <= 7-day TTL, max 5 entries, no @critical/@smoke, T1 MAC integrity, and Ledger flaky history evidence.
+ * @param {string} qaDir
+ * @param {number | { nowMs?: number, requireT1Mac?: boolean }} [nowOrOptions]
+ */
+export function loadActiveQuarantine(qaDir, nowOrOptions = Date.now()) {
+  const nowMs = typeof nowOrOptions === 'number' ? nowOrOptions : nowOrOptions?.nowMs ?? Date.now();
+  const requireT1Mac = typeof nowOrOptions === 'object' && Boolean(nowOrOptions?.requireT1Mac);
+  const qPath = path.join(qaDir, '.aitest', 'quarantine.json');
+  if (!fs.existsSync(qPath)) return { ok: true, entries: [], errors: [] };
+
+  const MAX_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+  const MAX_ENTRIES = 5;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(qPath, 'utf8'));
+  } catch (err) {
+    return { ok: false, entries: [], errors: [`Invalid JSON in .aitest/quarantine.json: ${err instanceof Error ? err.message : String(err)}`] };
+  }
+
+  /** @type {string[]} */
+  const errors = [];
+  /** @type {Array<Record<string, any>>} */
+  const active = [];
+  const list = Array.isArray(parsed.entries) ? parsed.entries : [];
+
+  // Verify T1 HMAC if entries are non-empty (prevents hand-editing or MAC-stripping quarantine.json!)
+  if (list.length > 0) {
+    const macCheck = verifyPayloadT1('quarantine.json', parsed, parsed.mac, {
+      qaDir,
+      repoDir: path.dirname(qaDir),
+      requireMac: requireT1Mac || Boolean(parsed.mac),
+    });
+    if (!macCheck.ok) {
+      errors.push(`[Quarantine Tamper Blocked] ${macCheck.reason}`);
+    }
+  }
+
+  if (list.length > MAX_ENTRIES) {
+    errors.push(`[Quarantine Policy Blocked] Active quarantine count (${list.length}) exceeds maximum ${MAX_ENTRIES}.`);
+  }
+
+  for (const item of list) {
+    if (!item || typeof item !== 'object' || !item.title || !item.file) {
+      errors.push('[Quarantine Policy Blocked] Malformed quarantine entry (requires "file" and "title").');
+      continue;
+    }
+    if (/@critical|@smoke/i.test(String(item.title))) {
+      errors.push(`[Quarantine Policy Blocked] Critical/smoke test "${item.title}" cannot be quarantined.`);
+      continue;
+    }
+    const exp = Date.parse(item.expiresAt || '');
+    if (Number.isNaN(exp) || exp <= nowMs) {
+      errors.push(`[Quarantine Expired] Quarantined flaky test "${item.title}" expired at ${item.expiresAt}; fix or escalate.`);
+      continue;
+    }
+    const addedMs = item.addedAt ? Date.parse(item.addedAt) : nowMs;
+    if (Number.isNaN(addedMs) || exp - nowMs > MAX_TTL_MS || exp - addedMs > MAX_TTL_MS) {
+      errors.push(
+        `[Quarantine Policy Blocked] Quarantine TTL for "${item.title}" exceeds 7-day maximum (expiresAt=${item.expiresAt}).`
+      );
+      continue;
+    }
+    if (!hasLedgerFlakyEvidence(qaDir, item.file, item.title)) {
+      errors.push(
+        `[Quarantine Forgery Blocked] "${item.file}::${item.title}" has no historical flaky evidence (>=3 runs, >=20% flaky rate) in Run Ledger.`
+      );
+      continue;
+    }
+    active.push(item);
+  }
+
+  return { ok: errors.length === 0, entries: active, errors };
+}

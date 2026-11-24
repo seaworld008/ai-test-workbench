@@ -2,14 +2,15 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { redactEnvEntries } from './proc.mjs';
-import { SCHEMA_VERSIONS, WORKBENCH_VERSION } from './version.mjs';
+import { summarizePlaywrightResults } from './core/playwright-results.mjs';
+import { redactEnvEntries } from './core/redact.mjs';
+import { SCHEMA_VERSIONS, WORKBENCH_VERSION } from './core/version.mjs';
 import {
   computeWorkspaceInputHash,
   resolveGitHeadSha,
   sha256Hex,
   signPayloadT1,
-} from '../templates/playwright-qa/support/gate-kernel.mjs';
+} from './kernel/gate-kernel.mjs';
 
 const CROCKFORD_BASE32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
@@ -34,59 +35,24 @@ export function generateRunId(nowMs = Date.now()) {
   return `${timeChars}${randChars}`;
 }
 
+/**
+ * @param {Parameters<typeof summarizePlaywrightResults>[0]} resultsObj
+ */
 function summarizeResultsForLedger(resultsObj) {
-  /** @type {Array<{ testId: string, file: string, line: number, title: string, projectName: string, status: string, retryPassed: boolean, durationMs: number, errorSnippet: string | null }>} */
-  const tests = [];
-  let passed = 0;
-  let failed = 0;
-  let flaky = 0;
-  let skipped = 0;
-
-  const walkSuite = (suite, parents = [], fileHint = '') => {
-    const nextParents = suite.title ? [...parents, suite.title] : parents;
-    const curFile = String(suite.file || fileHint || '').replace(/\\/g, '/');
-    for (const spec of suite.specs || []) {
-      const fullTitle = [...nextParents, spec.title].filter(Boolean).join(' > ');
-      const file = String(spec.file || curFile).replace(/\\/g, '/');
-      for (const t of spec.tests || []) {
-        const results = Array.isArray(t.results) ? t.results : [];
-        const durationMs = results.reduce((sum, r) => sum + Number(r.duration || 0), 0);
-        const retryPassed = t.status === 'expected' && results.length > 1;
-        const effectiveStatus = retryPassed ? 'flaky' : String(t.status || 'unknown');
-        if (effectiveStatus === 'expected') passed += 1;
-        else if (effectiveStatus === 'unexpected') failed += 1;
-        else if (effectiveStatus === 'flaky') flaky += 1;
-        else if (effectiveStatus === 'skipped') skipped += 1;
-
-        const firstFailure = results.find((r) => r.status && r.status !== 'passed' && r.status !== 'skipped') || results[results.length - 1];
-        const errMsg = firstFailure?.error?.message || null;
-        tests.push({
-          testId: `${file}::${fullTitle}`,
-          file,
-          line: Number(spec.line || 0),
-          title: fullTitle,
-          projectName: String(t.projectName || ''),
-          status: effectiveStatus,
-          retryPassed,
-          durationMs,
-          errorSnippet: errMsg ? String(errMsg).split('\n')[0].slice(0, 240) : null,
-        });
-      }
-    }
-    for (const child of suite.suites || []) walkSuite(child, nextParents, curFile);
-  };
-
-  for (const s of resultsObj?.suites || []) walkSuite(s);
+  const { counts, tests } = summarizePlaywrightResults(resultsObj);
   return {
-    counts: {
-      total: tests.length,
-      executed: passed + failed + flaky,
-      passed,
-      failed,
-      flaky,
-      skipped,
-    },
-    tests,
+    counts,
+    tests: tests.map((t) => ({
+      testId: t.testId,
+      file: t.file,
+      line: t.line,
+      title: t.title,
+      projectName: t.projectName,
+      status: t.status,
+      retryPassed: t.retryPassed,
+      durationMs: t.durationMs,
+      errorSnippet: t.errorSnippet,
+    })),
   };
 }
 
@@ -105,6 +71,7 @@ export function beginRunLedger(qaDir, meta) {
   const runDir = path.join(qaDir, '.aitest', 'runs', runId);
   fs.mkdirSync(runDir, { recursive: true });
 
+  /** @type {Record<string, unknown>} */
   const pickedEnv = {};
   for (const k of ['TEST_ENV', 'TEST_BASE_URL', 'TEST_ALLOWED_HOSTS', 'TEST_ALLOW_MUTATION', 'TEST_EGRESS_MODE']) {
     if (meta.env && meta.env[k] !== undefined) pickedEnv[k] = meta.env[k];
