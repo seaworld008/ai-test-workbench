@@ -374,7 +374,7 @@ Each work unit is scoped to `<= 1 day` and follows: **lock tests first -> refact
 | **WU-07** | MCP Cycle Removal, Tool Surface Consolidation (21 -> 17) & Per-Command CLI | WU-06 | 1d | Extract `mcp-hub/catalog.mjs` + route `mcp serve` in `src/cli/` (`0` cycles); split `mcp/tools/*` with declarative `execute` hooks; consolidate `aitest_heal` + `aitest_job` with 6 deprecated v5 call aliases; per-command CLI option specs (`src/cli/commands.mjs`); update and pass `conformance/` official + 3-transport SDK tests | `git revert <sha>` (6 deprecated aliases maintain v5 compatibility) | `done` |
 | **WU-08** | Progressive Strict Type Safety (`strict: true, noImplicitAny: true` Zero Errors) | WU-07 | 1d | Add locked `typescript` + `@types/node` to root `devDependencies` (keeping `dependencies: {}`), remove template `typeRoots`, make `run-typecheck.mjs` fail-closed everywhere, resolve all `1,012` strict errors to `0` under `strict: true` | `git revert <sha>` (type annotations & config only) | `done` |
 | **WU-09** | Three-Layer Test Architecture & ≥ 80% Core Coverage Gate | WU-08 | 1d | Reorganize `test/{unit,integration,adversarial}/` preserving 100% of existing adversarial/holdout/E1–E6 assertions; close coverage gaps (`doctor`, `runner`, `verdict`, `report`, `agents`, `skill-install`, `resources`, `audit`, `upgrade`, `config`) to ≥ 80% core line coverage; enforce Node `--experimental-test-coverage` threshold in `npm test` & CI | `git revert <sha>` (test layout & runner only) | `done` |
-| **WU-10** | Docs Convergence, Auto-Generated Tool Matrix, Tarball Hygiene & `v6.0.0` Prep | WU-09 | 0.5–1d | Tighten `package.json#files` (exclude `docs/review/`, `docs/history/`, internal `scripts/`) + `npm pack` hygiene test; archive stale docs to `docs/history/`; consolidate `docs/adr/0001..0005`; add `scripts/generate-docs.mjs --check`; strengthen `lint:docs`; de-hype `README`/`AGENTS`/`SKILL`; write full v5->v6 `docs/upgrade.md`, bump to `6.0.0`, pass all 7 final gates | `git revert <sha>` (docs, manifest & version bump only) | `pending` |
+| **WU-10** | Docs Convergence, Auto-Generated Tool Matrix, Tarball Hygiene & `v6.0.0` Prep | WU-09 | 0.5–1d | Tighten `package.json#files` (exclude `docs/review/`, `docs/history/`, internal `scripts/`) + `npm pack` hygiene test; archive stale docs to `docs/history/`; consolidate `docs/adr/0001..0005`; add `scripts/generate-docs.mjs --check`; strengthen `lint:docs`; de-hype `README`/`AGENTS`/`SKILL`; write full v5->v6 `docs/upgrade.md`, bump to `6.0.0`, pass all 7 final gates | `git revert <sha>` (docs, manifest & version bump only) | `done` |
 
 ---
 
@@ -389,6 +389,57 @@ Each work unit is scoped to `<= 1 day` and follows: **lock tests first -> refact
 
 ---
 
-## 7. Final Refactor Delivery Report (Populated After Stages 1..N)
+## 7. Final Refactor Delivery Report (`v6.0.0` Verified Complete)
 
-> Pending user confirmation of this Stage 0 assessment. Upon completion of WU-01..WU-10, this section will be populated with per-unit commit SHAs, before/after verified metrics (LOC, max module LOC, dependency violations, coverage, FGER, unseen-holdout real-world FPR with Wilson 95% CI, test counts/runtime, package size), breaking-change migration summary, and known follow-ups.
+> **Branch**: `refactor/v6` (based on `main@3d0c657`; no `git push`, no `npm publish`, `.github/workflows/release.yml` untouched) · **Completed**: `2026-11-24` · **All metrics below are freshly `VERIFIED`**.
+
+### 7.1 Work-Unit Commit Log
+
+| Unit | Commit SHA | Summary |
+|---|---|---|
+| **Stage 0** | `9bc7464` | Architecture assessment, verification of 10 suspicions, target design & WU-01..WU-10 plan |
+| **WU-01** | `a45373a` | `src/types/*.d.ts`, `src/core/*` leaf modules, architecture boundary tests, deduplication of 6 duplicated utilities |
+| **WU-02** | `15c3d54` | Authoritative kernel in `src/kernel/`, `package.json#exports`, one-way `sync:vendor`/`check:vendor`, `.aitest/template-manifest.json`, `aitw upgrade` |
+| **WU-03** | `a4c7d43` | `src/core/outcome.mjs`, schema-validated `src/core/config.mjs`, closed all 6 fail-open gates, added `init --json` |
+| **WU-04** | `c80c367` | Decomposed `ast-analyzer.mjs` (1,649L) into pluggable AST rule engine (`AITEST-G101..G115` + lexical scope stack + structured `Finding`) |
+| **WU-05** | `aa11338` | Blind unseen holdout evaluation (`seed=20261125`, `n=50`, 0 overlap) before/after + 5 systemic FP improvements |
+| **WU-06** | `f90e923` | Decomposed remaining god modules (`trust`, `explore`, `codemap`, `perf`) and eliminated temp-script codegen in `auth-login.mjs` |
+| **WU-07** | `e396caa` | Eliminated 4 circular imports, consolidated MCP tools (`21 -> 17` + 6 v5 forwarding aliases), enforced per-command CLI option tables |
+| **WU-08** | `4732209` | Pinned `typescript@6.0.3` + `@types/node@26.6.6` in root `devDependencies`, resolved all strict `checkJs` diagnostics to 0 errors / 0 suppressions |
+| **WU-09** | `20baf15` | Reorganized tests into `test/{unit,integration,adversarial}/` and enforced native V8 `--test-coverage-lines=80` gate |
+| **WU-10** | *(this delivery commit)* | Docs convergence, 5 ADRs (`0001..0005`), auto-generated 17-tool tables, strengthened `lint:docs`, tightened `package.json#files`, `v6.0.0` release prep |
+
+### 7.2 Before vs After Verified Metrics (`v5.1.1` → `v6.0.0`)
+
+| Metric | Before (`main` / `v5.1.1`) | After (`refactor/v6` / `v6.0.0`) | Verification Source |
+|---|---|---|---|
+| **`src/scripts -> templates` Dependency Inversions** | `14` violations | **`0`** | `test/unit/architecture-boundaries.test.mjs` |
+| **Circular Imports Across `src/**`** | `4` cycles | **`0`** | `test/unit/architecture-boundaries.test.mjs` |
+| **Max Module Size / `> 900L` God Modules** | `1,616L` (`ast-analyzer.mjs`) / `5` modules | **`786L` (`src/impact.mjs`) / `0` modules** | `85` `.mjs` modules in `src/` (including `23` homed `src/kernel` modules), `22,852` LOC total |
+| **Root Runtime `dependencies`** | `0` (absent) | **`0` (absent)** | `test/unit/package-hygiene.test.mjs`; dev-only pinned `typescript@6.0.3` + `@types/node@26.6.6` |
+| **Fail-Open Security Gaps** | `6` confirmed gaps | **`0`** | All tightened to `outcome: 'blocked'` (exit `2`) with regression tests |
+| **Strict TypeCheck (`strict: true, noImplicitAny: true`)** | `1,012` latent errors (checks disabled) | **`0` errors · `0` `@ts-ignore`/`@ts-expect-error`/`@ts-nocheck`** | `npm run typecheck` (fail-closed everywhere) |
+| **Canonical MCP Tools / Deprecated Aliases** | `21` tools (hardcoded branches in `protocol.mjs`) | **`17` canonical tools + `6` v5 forwarding aliases** | `conformance/sdk-client.test.mjs` `5/5` across all 3 transports |
+| **Automated Unit / Integration / Adversarial Tests** | `75` pass / `0` fail / `0` skip | **`124` pass / `0` fail / `0` skip** | `npm test` (`test/{unit,integration,adversarial}/`) |
+| **Line / Branch / Function Coverage (`src/**/*.mjs`)** | `70.08%` lines (no gate) | **`81.88%` lines / `66.03%` branches / `82.58%` functions** | `scripts/run-unit-tests.mjs` (`--test-coverage-lines=80`) |
+| **Internal Fake-Green Escape Rate (`FGER-internal`)** | `0.0%` (`26/26`) | **`0.0%` (`26/26`)** | `npm run bench` (zero regression) |
+| **Red-Team Holdout Escape Rate (`FGER-holdout`)** | `0.0%` (`24/24`) | **`0.0%` (`24/24`)** | `npm run bench` (zero regression) |
+| **Internal Benign Refactor FPR (`Gate-FPR internal`)** | `0.0%` (`12/12`) | **`0.0%` (`12/12`)** | `npm run bench` |
+| **SDDR / Triage / Redaction / Mis-Heal** | `100% (7/7)` / `100%` / `100%` / `0.0%` | **`100.0% (7/7)` / `100.0%` (`C->A 0.0%`) / `100.0% (35/35)` / `0.0%`** | `npm run bench` & `npm run demo:verify` |
+| **Real-World FPR — Unseen Holdout (`n=50`, `seed=20261125`)** | `12.2%` (`6/49`, Wilson 95% CI `[5.7%, 24.2%]`, TP `1/1`) | **`6.1%` (`3/49`, Wilson 95% CI `[2.1%, 16.5%]`, TP `1/1`)** | 50% reduction on blind holdout (zero holdout tuning); see `bench/real-world/results/SUMMARY-v6-holdout.en.md` |
+| **Real-World FPR — Pilot (`n=50`, `seed=20261124`)** | `20.8%` (`10/48`, Wilson 95% CI `[11.7%, 34.3%]`, TP `2/2`) | **`4.2%` (`2/48`, Wilson 95% CI `[1.2%, 14.0%]`, TP `2/2`)** | 80% reduction; combined `n=100` is **`5.2%` (`5/97`, CI `[2.2%, 11.5%]`, `3/3` TP retained)** |
+| **npm Tarball (`npm pack --dry-run`)** | `164` files / `1.3 MB` unpacked (leaked reviews & internal scripts) | **`227` files / `375.4 kB` packed (`1.5 MB` unpacked)** — **0 reviews, 0 history, 0 internal scripts** | `test/unit/package-hygiene.test.mjs` (file count reflects finer modular `src/` + vendored `templates/` kernel files) |
+| **Docs & Hygiene Gate (`npm run lint:docs`)** | 92 docs, broken `--approver` flag & drifted manual tool tables | **`102` docs, `364` scanned files, 0 issues** (8 auto-generated tables, 14 core H2 parity checks, live CLI flag checks) | `npm run lint:docs` + `node scripts/generate-docs.mjs --check` |
+
+### 7.3 Breaking Changes & Migration Summary
+
+Full breaking changes and step-by-step migration commands are documented in [docs/upgrade.en.md](../upgrade.en.md) ([Chinese](../upgrade.md)):
+1. **MCP Tool Consolidation (21 → 17)**: Use `aitest_heal(action="begin"|"attempt"|"conclude")` and `aitest_job(action="status"|"result"|"cancel")`; all 6 v5 tool names remain active forwarding aliases with deprecation notices throughout `v6.x`.
+2. **Per-Command Strict CLI Flags & Unified Envelopes**: Unrelated flags exit `1` with suggestions; `governance approve` keeps a deprecated `--approver` → `--by` alias; all `blocked` outcomes exit `2`.
+3. **Fail-Closed Tightening & Host Upgrade**: Run `npx ai-test-workbench@6.0.0 upgrade --target <repo>` to update host `qa/` files safely via `.aitest/template-manifest.json`, then have a human run `governance approve --by <name> --reason "..."` to re-seal `.aitest/governance.lock`.
+
+### 7.4 Known Follow-Ups
+
+1. **Residual 3 Unseen-Holdout False Positives (`6.1%`, `3/49`)**: All 3 stem from assertions extracted into cross-module custom helper files outside single-file AST visibility. Reaching `<= 3%` will require a lightweight intra-repo helper assertion index (still avoiding full `ts.createProgram`) validated on a fresh pre-registered holdout corpus.
+2. **Formal `>= 200`-Commit Benchmark & Autonomous Red-Team (`FGER-agentic`)**: Tracked as separate post-v6 milestones per `bench/real-world/PREREGISTRATION.en.md` and `bench/agentic/DESIGN.en.md` (currently `pending` / `design only`, with no extrapolation).
+3. **Medium-Sized Cohesive Modules**: `src/impact.mjs` (`786L`), `src/diagnose.mjs` (`650L`), `src/verdict.mjs` (`612L`), and `src/heal.mjs` (`611L`) remain well-tested and cohesive, and can be trimmed below `500L` opportunistically in future feature work.

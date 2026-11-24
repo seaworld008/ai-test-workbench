@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 /**
- * T1 Out-of-Workspace HMAC Tamper-Evidence Engine (`ADR-0002`).
+ * T1 Out-of-Workspace HMAC Tamper-Evidence Engine (see `docs/governance.md` & `ADR-0002`).
  *
  * Threat-model honesty:
  * - T0 (Advisory): unsigned local artifacts; no tamper evidence.

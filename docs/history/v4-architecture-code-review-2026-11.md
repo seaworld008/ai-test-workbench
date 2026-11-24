@@ -1,6 +1,6 @@
 # ai-test-workbench v4.0 全面架构与代码审查报告
 
-> [English Summary](./architecture-code-review-2026-11.en.md) · [配套优化路线图](./optimization-roadmap-2026-2027.md) · [主文档 README](../../README.md) · [AGENTS.md](../../AGENTS.md)
+> [English Summary](./v4-architecture-code-review-2026-11.en.md) · [配套优化路线图](./v5-optimization-roadmap-2026-2027.md) · [主文档 README](../../README.md) · [AGENTS.md](../../AGENTS.md)
 >
 > **审查日期**：2026-11-23 · **审查对象**：`main@e43e107`（v4.0.0）· **审查口径**：围绕「AI 驱动的智能化测试工具、能跟上 AI 代码生成速度的可信验证层」这一目标，覆盖架构、协议、门禁、安全、智能化能力、工程质量与文档 7 个维度。
 >
@@ -330,4 +330,4 @@ diff --git a/eslint.config.mjs b/eslint.config.mjs
 1. **先“修门禁”，再“加智能”**：P0 问题里有 7 条属于“门禁自身产生假绿”。在 AI 写码的场景里，一个会说谎的门禁比没有门禁更危险，因为 Agent 和人都会信任它。
 2. **把治理从提示词迁到代码**：A/B/C/D 分类、3 次修复上限、豁免审批、受保护文件，都应该由 MCP 工具层**强制执行**，并留下可审计的证据链。
 3. **建立度量闭环**：没有基准就无法收敛。路线图第 3 阶段的“带种子缺陷的基准仓库 + 门禁指标”应提前到第 1 阶段启动，作为所有后续优化的验收标尺。
-4. 详细的分阶段实施方案、验收标准与度量指标见 **[优化路线图](./optimization-roadmap-2026-2027.md)**。
+4. 详细的分阶段实施方案、验收标准与度量指标见 **[优化路线图](./v5-optimization-roadmap-2026-2027.md)**。

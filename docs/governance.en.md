@@ -1,79 +1,83 @@
-# 4-Layer Anti-Fake-Green Gate Kernel, Governance Lock & Stateful Healer Guide (`v5.0`)
+# Four-Layer Anti-Fake-Green Gate, Governance Lock & Heal State Machine (`v6.0`)
 
-> [简体中文 (默认)](./governance.md) · [English README](../README.en.md) · [Architecture](../ARCHITECTURE.en.md) · [Verification Scorecard](./review/v5-verification-scorecard.en.md)
+> [简体中文 (默认)](./governance.md) · [English README](../README.en.md) · [Architecture](../ARCHITECTURE.en.md) · [v6.0 Upgrade Guide](./upgrade.en.md)
 
-`ai-test-workbench v5.0` serves as an **independent Trustworthy Verification Kernel for AI coding agents**. Rather than trusting prompt-only instructions, governance rules are **tool-enforced** at the AST, git-diff, ledger, and filesystem-hash layers.
+`ai-test-workbench v6.0` is a standalone **Trustworthy Verification Kernel** for AI coding agents. Anti-fake-green enforcement and safety boundaries are **tool-enforced and fail-closed** rather than relying on prompt suggestions.
 
 ---
 
-## 1. 4-Layer Anti-Fake-Green Gate Kernel (`support/gate-kernel.mjs`)
+## 1. Four-Layer Anti-Fake-Green Gate Kernel (`src/kernel/gate/`)
 
-Every `npx ai-test-workbench@5.1.1 audit`, `npx ai-test-workbench@5.1.1 run --audit`, and one-call `npx ai-test-workbench@5.1.1 verify-change` invocation enforces four sequential gates:
+Every `npx ai-test-workbench@6.0.0 audit`, `npx ai-test-workbench@6.0.0 run --audit`, or `npx ai-test-workbench@6.0.0 verify-change` evaluates four fail-closed layers (any missing dependency, ledger, lock, or unbound input yields tri-state `blocked`, exit code `2`):
 
-| Layer | Gate | What It Verifies | Cheating Patterns Blocked |
+| Layer | Gate | Core Checks | Blocked Cheat Patterns |
 |---|---|---|---|
-| **Layer 0** | **Governance Tamper Lock (`governance.lock`)** | Verifies SHA-256 digests across 11 protected QA files (`eslint.config.mjs`, `playwright.config.ts`, `aitest.config.json`, `waivers.json`, `perf-budget.json`, `support/*.mjs`, `tests/fixtures/base.ts`, etc.) | Agent disabling ESLint rules, adding `testIgnore` or `retries: 5` in `playwright.config.ts`, or self-authoring `waivers.json` entries |
-| **Layer 1** | **Static Type & Playwright Lint Gate** | `tsc --noEmit` + `eslint-plugin-playwright` (including bans on raw `request.newContext()` and `test.fail()`) | Zero-assertion specs, `.only`, `waitForTimeout()`, `{ force: true }`, bypassing guarded fixtures |
-| **Layer 2** | **Run Ledger Binding & Waiver Accounting** | Validates `.aitest/runs/<runId>/manifest.json` workspace input hashes; strictly separates `passed / failed / flaky / quarantined / skipped / policyExcludedMutation`; deduplicates `@mutation` by `file:line`; enforces human `approvedBy`, linked `issue`/`traceId`, `<= 5` max waivers, and `<= 14d` TTL | Replaying stale green `results.json` after code changes, bot-signed waivers, indefinite test suppression |
-| **Layer 3** | **Assertion Strength Lattice (`S0–S5`) & Semantic Diff Guard** | Inspects all tracked and untracked changes across `qa/`, scoring assertions from `S5` (exact value) -> `S4` (structural/schema) -> `S3` (substring/regex) -> `S2` (visibility/state) -> `S1` (existence/truthy) -> `S0` (tautology) across rules `AITEST-G101..G113` | Downgrading `toHaveText('49/50')` to `toBeVisible()`, `expect(true).toBe(true)`, `test.fail()`, `.catch(() => null)`, `expect.soft()`, `if (...) { expect(...) }`, flipping `200` to `500` to match broken APIs, empty `verifyNothing()` helpers |
+| **Layer 0** | **Governance Integrity Lock (`governance.lock`) & Config Schema** | Verifies SHA-256 + T1 MAC across 17 protected path patterns (`eslint.config.mjs`, `playwright.config.ts`, `aitest.config.json`, `waivers.json`, `perf-budget.json`, `impact-map.json`, `support/**/*.mjs`, `tests/fixtures/base.ts`) and JSON-Schema-validates `aitest.config.json` | Disabling ESLint rules, adding `testIgnore` or inflating `retries`, self-authoring `waivers.json`, corrupting config to fall back to defaults |
+| **Layer 1** | **Static TypeScript & Playwright Rules** | `tsc --noEmit` + `eslint-plugin-playwright` (banning raw `request.newContext()` and `test.fail()`) + AST static spec checks; missing compilers fail closed (`blocked`) in CI | Zero-assertion shells, `.only`, `waitForTimeout()`, `{ force: true }`, unguarded API requests |
+| **Layer 2** | **Run Ledger Binding & Waiver Audit** | Verifies `.aitest/runs/<runId>/manifest.json`, workspace input fingerprint, and `results.json` SHA-256 binding (custom `--results` without `--expected-run-id` blocks); separates `passed / failed / flaky / quarantined / skipped / policyExcludedMutation` (`maxSkipped=0` default); enforces human waivers (`<= 5`, `<= 14d` TTL) | Reusing stale green `results.json`, bot-approved waivers, excessive TTL, or unbound results bypass |
+| **Layer 3** | **Pluggable AST Assertion Lattice & Changeset Semantic Diff Guard (`S0–S5`)** | Runs all 15 independent rules (`AITEST-G101..G115`) via TypeScript AST with explicit lexical scope stack (`top-level/describe/hook/test/browser-evaluate`), commit-level cross-file test pooling, and fault-injection/honeypot awareness; missing TS compiler blocks | Deleting assertions, weakening assertions (`toHaveText` -> `toBeVisible`), `S0` tautologies, `test.fail()`, `expect.soft()`, empty `catch`, conditional assertions inside `test()`, mocking `2xx` responses |
 
 ---
 
-## 2. Human-Only Governance Approval (`npx ai-test-workbench@5.1.1 governance`)
+## 2. Human-Only Governance Approval (`npx ai-test-workbench@6.0.0 governance`)
 
-Protected governance files are sealed in `<repo>/qa/.aitest/governance.lock` alongside an append-only audit log `.aitest/governance-audit.jsonl`:
+Protected files are sealed in `<repo>/qa/.aitest/governance.lock` with an append-only `.aitest/governance-audit.jsonl` trail:
 
 ```bash
-# Check governance lock integrity (read-only)
-npx ai-test-workbench@5.1.1 governance status --target "/path/to/repo"
+# Inspect protected governance file hashes (read-only)
+npx ai-test-workbench@6.0.0 governance status --target "/path/to/repo"
 
-# Re-seal protected governance files from a human terminal after intentional updates
-npx ai-test-workbench@5.1.1 governance approve --target "/path/to/repo" --approver "alice@team" --reason "Update staging LCP budget"
+# Re-seal governance.lock locally as a human after intentional config or waiver edits
+npx ai-test-workbench@6.0.0 governance approve --target "/path/to/repo" --by "alice@team" --reason "Update staging perf budget"
 ```
 
 > [!IMPORTANT]
-> **Privilege Separation**: `governance approve` is **never exposed as an MCP tool**, hard-fails whenever `AITEST_MCP_CHILD=1`, and rejects bot identities (`codex`, `claude`, `agent`, `healer`, etc.).
+> **Physical Privilege Isolation**: `governance approve` is **never registered as an MCP tool**, hard-blocks when `AITEST_MCP_CHILD=1`, and rejects bot/agent approver identifiers (`codex`, `claude`, `ai-agent`, `healer`).
 
 ---
 
-## 3. Stateful Heal Session State Machine (`npx ai-test-workbench@5.1.1 heal` / `aitest_heal_*`)
+## 3. Stateful Heal Governance (`npx ai-test-workbench@6.0.0 heal` / `aitest_heal`)
 
-Instead of letting agents freely edit specs in an unmonitored loop, repairs follow a persisted state machine:
+All failure remediation flows through a T1-MAC-protected state machine:
 
-1. **`aitest_heal_begin`**: Reads the latest `Run Ledger` and structured diagnostics (`A / B / C / D`) to initialize `.aitest/heals/<sessionId>.json`:
-   - **Class A (Locator / Sync Drift)**: Grants `allowedToEditTests: true` with a strict **3-attempt cap**.
-   - **Class B (Environment / Auth / Guard Block)**: **Hard-blocks spec edits** (exit `2`) and surfaces infrastructure remediation steps.
-   - **Class C (Backend `5xx`, Uncaught `pageerror`, Schema / Business Bug)**: **Hard-blocks spec edits** (exit `2`) and automatically writes a Trace-ID-linked defect ticket under `reports/defects/<id>.md`.
-   - **Class D (Requirement Ambiguity)**: **Hard-blocks spec edits** and requests human clarification.
-2. **`aitest_heal_attempt`**: Re-runs the target spec, Semantic Diff Guard, and Governance Lock check on each attempt; trips the circuit breaker on semantic weakening or after 3 failed tries.
-3. **`aitest_heal_conclude`**: Seals the heal session record for auditability.
-
----
-
-## 4. Flaky Telemetry & Auto-Quarantine
-
-- Run history in `.aitest/runs/index.jsonl` computes rolling flaky rates over the last 20 runs (`src/flaky.mjs`).
-- Quarantined specs in `.aitest/quarantine.json` carry a mandatory `<= 7d` TTL and auto-release after `5` consecutive clean passes.
+1. **`aitest_heal(action="begin")`** (CLI: `heal begin`): Reads the latest Run Ledger and structured A/B/C/D diagnostics into `.aitest/heals/<sessionId>.json`:
+   - **Class A (locator/wait drift)**: Permits repair (`allowedToEditTests: true`), capped at **3 cumulative attempts across sessions**.
+   - **Class B (environment/auth/guard block)**: **Hard-blocks test edits** (exit `2`); prompts fixing infrastructure or running `auth-login`.
+   - **Class C (5xx, uncaught runtime error, contract/business defect)**: **Hard-blocks test edits** (exit `2`); emits `reports/defects/<id>.md` with 32-char W3C `Trace-ID`.
+   - **Class D (ambiguous requirement)**: **Hard-blocks test edits**; pauses for human clarification.
+2. **`aitest_heal(action="attempt")`** (CLI: `heal attempt`): Re-checks Governance Lock + AST Semantic Diff Guard + targeted re-run; trips and escalates on assertion weakening or cap exhaustion.
+3. **`aitest_heal(action="conclude")`** (CLI: `heal conclude`): Archives audit trail and writes Class-C defect tickets.
 
 ---
 
-## 5. One-Call Change Verdict (`npx ai-test-workbench@5.1.1 verify-change` / `aitest_verify_change`)
+## 4. Historical Flaky Telemetry & Quarantine (`Flaky Quarantine`)
 
-Before opening or merging a PR, one call orchestrates `governance verify` → `Import-Graph Impact v2` → `Playwright Run (Run Ledger)` → `4-Layer Gate Audit` → `Diagnose & Trace Matrix`, producing:
-- Machine-verifiable attestation: `<repo>/qa/.aitest/runs/<runId>/attestation.json`
-- Human-readable summary: `<repo>/qa/reports/verdict-summary.md` (explicitly labeling `local-workbench` vs `business-e2e` scope)
-- GitHub Code Scanning report: `<repo>/qa/reports/verdict.sarif.json`
+- Every run appends to `.aitest/runs/index.jsonl`; `src/flaky.mjs` computes rolling 20-run flaky rates.
+- Non-critical flaky tests can be placed in T1-MAC-signed `.aitest/quarantine.json` (max `7-day` TTL; auto-released after `5` consecutive clean passes), preventing silent permanent skips.
+
+---
+
+## 5. One-Call Change Verdict (`npx ai-test-workbench@6.0.0 verify-change` / `aitest_verify_change`)
+
+Chains the full fail-closed pipeline in one call:
+`governance verify` -> `Git merge-base` -> `Import-Graph Impact v2` -> `Playwright Run (Run Ledger)` -> `4-Layer Gate Audit` -> `Heal Conflict Check` -> `Diagnose & Trace Matrix`, producing:
+- Machine-verifiable attestation: `<repo>/qa/.aitest/runs/<runId>/attestation.json` (in-toto Statement v1)
+- Human-readable verdict: `<repo>/qa/reports/verdict-summary.md` (explicitly separating `local-workbench` vs `business-e2e`)
+- SARIF 2.1.0 report: `<repo>/qa/reports/verdict.sarif.json`
 
 ---
 
 ## 6. Trust Levels (`T0 / T1 / T2`) & Reusable CI Attestation Workflow
 
-| Trust Level | Canonical Definition | Merge-Grade Green? |
+| Trust Level | Definition | Merge-Grade Green? |
 |---|---|---|
-| **T0** | Unverified local run | No |
-| **T1** | Local Run Ledger + MAC (proves integrity, not provenance) | No |
-| **T2** | Re-run from a clean checkout on a GitHub-hosted runner, keylessly signed with Sigstore, and verified for issuer identity | **Yes (only merge-grade green)** |
+| **T0** | Unverified local run or downgraded scope | No |
+| **T1** | Local Run Ledger + HMAC (proves integrity, not provenance) | No |
+| **T2** | Clean checkout re-run on a GitHub-hosted runner, signed keyless via Sigstore with verified workflow OIDC identity | **Yes (only merge-grade green)** |
 
-- Adopt `.github/workflows/aitest-verify.yml` in one job using [examples/workflows/use-aitest-verify.yml](../examples/workflows/use-aitest-verify.yml).
-- Verify bundles offline with `npx ai-test-workbench@5.1.1 attest verify --file <attestation.json> --bundle <attestation.sigstore.json> --expect-repo <owner/repo> --expect-workflow <workflow-path> --expect-ref <ref>`. Any missing signature, T1-only MAC, byte-level tamper, or OIDC issuer / workflow SAN mismatch fails closed (non-zero exit code, `trustLevel <= T1`).
-- **Private Repository Note**: `signer: github-attest` (default) uses GitHub Artifact Attestations, which requires **GitHub Enterprise Cloud** for private repositories. `signer: cosign` with public Sigstore records repository identity in the public Rekor transparency log; private projects must evaluate that disclosure before opting in.
+- Wire `.github/workflows/aitest-verify.yml` via [examples/workflows/use-aitest-verify.yml](../examples/workflows/use-aitest-verify.yml).
+- Verify attestations offline with:
+  ```bash
+  npx ai-test-workbench@6.0.0 attest verify --file <attestation.json> --bundle <attestation.sigstore.json> --expect-repo <owner/repo> --expect-workflow <workflow-path> --expect-ref <ref>
+  ```
+- Private repository note: `signer: github-attest` (default) uses GitHub Artifact Attestations (requires GitHub Enterprise Cloud on private repos); `signer: cosign` logs repository identity to the public Rekor transparency log.

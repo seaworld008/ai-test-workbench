@@ -306,7 +306,7 @@ export function suggestFailureCategory(errorText, guardSignals = null, errorObj 
       candidates: ['A'],
       evidence: ['locator-or-action-drift'],
       guidance:
-        'Inspect ARIA snapshot in error-context.md. If UI locator drifted legitimately without business regression, repair semantic locator (max 3 attempts via aitest_heal_begin).',
+        'Inspect ARIA snapshot in error-context.md. If UI locator drifted legitimately without business regression, repair semantic locator (max 3 attempts via aitest_heal(action="begin"|"attempt")).',
     };
   }
 
@@ -476,7 +476,7 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
     '',
     `> Generated at: ${new Date().toISOString()}`,
     '> **Security & Governance Notice**: Credentials in text snippets are automatically redacted, but raw `trace.zip` and video files may still contain rendered session data — treat report directories as sensitive artifacts.',
-    '> **Triage Notice**: Categories below follow evidence-first runtime-guard + matcher triage (Class C value regressions always take precedence over locator Call log). Use `aitest_heal_begin` to enforce A/B/C/D governance; NEVER use `test.skip`, `test.fixme`, or assertion weakening.',
+    '> **Triage Notice**: Categories below follow evidence-first runtime-guard + matcher triage (Class C value regressions always take precedence over locator Call log). Use `aitest_heal(action="begin")` to enforce A/B/C/D governance; NEVER use `test.skip`, `test.fixme`, or assertion weakening.',
     '',
   ];
 

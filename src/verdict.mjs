@@ -454,12 +454,12 @@ export async function verifyChangeCore(options = {}) {
   if (verdictStatus !== 'pass') {
     for (const f of diagFailures.slice(0, 5)) {
       if (f.categoryCode === 'A') {
-        nextActions.push({ tool: 'aitest_heal_begin', args: { target, testId: f.testId } });
+        nextActions.push({ tool: 'aitest_heal', args: { action: 'begin', target, testId: f.testId } });
       } else {
         nextActions.push({
-          tool: 'aitest_heal_begin',
+          tool: 'aitest_heal',
           note: `Category ${f.categoryCode}: open session and conclude as defect/escalation without editing assertions`,
-          args: { target, testId: f.testId },
+          args: { action: 'begin', target, testId: f.testId },
         });
       }
     }

@@ -7,7 +7,7 @@
     {
       "scenario": "completion-complete",
       "category": "optional-capability-not-implemented",
-      "reason": "Server intentionally does not declare or implement the optional MCP completion/complete capability; see ADR-001 (docs/adr/mcp-zero-dependency.md).",
+      "reason": "Server intentionally does not declare or implement the optional MCP completion/complete capability; see ADR-0001 (docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md).",
       "issue": "https://github.com/seaworld008/ai-test-workbench/issues"
     },
     {

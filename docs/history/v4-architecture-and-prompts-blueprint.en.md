@@ -1,6 +1,6 @@
 # AI Test Workbench (v4.0) — AI-Agent-First Full-Link Testing Workbench: Architecture & Implementation Prompts
 
-> [简体中文完整架构蓝图 (默认)](../Playwright%20Test%20Agents%20+%20Codex%20%E5%8F%AF%E5%A4%8D%E7%94%A8%E6%9C%AC%E6%9C%BA%20AI%20%E8%87%AA%E5%8A%A8%E5%8C%96%E6%B5%8B%E8%AF%95%E5%B7%A5%E4%BD%9C%E5%8F%B0%E2%80%94%E2%80%94%E6%9E%B6%E6%9E%84%E8%AE%BE%E8%AE%A1%E4%B8%8E%E5%AE%9E%E6%96%BD%E6%8F%90%E7%A4%BA%E8%AF%8D.md) · [English README](../README.en.md) · [AI Agent Quickstart](./ai-agent-quickstart.en.md) · [AGENTS.en.md](../AGENTS.en.md)
+> [简体中文完整架构蓝图 (默认)](./v4-architecture-and-prompts-blueprint.md) · [English README](../../README.en.md) · [AI Agent Quickstart](../ai-agent-quickstart.en.md) · [AGENTS.en.md](../../AGENTS.en.md)
 > **Version**: v4.0 (AI-Agent-First · Multi-Protocol MCP Server · Living Code Map · 7-Pillar MCP Hub · Perf SLOs · 3-Layer Anti-Fake-Green Gates)  
 > **Date**: 2026-11-23  
 > **Goal**: Build an **AI-Agent-First**, Git-tracked, open-source package (`ai-test-workbench`), native **MCP Server**, and portable **Agent Skill (`SKILL.md`)** connecting **Native Multi-Protocol MCP Orchestration -> 0→1 Multi-Portal Exploration -> Living Code Map -> 7-Pillar Read-Only System MCPs -> Performance SLOs -> 3-Layer Anti-Fake-Green Deterministic Regression**.
@@ -40,7 +40,7 @@
 
 ## 3. Ready-to-Use AI Agent Workflows & Prompts
 
-See paired prompts under [`prompts/*.en.md`](../prompts/first-time-ai-agent.en.md) and multi-client MCP configurations (Claude Code, Codex CLI, Cursor, Windsurf, VS Code Copilot, Gemini CLI, Streamable HTTP, Legacy SSE) in [docs/ai-agent-quickstart.en.md](./ai-agent-quickstart.en.md).
+See paired prompts under [`prompts/*.en.md`](../../prompts/first-time-ai-agent.en.md) and multi-client MCP configurations (Claude Code, Codex CLI, Cursor, Windsurf, VS Code Copilot, Gemini CLI, Streamable HTTP, Legacy SSE) in [docs/ai-agent-quickstart.en.md](../ai-agent-quickstart.en.md).
 
 ---
 

@@ -1,6 +1,6 @@
 # ai-test-workbench v4.0 Architecture & Code Review (English Summary)
 
-> [简体中文完整版](./architecture-code-review-2026-11.md) · [Optimization Roadmap](./optimization-roadmap-2026-2027.en.md) · [README](../../README.en.md)
+> [简体中文完整版](./v4-architecture-code-review-2026-11.md) · [Optimization Roadmap](./v5-optimization-roadmap-2026-2027.en.md) · [README](../../README.en.md)
 >
 > Review date: 2026-11-23 · Baseline: `main@e43e107` (v4.0.0). This is a **static review plus local workbench verification**. It is not a business E2E acceptance.
 
@@ -52,4 +52,4 @@ Other notable issues:
 2. Move governance from prompts into enforced tooling: a policy engine, heal sessions, and protected files.
 3. Build a seeded-bug benchmark early, so the fake-green escape rate and defect detection rate drive every later phase.
 
-See the [roadmap](./optimization-roadmap-2026-2027.en.md) for phased work packages.
+See the [roadmap](./v5-optimization-roadmap-2026-2027.en.md) for phased work packages.

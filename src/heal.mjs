@@ -152,7 +152,7 @@ function writeSignedSession(qaDir, session) {
 function readAndVerifySession(qaDir, sessionId) {
   const sessionPath = getSessionPath(qaDir, sessionId);
   if (!sessionId || !fs.existsSync(sessionPath)) {
-    return { ok: false, exitCode: 1, error: `Unknown heal session "${sessionId}". Call aitest_heal_begin first.` };
+    return { ok: false, exitCode: 1, error: `Unknown heal session "${sessionId}". Call aitest_heal(action="begin") first.` };
   }
   let session;
   try {
@@ -181,7 +181,7 @@ function readAndVerifySession(qaDir, sessionId) {
 
 /**
  * Captures the authoritative baseline of `relSpec` from Git base ref (`T-07`) when available,
- * preventing agents from mutating the spec BEFORE calling `aitest_heal_begin`.
+ * preventing agents from mutating the spec BEFORE calling `aitest_heal(action="begin")`.
  * @param {string} qaDir
  * @param {string} relSpec
  * @param {string} absSpec
@@ -301,7 +301,7 @@ export function beginHealSession(qaDir, options = {}) {
 }
 
 /**
- * Validates and executes a single Class-A repair attempt (`aitest_heal_attempt`), enforcing:
+ * Validates and executes a single Class-A repair attempt (`aitest_heal(action="attempt")`), enforcing:
  * 1) T1 HMAC session integrity
  * 2) Category === 'A' (B/C/D hard-blocked -> 0% mis-heal rate)
  * 3) Cross-session `attemptsUsed < 3` per `testId`
@@ -334,7 +334,7 @@ export async function attemptHealRepair(qaDir, options = {}) {
       ok: false,
       exitCode: 2,
       misHealBlocked: true,
-      error: `[Heal Governance Blocked] Category "${session.category}" prohibits modifying test assertions/locators. Call aitest_heal_conclude to file a defect report or request spec clarification.`,
+      error: `[Heal Governance Blocked] Category "${session.category}" prohibits modifying test assertions/locators. Call aitest_heal(action="conclude") to file a defect report or request spec clarification.`,
     };
   }
 
@@ -469,7 +469,7 @@ export async function attemptHealRepair(qaDir, options = {}) {
 }
 
 /**
- * Concludes a Heal Session (`aitest_heal_conclude`), generating a structured Defect Ticket for Class C bugs.
+ * Concludes a Heal Session (`aitest_heal(action="conclude")`), generating a structured Defect Ticket for Class C bugs.
  * @param {string} qaDir
  * @param {{ sessionId?: string, outcome?: string, summary?: string }} [options]
  */

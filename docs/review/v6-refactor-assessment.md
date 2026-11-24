@@ -404,7 +404,7 @@ flowchart TB
 | **WU-07** | MCP 环路清零、工具面收敛（21 -> 17）与按命令 CLI 参数表 | WU-06 | 1d | 抽离 `mcp-hub/catalog.mjs` 清零 4 条循环依赖；拆分 `mcp/tools/{verification,discovery,stateful}.mjs` 并引入声明式 `execute` 清理 `protocol.mjs` 硬编码；合并 `aitest_heal` + `aitest_job` 并实现 6 个 v5 弃用别名；`cli/commands.mjs` 实现按子命令严格校验；更新并通过 `conformance/` 官方合规与 3 传输 SDK 测试 | `git revert <sha>`（6 个旧工具名在 v6.x 中有兼容别名） | `done` |
 | **WU-08** | 渐进式严格类型安全（`strict: true, noImplicitAny: true` 全量清零） | WU-07 | 1d | 根包 `devDependencies` 锁定 `typescript` + `@types/node`（`dependencies` 仍为 `{}`），解除模板 `typeRoots` 依赖；`run-typecheck.mjs` 全环境 fail-closed；清零全部 `1,012` 处严格类型错误，`tsconfig.check.json` 切换至 `strict: true, noImplicitAny: true, useUnknownInCatchVariables: true` 全绿 | `git revert <sha>`（纯 JSDoc/`.d.ts`/tsconfig 变更，不影响运行时逻辑） | `done` |
 | **WU-09** | 三层测试体系重组与核心模块行覆盖率 ≥ 80% 门禁 | WU-08 | 1d | 重组 `test/{unit,integration,adversarial}/`，完整保留全部 24 红队 + 20 内部 + E1–E6 + 12 良性 + 45/12 诊断 + 35 脱敏用例；补齐 `doctor`、`runner`、`verdict`、`report`、`agents`、`skill-install`、`resources`、`audit`、`upgrade`、`config` 覆盖率盲区，核心模块行覆盖 ≥ 80%，并在 `run-unit-tests.mjs` 与 CI 强制执行覆盖率阈值 | `git revert <sha>`（仅测试文件与运行脚本调整） | `done` |
-| **WU-10** | 文档收敛、工具清单自动生成、打包卫生治理与 `v6.0.0` 封版 | WU-09 | 0.5–1d | 收紧 `package.json#files`（排除 `docs/review/`、`docs/history/`、内部 `scripts/`）+ `npm pack` 卫生单测；归档过时文档至 `docs/history/`；合并整理 `docs/adr/0001..0005`；落地 `scripts/generate-docs.mjs --check` 同步工具表；强化 `lint:docs`（结构对等 + CLI 旗标校验）；去营销化修订 `README`/`AGENTS`/`SKILL`，完善 `docs/upgrade.md` 与 `CHANGELOG.md`，升级版本号至 `6.0.0` 并通过全量验收门禁 | `git revert <sha>`（纯文档、打包清单与版本号变更） | `pending` |
+| **WU-10** | 文档收敛、工具清单自动生成、打包卫生治理与 `v6.0.0` 封版 | WU-09 | 0.5–1d | 收紧 `package.json#files`（排除 `docs/review/`、`docs/history/`、内部 `scripts/`）+ `npm pack` 卫生单测；归档过时文档至 `docs/history/`；合并整理 `docs/adr/0001..0005`；落地 `scripts/generate-docs.mjs --check` 同步工具表；强化 `lint:docs`（结构对等 + CLI 旗标校验）；去营销化修订 `README`/`AGENTS`/`SKILL`，完善 `docs/upgrade.md` 与 `CHANGELOG.md`，升级版本号至 `6.0.0` 并通过全量验收门禁 | `git revert <sha>`（纯文档、打包清单与版本号变更） | `done` |
 
 ---
 
@@ -419,6 +419,57 @@ flowchart TB
 
 ---
 
-## 7. 最终重构交付报告（阶段 1..N 完成后填写）
+## 7. 最终重构交付报告（`v6.0.0` 已全部实测完成）
 
-> 待用户确认本阶段 0 方案后，按 WU-01..WU-10 顺序执行并在完成后于此处回填提交哈希、前后实测指标对比表、留出集误报率前后 Wilson 95% CI 对比、破坏性变更迁移说明及遗留问题。
+> **分支**：`refactor/v6`（基于 `main@3d0c657`，未执行 `git push` 或 `npm publish`，未改动 `.github/workflows/release.yml`） · **完成日期**：`2026-11-24` · **全部数据均为本次实测 `VERIFIED`**。
+
+### 7.1 工作单元提交记录
+
+| 单元 | 提交 SHA | 核心变更摘要 |
+|---|---|---|
+| **Stage 0** | `9bc7464` | 架构评估、10 条疑点核实、目标架构与 WU-01..WU-10 计划 |
+| **WU-01** | `a45373a` | `src/types/*.d.ts`、`src/core/*` 叶模块、架构边界测试、消除 6 类重复实现 |
+| **WU-02** | `15c3d54` | 权威内核归位 `src/kernel/`、`package.json#exports`、单向镜像同步 `sync:vendor`/`check:vendor`、`.aitest/template-manifest.json`、`aitw upgrade` |
+| **WU-03** | `a4c7d43` | `src/core/outcome.mjs`、带 Schema 校验的 `src/core/config.mjs`、封堵全部 6 处 fail-open 缺口、`init --json` |
+| **WU-04** | `c80c367` | 拆分 `ast-analyzer.mjs`（1,649L）为可插拔 AST 规则引擎（`AITEST-G101..G115` + 词法作用域栈 + 结构化 `Finding`） |
+| **WU-05** | `aa11338` | 新种子未见留出集（`seed=20261125`, `n=50`, 0 重叠）盲测前后对比 + 5 项系统性降误报改进 |
+| **WU-06** | `f90e923` | 拆分 `trust`、`explore`、`codemap`、`perf` 剩余上帝模块，消除 `auth-login.mjs` 临时脚本代码生成 |
+| **WU-07** | `e396caa` | 清零 4 条循环导入、MCP 工具面收敛（21 → 17 + 6 个 v5 弃用别名）、按子命令严格 CLI 旗标表 |
+| **WU-08** | `4732209` | 根包 `devDependencies` 锁定 `typescript@6.0.3` + `@types/node@26.6.6`、`strict: true, noImplicitAny: true` 全量 0 错误 0 抑制注释 |
+| **WU-09** | `20baf15` | 三层测试体系重组（`test/{unit,integration,adversarial}/`）+ 原生 V8 `--test-coverage-lines=80` 门禁 |
+| **WU-10** | *(本交付提交)* | 文档收敛、5 份 ADR（`0001..0005`）、自动生成 17 工具表、强化 `lint:docs`、`package.json#files` 打包卫生、`v6.0.0` 封版 |
+
+### 7.2 重构前后核心指标实测对比（`v5.1.1` → `v6.0.0`）
+
+| 指标维度 | 重构前 (`main` / `v5.1.1`) | 重构后 (`refactor/v6` / `v6.0.0`) | 变化与验证方式 |
+|---|---|---|---|
+| **`src/scripts -> templates` 反向依赖边** | `14` 条违规边 | **`0`** | `test/unit/architecture-boundaries.test.mjs` |
+| **全仓 `src/**` 循环导入环路** | `4` 条环路 | **`0`** | `test/unit/architecture-boundaries.test.mjs` |
+| **单模块最大行数 / `> 900L` 上帝模块数** | `1,616L`（`ast-analyzer.mjs`） / `5` 个 | **`786L`（`src/impact.mjs`） / `0` 个** | `src/` 共 `85` 模块（含迁入的 `23` 个 `src/kernel` 模块），总计 `22,852` 行 |
+| **根包运行时 `dependencies`** | `0`（缺失） | **`0`（缺失）** | `test/unit/package-hygiene.test.mjs`；仅 `devDependencies` 锁定 `typescript@6.0.3` + `@types/node@26.6.6` |
+| **Fail-Open 安全漏洞数** | `6` 处实证漏洞 | **`0`** | 全部收紧为 `outcome: 'blocked'`（exit `2`），配专项回归测试 |
+| **严格类型检查 (`strict: true, noImplicitAny: true`)** | `1,012` 处潜在错误（关闭检查） | **`0` 错误 · `0` `@ts-ignore`/`@ts-expect-error`/`@ts-nocheck`** | `npm run typecheck`（全环境 fail-closed） |
+| **原生 MCP 权威工具数 / 兼容别名** | `21` 工具（`protocol.mjs` 含硬编码分支） | **`17` 权威工具 + `6` 个 v5 转发别名** | `conformance/sdk-client.test.mjs` 3 传输 `5/5` 通过 |
+| **自动化单元测试数与跳过数** | `75` 通过 / `0` 失败 / `0` 跳过 | **`124` 通过 / `0` 失败 / `0` 跳过** | `npm test`（`test/{unit,integration,adversarial}/`） |
+| **源码行 / 分支 / 函数覆盖率 (`src/**/*.mjs`)** | `70.08%` 行（未启用门禁） | **`81.88%` 行 / `66.03%` 分支 / `82.58%` 函数** | `scripts/run-unit-tests.mjs` 强制 `--test-coverage-lines=80` |
+| **内部对抗逃逸率 (`FGER-internal`)** | `0.0%` (`26/26`) | **`0.0%` (`26/26`)** | `npm run bench`（零回退） |
+| **红队留出逃逸率 (`FGER-holdout`)** | `0.0%` (`24/24`) | **`0.0%` (`24/24`)** | `npm run bench`（零回退） |
+| **内部良性重构误报率 (`Gate-FPR internal`)** | `0.0%` (`12/12`) | **`0.0%` (`12/12`)** | `npm run bench` |
+| **种子缺陷检出率 (`SDDR`) / 诊断 / 脱敏 / 误修** | `100% (7/7)` / `100%` / `100%` / `0.0%` | **`100.0% (7/7)` / `100.0%`（C→A `0.0%`） / `100.0% (35/35)` / `0.0%`** | `npm run bench` & `npm run demo:verify` |
+| **真实提交 FPR — 未见留出集 (`n=50`, `seed=20261125`)** | `12.2%` (`6/49`, Wilson 95% CI `[5.7%, 24.2%]`, TP `1/1`) | **`6.1%` (`3/49`, Wilson 95% CI `[2.1%, 16.5%]`, TP `1/1`)** | 盲测下降 50%，零调参过拟合，见 `bench/real-world/results/SUMMARY-v6-holdout.md` |
+| **真实提交 FPR — 试跑集 (`n=50`, `seed=20261124`)** | `20.8%` (`10/48`, Wilson 95% CI `[11.7%, 34.3%]`, TP `2/2`) | **`4.2%` (`2/48`, Wilson 95% CI `[1.2%, 14.0%]`, TP `2/2`)** | 下降 80%；合并 `n=100` 为 **`5.2%` (`5/97`, CI `[2.2%, 11.5%]`, `3/3` TP 保留)** |
+| **npm 发布包 (`npm pack --dry-run`)** | `164` 文件 / `1.3 MB` 解压（含内部审查稿与开发脚本） | **`227` 文件 / `375.4 kB` 压缩 (`1.5 MB` 解压)** — **0 审查稿、0 归档、0 内部脚本** | `test/unit/package-hygiene.test.mjs`（文件数增加来自拆分后的细粒度 `src/` + `templates/` 内核模块） |
+| **文档与卫生门禁 (`npm run lint:docs`)** | 92 份文档，存在 `--approver` 死旗标与手工工具表漂移 | **`102` 份文档、`364` 扫描文件、0 违规**（强制 8 表自动生成、14 组核心 H2 对等、CLI 旗标实检） | `npm run lint:docs` + `node scripts/generate-docs.mjs --check` |
+
+### 7.3 破坏性变更与迁移策略摘要
+
+完整的破坏性变更清单与分步迁移命令见 [docs/upgrade.md](../upgrade.md)（英文版 [docs/upgrade.en.md](../upgrade.en.md)）：
+1. **MCP 工具合并（21 → 17）**：改用 `aitest_heal(action="begin"|"attempt"|"conclude")` 与 `aitest_job(action="status"|"result"|"cancel")`；6 个 v5 工具名在整个 `v6.x` 保持兼容转发并输出弃用告警。
+2. **CLI 严格参数校验与 `--json` 信封统一**：不相关选项立即退出码 `1`；`governance approve` 为历史文档误写的 `--approver` 保留指向 `--by` 的弃用别名；全部 `blocked` 统一退出码 `2`。
+3. **Fail-Closed 收紧与宿主升级**：通过 `npx ai-test-workbench@6.0.0 upgrade --target <repo>` 安全升级宿主 `qa/` 并生成 `.aitest/template-manifest.json`，再由人类执行 `governance approve --by <name> --reason "..."` 重签治理锁。
+
+### 7.4 已知遗留项与后续演进方向
+
+1. **未见留出集剩余 3 例真实提交误报（`6.1%`, `3/49`）**：均属于跨模块自定义封装函数（如将 `expect()` 抽提至外部 helper 文件）导致的局部 AST 不可见；进一步压至 `<= 3%` 需在后续版本中评估轻量级同仓 import helper 索引（不引入完整 `ts.createProgram`），并在新的预登记留出集上独立验证。
+2. **`>= 200` 真实提交正式评测与 `FGER-agentic` 自治红队评测**：按 `bench/real-world/PREREGISTRATION.md` 与 `bench/agentic/DESIGN.md` 作为独立演进里程碑推进（当前保持 `pending` / `design only`，不做任何数值外推）。
+3. **中等规模核心模块持续细化**：`src/impact.mjs`（`786L`）、`src/diagnose.mjs`（`650L`）、`src/verdict.mjs`（`612L`）、`src/heal.mjs`（`611L`）当前高内聚且单测/覆盖率健康，可在后续需求迭代中自然按子职责进一步收窄至 `<= 500L`。

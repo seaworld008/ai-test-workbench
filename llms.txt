@@ -1,26 +1,28 @@
-# AI Test Workbench (`ai-test-workbench` / `aitw` v5.1.1)
+# AI Test Workbench (`ai-test-workbench` / `aitw` v6.0.0)
 
-> Trustworthy Verification Kernel & AI-Agent-First multi-protocol MCP Server (`stdio`, Streamable HTTP `/mcp`, Legacy HTTP+SSE `/sse`) for Playwright E2E/API verification. Supports Chinese-default docs with paired English `.en.md` docs.
+> Trustworthy Verification Kernel & AI-Agent-First native multi-protocol MCP Server (`stdio`, Streamable HTTP `/mcp`, Legacy HTTP+SSE `/sse`) for Playwright E2E/API verification. Supports Chinese-default docs with paired English `.en.md` docs.
 
-## Core v5.0 Capabilities
-- **4-Layer Anti-Fake-Green Gate Kernel (`templates/playwright-qa/support/gate-kernel.mjs`, `src/governance.mjs`, `src/ledger.mjs`)**: Combines SHA-256 `.aitest/governance.lock` tamper protection, `tsc` + `eslint-plugin-playwright`, ULID `Run Ledger` input-hash binding + human-approved `waivers.json`, and an `S0–S5` Semantic Assertion Strength Lattice Diff Guard (`FGER = 0.0%`, `26/26` cheating patches blocked).
-- **Native Multi-Protocol MCP Server v2 & Job Runner (`src/mcp-server.mjs`, `src/jobs.mjs`)**: Zero runtime npm dependencies; supports MCP `2025-11-25`..`2024-11-05` with **21 typed tools**, isolated child-process jobs (`syncBudgetMs`), `_meta.progressToken` heartbeats, `notifications/cancelled` process-tree termination, concurrent read tools, and per-workspace write locks.
-- **One-Call Change Verdict & Stateful Healer (`src/verdict.mjs`, `src/heal.mjs`, `src/traceability.mjs`)**: `aitest_verify_change` emits `attestation.json`, `verdict-summary.md`, and `verdict.sarif.json`; `aitest_heal_begin|attempt|conclude` hard-blocks Class B/C/D test edits (`0.0%` mis-heal rate) and maps `REQ-xxx` traceability.
-- **Import-Graph Impact v2 & Living Code Map v4 (`src/impact.mjs`, `src/codemap.mjs`, `src/explore.mjs`)**: Static reverse `import` dependency graph with `why` provenance, default-deny read-only exploration (`specs/pages/*.md`), preserved `:id`/`[id]` dynamic routes, and automatic defect convergence.
-- **PerformanceObserver Web Vitals, WCAG 2.0/2.1/2.2 & JSON Schema Contracts (`src/perf.mjs`, `base.ts`, `schema-validator.mjs`)**: Real `LCP / CLS / INP` median & P75 capture, guarded `page.request` + `context.request` + allowlist egress, active W3C `traceparent` correlation, and `100%` seeded-defect detection (`7/7`).
+## Core v6.0.0 Capabilities
+- **Authoritative 4-Layer Anti-Fake-Green Gate Kernel (`src/kernel/gate-kernel.mjs`, `src/kernel/gate/rules/`, `src/governance.mjs`, `src/ledger.mjs`)**: Pluggable `AITEST-G101..G115` AST rules with lexical scope stack and cross-file title pooling, T1 MAC `.aitest/governance.lock`, `tsc` + `eslint-plugin-playwright`, and ULID `Run Ledger` input-hash binding (`FGER-internal = 0.0% (26/26)`, `FGER-holdout = 0.0% (24/24)`, real-world unseen holdout FPR `6.1% [2.1%, 16.5%]`).
+- **Native Multi-Protocol MCP Server & Job Runner (`src/mcp/`, `src/jobs.mjs`)**: Zero runtime npm dependencies; supports MCP `2024-11-05`..`2025-11-25` with **17 canonical typed tools** (`aitest_heal` and `aitest_job` action-dispatched, with 6 v5 deprecated aliases retained in v6.x), isolated child-process jobs (`syncBudgetMs`), `_meta.progressToken` heartbeats, `notifications/cancelled` process-tree termination, concurrent read tools, and per-workspace write locks.
+- **One-Call Change Verdict & Stateful Healer (`src/verdict.mjs`, `src/heal.mjs`, `src/traceability.mjs`)**: `aitest_verify_change` emits `attestation.json` (in-toto v1 + T0/T1/T2), `verdict-summary.md`, and `verdict.sarif.json`; `aitest_heal(action="begin"|"attempt"|"conclude")` hard-blocks Class B/C/D test edits (`0.0%` mis-heal rate) and maps `REQ-xxx` traceability.
+- **Import-Graph Impact, Living Code Map & Default-Deny Explorer (`src/impact.mjs`, `src/codemap.mjs`, `src/explore.mjs`)**: Static reverse `import` dependency graph with `why` provenance, default-deny read-only exploration (`specs/pages/*.md`), preserved `:id`/`[id]` dynamic routes, and automatic defect convergence.
+- **Template Manifest & Hash-Safe Upgrade (`src/upgrade.mjs`, `src/core/config.mjs`)**: One-way vendor mirror (`templates/playwright-qa/support/`) stamped with SHA-256 digests, `aitw upgrade` 3-way safe upgrades, and schema-validated centralized configuration.
+- **PerformanceObserver Web Vitals, WCAG 2.0/2.1/2.2 & JSON Schema Contracts (`src/perf.mjs`, `base.ts`, `src/kernel/schema-validator.mjs`)**: Real `LCP / CLS / INP` median & P75 capture, guarded `page.request` + `context.request` + allowlist egress, active W3C `traceparent` correlation, and `100%` seeded-defect detection (`7/7`).
 
 ## Documentation & Entrypoints
 - [README (Chinese Default)](./README.md)
 - [README (English)](./README.en.md)
+- [v5 to v6 Upgrade Guide (Chinese)](./docs/upgrade.md)
+- [v5 to v6 Upgrade Guide (English)](./docs/upgrade.en.md)
 - [AI Agent Guide (Chinese)](./AGENTS.md)
 - [AI Agent Guide (English)](./AGENTS.en.md)
 - [Governance & 4-Layer Gate Kernel (Chinese)](./docs/governance.md)
 - [Governance & 4-Layer Gate Kernel (English)](./docs/governance.en.md)
-- [ADR-0001: Zero-Dependency MCP Kernel v2 (Chinese)](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md)
-- [ADR-0001: Zero-Dependency MCP Kernel v2 (English)](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md)
-- [v5.0 Verification & Benchmark Scorecard (Chinese)](./docs/review/v5-verification-scorecard.md)
-- [v5.0 Verification & Benchmark Scorecard (English)](./docs/review/v5-verification-scorecard.en.md)
 - [Architecture & Security Boundaries (Chinese)](./ARCHITECTURE.md)
 - [Architecture & Security Boundaries (English)](./ARCHITECTURE.en.md)
+- [v6 Refactor Assessment & Delivery Report (Chinese)](./docs/review/v6-refactor-assessment.md)
+- [v6 Refactor Assessment & Delivery Report (English)](./docs/review/v6-refactor-assessment.en.md)
+- [ADR-0001..0005 Directory](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md)
 - [MCP Server Protocol Reference](./skills/ai-test-workbench/references/mcp-server-protocol.md)
 - [Agent Skill Definition](./skills/ai-test-workbench/SKILL.md)

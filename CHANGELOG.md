@@ -1,8 +1,28 @@
 # 更新日志 (Changelog)
 
-> [English Changelog](./CHANGELOG.en.md) · [简体中文主文档](./README.md) · [v5.0 验证评分卡](./docs/review/v5-verification-scorecard.md)
+> [English Changelog](./CHANGELOG.en.md) · [简体中文主文档](./README.md) · [v5→v6 升级指南](./docs/upgrade.md) · [v6 重构评估报告](./docs/review/v6-refactor-assessment.md)
 
 本日志遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 与 [语义化版本 (SemVer)](https://semver.org/spec/v2.0.0.html) 规范。
+
+## [6.0.0] - 2026-11-24
+
+### 破坏性变更 (Breaking Changes — 迁移指南见 [docs/upgrade.md](./docs/upgrade.md))
+- **MCP 工具面收敛（21 → 17 个权威工具）**：将 `aitest_heal_begin` / `aitest_heal_attempt` / `aitest_heal_conclude` 合并为 `aitest_heal(action: "begin"|"attempt"|"conclude")`，将 `aitest_job_status` / `aitest_job_result` / `aitest_job_cancel` 合并为 `aitest_job(action: "status"|"result"|"cancel")`；`tools/call` 在整个 `v6.x` 保留 6 个旧工具名自动转发并附带 `data._deprecation` 与弃用告警。
+- **按子命令严格 CLI 参数校验**：`src/cli/commands.mjs` 为每条命令独立声明合法旗标，传入不相关参数直接以退出码 `1` 报错并给出拼写建议（`governance approve` 同时为历史文档误写的 `--approver` 保留指向 `--by` 的弃用兼容别名）。
+- **统一 `--json` 信封与退出码**：全量 CLI `--json` 统一携带 `ok` / `exitCode` / `outcome`（门禁类）；新增 `init --json`；所有 `blocked` 场景（含 `run --audit`）统一返回退出码 `2`。
+- **6 处 Fail-Closed 收紧**：缺失 TypeScript 编译器、CI 缺失 `tsc/eslint`、自定义 `--results` 绕过 Run Ledger、未初始化工作区、畸形目标 URL、损坏 `aitest.config.json` 全部由静默放行/回退默认值收紧为 `outcome: 'blocked'`（退出码 `2`）。人工离线调试可通过 CLI 专属 `--allow-unbound-results` 显式降级为 T0。
+- **验证内核归位（`src/kernel/`）与公共导出**：权威门禁内核从 `templates/playwright-qa/support/` 迁至 `src/kernel/` 并通过 `package.json#exports`（`.`、`./kernel`、`./target-guard`、`./schema-validator`）导出；`templates/playwright-qa/support/` 改为单向构建期同步镜像（`npm run sync:vendor` / `check:vendor`）。
+
+### 新增与架构重构 (Added & Refactored)
+- **可插拔 AST 门禁规则引擎与真实提交误报率大幅降低（[ADR-0004](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.md)）**：
+  - 将 1,649 行 `ast-analyzer.mjs` 拆分为 `ts-loader`、`constant-eval`、`lattice`、`parser-inspectors`、`parser`（词法作用域栈）、`diff-parser`、`changeset`、`static-runner` 与 15 条独立可开关规则对象 `AITEST-G101..G115`（支持 `aitest.config.json#rules` 配置，变更受 `governance.lock` 保护）。
+  - 落地 5 项系统性降误报改进（跨文件标题池化、作用域边界与 `browser-evaluate`/负向 `catch` 区分、结构化 `skip` 计次与运行时能力守卫、web-first 强度格校准、`G114` 故障注入/蜜罐感知）。
+  - **新种子未见留出集实测（`n=50`，`seed=20261125`，0 重叠，盲测）**：FPR 从 `12.2%`（`6/49`, CI `[5.7%, 24.2%]`）降至 **`6.1%`（`3/49`, Wilson 95% CI `[2.1%, 16.5%]`）**，保留 `1/1` 真报；试跑集（`n=50`）从 `20.8%` 降至 **`4.2%`（`2/48`, CI `[1.2%, 14.0%]`）**；合并 `n=100` 为 **`5.2%`（`5/97`, CI `[2.2%, 11.5%]`, `3/3` 真报全保留）**；同时 `FGER-internal = 0.0% (26/26)`、`FGER-holdout = 0.0% (24/24)`、`Gate-FPR(internal) = 0.0% (12/12)` 零回退。
+- **模板清单与 `aitw upgrade` 安全升级（[ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.md)）**：`init` 生成 `.aitest/template-manifest.json`，新增 `upgrade [--dry-run] [--force]` 三方哈希比对升级并保护用户手改文件；修复 `doctor` 门禁版本漂移探测。
+- **集中式配置层与统一结果模型（[ADR-0005](./docs/adr/0005-mcp-surface-outcome-and-config.md)）**：新增 `src/core/config.mjs`（带 Schema 校验）与 `src/core/outcome.mjs`；5 个 `> 900` 行上帝模块全部拆分清零（最大单模块从 `1,649` 行降至 `786` 行），消除 4 处循环依赖（`0` 环路）及 `results.json`/Playwright/glob 重复实现。
+- **严格类型安全（[ADR-0003](./docs/adr/0003-strict-checkjs-type-safety.md)）**：根包 `devDependencies` 精确锁定 `typescript@6.0.3` 与 `@types/node@26.6.6`（运行时 `dependencies` 保持为空），`tsconfig.check.json` 启用 `strict: true, noImplicitAny: true, useUnknownInCatchVariables: true` 全量 0 错误、0 抑制注释，`run-typecheck.mjs` 全环境 fail-closed。
+- **三层测试重组与行覆盖率门禁**：重组 `test/{unit,integration,adversarial}/`，完整保留所有既有对抗/红队/E1–E6 用例并补齐核心命令覆盖率，`scripts/run-unit-tests.mjs` 强制启用 `--test-coverage-lines=80`。
+- **文档单一真源与打包卫生**：归档过时文档至 `docs/history/`，收敛 5 份编号 ADR（`0001..0005`），新增 `scripts/generate-docs.mjs` 自动同步 8 份核心文档中的 17 工具表，强化 `lint:docs`（自动表防漂移、核心双语 H2 对等、CLI 旗标校验），收紧 `package.json#files` 剔除审查/归档/内部脚本并新增打包卫生单测。
 
 ## [5.1.1] - 2026-11-24
 
@@ -17,7 +37,7 @@
 ### 新增与加固 (Added & Hardened)
 - **npm 供应链发布就绪**：`package.json` 补充 `publishConfig: { "access": "public", "provenance": true }`，新增标签触发的 [.github/workflows/release.yml](./.github/workflows/release.yml)（全量 Action 锁定至完整 Commit SHA，发布前强制执行全部 7 条验证门禁，支持首次发布后切换 npm Trusted Publisher）。
 - **`T2` 信任分级与可复用 CI 工作流**：全栈统一 `T0 / T1 / T2` 固定口径（仅 CI 干净重跑 + Sigstore 免密钥签名的 `T2` 为合入级绿灯），新增可复用 [.github/workflows/aitest-verify.yml](./.github/workflows/aitest-verify.yml)（支持 `github-attest` 与 `cosign`）与 [examples/workflows/use-aitest-verify.yml](./examples/workflows/use-aitest-verify.yml)；强化 `attest verify` 支持 `--expect-repo` / `--expect-workflow` / `--expect-ref` 与离线零依赖 Sigstore/Fulcio 验签（默认 fail-closed）。
-- **零依赖 MCP ADR 与官方合规门禁**：新增 [docs/adr/mcp-zero-dependency.md](./docs/adr/mcp-zero-dependency.md) 与隔离 `conformance/` 测试套件（锁定 `@modelcontextprotocol/conformance@0.1.16` 与 `@modelcontextprotocol/sdk@1.32.2`，接入 CI `mcp-conformance` job 覆盖 `stdio` / Streamable HTTP / Legacy SSE 三传输），修复 Legacy SSE 异步 `202` 与 Streamable HTTP 双 `Accept` 进度流。
+- **零依赖 MCP ADR 与官方合规门禁**：新增零依赖 MCP ADR（现已合并至 [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md)）与隔离 `conformance/` 测试套件（锁定 `@modelcontextprotocol/conformance@0.1.16` 与 `@modelcontextprotocol/sdk@1.32.2`，接入 CI `mcp-conformance` job 覆盖 `stdio` / Streamable HTTP / Legacy SSE 三传输），修复 Legacy SSE 异步 `202` 与 Streamable HTTP 双 `Accept` 进度流。
 - **真实开源提交 Gate FPR 公开试跑与红队设计**：预登记方法 [bench/real-world/PREREGISTRATION.md](./bench/real-world/PREREGISTRATION.md) 独立先行提交，完成 5 个宽松许可开源仓 `n = 50` 真实提交离线试跑（审核后 FPR `20.8%`、Wilson 95% CI `[11.7%, 34.3%]`，原始告警率 `24.0%`，`>=200` 正式评测标记 `pending`），并新增 `FGER-agentic` 红队设计文档 [bench/agentic/DESIGN.md](./bench/agentic/DESIGN.md)。
 - **企业级多端 SaaS 深度探索与会话复用升级（真实 SaaS 实测沉淀）**：
   - `explore` 新增**多端/多租户切换抽屉自动发现与跨端遍历**（`--explore-portals` / `--max-portals`）、**业务域分层轮询队列**（上限升至 `500` 页）、**Vue 2 `$router.getRoutes()` + Vuex 权限菜单树**发现、**折叠子菜单自动展开**、**页内 Tab 自动切换**（`--explore-tabs`）、**严格只读详情弹窗/抽屉探测与关闭**（`--explore-dialogs`，标签白名单 + 网络层默认拒绝双重保护）、**断链/缺模块路由检测**（`brokenRoutes`）、**Element UI / AntD 固定列行数去重**、**HTTP 200 包裹业务码异常检测**（`code: 401/403/500`，同步覆盖 `perf`）、**URL 编码 Query 泄漏修复**（`%5B$L%5D`）与**独立 API 网关跨源提示**（`blockedApiHosts`）。

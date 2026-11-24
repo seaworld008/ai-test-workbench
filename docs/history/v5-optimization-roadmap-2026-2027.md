@@ -1,12 +1,12 @@
 # ai-test-workbench 优化路线图（2026 Q4 – 2027）：打造 AI 时代的可信验证层
 
-> [English Summary](./optimization-roadmap-2026-2027.en.md) · [配套审查报告](./architecture-code-review-2026-11.md) · [v5.0 验证评分卡](./v5-verification-scorecard.md) · [ADR-0001](../adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) · [主文档 README](../../README.md) · [AGENTS.md](../../AGENTS.md)
+> [English Summary](./v5-optimization-roadmap-2026-2027.en.md) · [配套审查报告](./v4-architecture-code-review-2026-11.md) · [v5.0 验证评分卡](./v5-verification-scorecard.md) · [ADR-0001](../adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) · [主文档 README](../../README.md) · [AGENTS.md](../../AGENTS.md)
 >
 > **执行进度更新（`v5.0.0` 已落地，2026-11-24）**：R0 全部可信底座修复、R1 工具强执治理与一键终审（`aitest_verify_change` / `governance.lock` / `Run Ledger` / `aitest_heal_*` / `Flaky Quarantine`）、以及 R2 核心智能选测与公开基准（Import-Graph Impact v2、CodeMap v4、需求追溯 `REQ-xxx`、JSON Schema 契约、`npm run bench`）已完成交付并通过实测：**`FGER = 0.0% (26/26)`、`SDDR = 100.0% (7/7)`、诊断准确率 `100.0% (45/45)`、脱敏召回率 `100.0% (35/35)`、误修率 `0.0%`**。详见 [v5.0 验证评分卡](./v5-verification-scorecard.md)。
 >
 > **文档版本**：v1.1（2026-11-24）· **适用基线**：`v4.0.0@e43e107` → `v5.0.0` · **维护规则**：每个阶段结束时更新第 7 节“度量看板”和第 9 节“行动清单”。新增或删除工作包必须同步更新第 4 节，并写一条 ADR。
 >
-> **使用方式**：本文档是后续落地的唯一路线真源。每个工作包（WP）都写明了「目标 → 设计要点 → 交付物 → 验收标准 → 度量 → 依赖」，可以直接拆成 Issue 或 PR。审查问题编号（如 `G-01`）对应 [审查报告](./architecture-code-review-2026-11.md) 第 5 节。
+> **使用方式**：本文档是后续落地的唯一路线真源。每个工作包（WP）都写明了「目标 → 设计要点 → 交付物 → 验收标准 → 度量 → 依赖」，可以直接拆成 Issue 或 PR。审查问题编号（如 `G-01`）对应 [审查报告](./v4-architecture-code-review-2026-11.md) 第 5 节。
 
 ---
 

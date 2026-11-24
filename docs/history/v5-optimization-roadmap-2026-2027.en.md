@@ -1,6 +1,6 @@
 # ai-test-workbench Optimization Roadmap 2026 Q4 – 2027 (English Summary)
 
-> [简体中文完整版](./optimization-roadmap-2026-2027.md) · [Architecture & Code Review](./architecture-code-review-2026-11.en.md) · [v5.0 Scorecard](./v5-verification-scorecard.en.md) · [ADR-0001](../adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md) · [README](../../README.en.md)
+> [简体中文完整版](./v5-optimization-roadmap-2026-2027.md) · [Architecture & Code Review](./v4-architecture-code-review-2026-11.en.md) · [v5.0 Scorecard](./v5-verification-scorecard.en.md) · [ADR-0001](../adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md) · [README](../../README.en.md)
 
 > **Execution Update (`v5.0.0` Delivered, 2026-11-24)**: R0 Trustworthy Kernel fixes, R1 Agent-Native Governance (`aitest_verify_change`, `governance.lock`, `Run Ledger`, stateful `aitest_heal_*`, `Flaky Quarantine`), and R2 intelligence & benchmark (`Import-Graph Impact v2`, `CodeMap v4`, `REQ-xxx` traceability, JSON Schema contracts, `npm run bench`) are complete and verified: **`FGER = 0.0% (26/26)`**, **`SDDR = 100.0% (7/7)`**, **`Triage = 100.0% (45/45)`**, **`Redaction = 100.0% (35/35)`**, **`Mis-Heal = 0.0%`**. See [v5-verification-scorecard.en.md](./v5-verification-scorecard.en.md).
 
