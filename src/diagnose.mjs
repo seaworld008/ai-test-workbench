@@ -2,34 +2,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
-import { redactSecrets } from './proc.mjs';
-
-function flattenFailedTests(suites, parents = [], fileHint = '') {
-  const failures = [];
-  const nextParents = suites.title ? [...parents, suites.title] : parents;
-  const currentFile = suites.file || fileHint;
-
-  for (const spec of suites.specs || []) {
-    const title = [...nextParents, spec.title].filter(Boolean).join(' > ');
-    for (const testItem of spec.tests || []) {
-      const retryPassed = testItem.status === 'expected' && Array.isArray(testItem.results) && testItem.results.length > 1;
-      if (testItem.status === 'unexpected' || testItem.status === 'flaky' || retryPassed) {
-        failures.push({
-          title,
-          file: spec.file || currentFile || 'unknown',
-          line: spec.line || 0,
-          projectName: testItem.projectName || '',
-          status: retryPassed ? 'flaky' : testItem.status,
-          results: testItem.results || [],
-        });
-      }
-    }
-  }
-  for (const child of suites.suites || []) {
-    failures.push(...flattenFailedTests(child, nextParents, currentFile));
-  }
-  return failures;
-}
+import { flattenPlaywrightResults } from './core/playwright-results.mjs';
+import { redactSecrets } from './core/redact.mjs';
 
 /**
  * Selects the FIRST failing attempt from Playwright `test.results[]` (`D-03`).
@@ -440,10 +414,16 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
     throw new Error(`Results file not found: ${resultsPath}`);
   }
   const resultsJson = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
-  const failures = [];
-  for (const suite of resultsJson.suites || []) {
-    failures.push(...flattenFailedTests(suite));
-  }
+  const failures = flattenPlaywrightResults(resultsJson)
+    .filter((t) => t.status === 'unexpected' || t.status === 'flaky' || t.retryPassed)
+    .map((t) => ({
+      title: t.title,
+      file: t.file || 'unknown',
+      line: t.line,
+      projectName: t.projectName,
+      status: t.status,
+      results: t.results,
+    }));
 
   const lines = [
     '# AI Test Workbench — Failure Diagnostics Summary (Redacted)',

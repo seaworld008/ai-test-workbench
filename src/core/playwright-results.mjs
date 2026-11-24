@@ -1,0 +1,196 @@
+// @ts-check
+/**
+ * @import {
+ *   FlakyStats,
+ *   PlaywrightAttemptRecord,
+ *   PlaywrightResultsSummary,
+ *   PlaywrightTestRecord,
+ * } from '../types/gate.d.ts'
+ */
+
+/**
+ * @typedef {{
+ *   title?: string;
+ *   file?: string;
+ *   specs?: Array<{
+ *     title?: string;
+ *     file?: string;
+ *     line?: number;
+ *     tags?: string[];
+ *     tests?: Array<{
+ *       projectName?: string;
+ *       status?: string;
+ *       annotations?: Array<{ type?: string; description?: string }>;
+ *       results?: PlaywrightAttemptRecord[];
+ *     }>;
+ *   }>;
+ *   suites?: RawSuite[];
+ * }} RawSuite
+ */
+
+/**
+ * Single authoritative recursive walker over Playwright JSON reporter output (`results.json`).
+ * Consistently normalizes `retryPassed = (rawStatus === 'expected' && results.length > 1)` to `status = 'flaky'`
+ * across Ledger, Audit, Diagnose, Code Map, and Requirement Traceability.
+ * @param {{ suites?: RawSuite[] } | null | undefined} resultsObj
+ * @returns {PlaywrightTestRecord[]}
+ */
+export function flattenPlaywrightResults(resultsObj) {
+  /** @type {PlaywrightTestRecord[]} */
+  const tests = [];
+  if (!resultsObj || !Array.isArray(resultsObj.suites)) return tests;
+
+  /**
+   * @param {RawSuite} suite
+   * @param {string[]} parents
+   * @param {string} fileHint
+   */
+  const walkSuite = (suite, parents = [], fileHint = '') => {
+    const nextParents = suite.title ? [...parents, suite.title] : parents;
+    const curFile = String(suite.file || fileHint || '').replace(/\\/g, '/');
+
+    for (const spec of suite.specs || []) {
+      const fullTitle = [...nextParents, spec.title || ''].filter(Boolean).join(' > ');
+      const file = String(spec.file || curFile || '').replace(/\\/g, '/');
+      const specTags = Array.isArray(spec.tags) ? spec.tags.map((t) => (t.startsWith('@') ? t : `@${t}`)) : [];
+      const inlineTags = fullTitle.match(/@[a-zA-Z0-9_-]+/g) || [];
+      const tags = [...new Set([...specTags, ...inlineTags])];
+
+      for (const testEntry of spec.tests || []) {
+        const attempts = Array.isArray(testEntry.results) ? testEntry.results : [];
+        const durationMs = attempts.reduce((sum, r) => sum + Number(r.duration || 0), 0);
+        const rawStatus = String(testEntry.status || 'unknown');
+        const retryPassed = rawStatus === 'expected' && attempts.length > 1;
+        const status = retryPassed ? 'flaky' : rawStatus;
+
+        const firstFailure =
+          attempts.find((r) => r.status && r.status !== 'passed' && r.status !== 'skipped') ||
+          attempts[attempts.length - 1];
+        const errMsg = firstFailure?.error?.message || null;
+
+        tests.push({
+          testId: `${file}::${fullTitle}`,
+          file,
+          line: Number(spec.line || 0),
+          title: fullTitle,
+          specTitle: String(spec.title || ''),
+          projectName: String(testEntry.projectName || ''),
+          rawStatus,
+          status,
+          retryPassed,
+          durationMs,
+          tags,
+          annotations: Array.isArray(testEntry.annotations) ? testEntry.annotations : [],
+          results: attempts,
+          errorSnippet: errMsg ? String(errMsg).split('\n')[0].slice(0, 240) : null,
+        });
+      }
+    }
+
+    for (const child of suite.suites || []) {
+      walkSuite(child, nextParents, curFile);
+    }
+  };
+
+  for (const rootSuite of resultsObj.suites) {
+    walkSuite(rootSuite, [], '');
+  }
+  return tests;
+}
+
+/**
+ * Summarizes Playwright JSON results into canonical counts + normalized test records.
+ * @param {{ suites?: RawSuite[] } | null | undefined} resultsObj
+ * @returns {PlaywrightResultsSummary}
+ */
+export function summarizePlaywrightResults(resultsObj) {
+  const tests = flattenPlaywrightResults(resultsObj);
+  let passed = 0;
+  let failed = 0;
+  let flaky = 0;
+  let skipped = 0;
+
+  for (const t of tests) {
+    if (t.status === 'expected') passed += 1;
+    else if (t.status === 'unexpected') failed += 1;
+    else if (t.status === 'flaky') flaky += 1;
+    else if (t.status === 'skipped') skipped += 1;
+  }
+
+  return {
+    counts: {
+      total: tests.length,
+      executed: passed + failed + flaky,
+      passed,
+      failed,
+      flaky,
+      skipped,
+    },
+    tests,
+  };
+}
+
+/**
+ * Aggregates Playwright outcomes keyed by normalized `tests/<relative-path>` spec file.
+ * @param {{ suites?: RawSuite[] } | null | undefined} resultsObj
+ * @returns {Map<string, { passed: number, failed: number, flaky: number, skipped: number }>}
+ */
+export function groupOutcomesBySpecFile(resultsObj) {
+  /** @type {Map<string, { passed: number, failed: number, flaky: number, skipped: number }>} */
+  const map = new Map();
+  for (const t of flattenPlaywrightResults(resultsObj)) {
+    const f = t.file.replace(/^\.\//, '');
+    const specKey = f.startsWith('tests/') ? f : f ? `tests/${f}` : 'unknown';
+    const prev = map.get(specKey) || { passed: 0, failed: 0, flaky: 0, skipped: 0 };
+    if (t.status === 'expected') prev.passed += 1;
+    else if (t.status === 'unexpected') prev.failed += 1;
+    else if (t.status === 'flaky') prev.flaky += 1;
+    else if (t.status === 'skipped') prev.skipped += 1;
+    map.set(specKey, prev);
+  }
+  return map;
+}
+
+/**
+ * Computes consistent flaky and failure metrics from ordered per-test Run Ledger observations.
+ * Shared across `flaky.mjs` reporting and `policy.mjs` quarantine validation.
+ * @param {ReadonlyArray<{ status?: string; retryPassed?: boolean }>} observations
+ * @returns {FlakyStats}
+ */
+export function computeFlakyStats(observations) {
+  let totalRuns = 0;
+  let passed = 0;
+  let failed = 0;
+  let flaky = 0;
+  let consecutivePasses = 0;
+
+  for (const obs of observations || []) {
+    if (!obs || obs.status === 'skipped') continue;
+    totalRuns += 1;
+    if (obs.status === 'expected' && !obs.retryPassed) {
+      passed += 1;
+      consecutivePasses += 1;
+    } else if (obs.status === 'flaky' || obs.retryPassed) {
+      flaky += 1;
+      consecutivePasses = 0;
+    } else if (obs.status === 'unexpected') {
+      failed += 1;
+      consecutivePasses = 0;
+    }
+  }
+
+  const flakyEvents = flaky + (passed > 0 && failed > 0 ? Math.min(passed, failed) : 0);
+  const flakyRate = totalRuns > 0 ? Number((flakyEvents / totalRuns).toFixed(4)) : 0;
+  const failRate = totalRuns > 0 ? Number((failed / totalRuns).toFixed(4)) : 0;
+
+  return {
+    totalRuns,
+    passed,
+    failed,
+    flaky,
+    flakyEvents,
+    flakyRate,
+    failRate,
+    consecutivePasses,
+  };
+}

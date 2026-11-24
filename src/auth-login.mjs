@@ -4,8 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveQaDirectory } from './agents.mjs';
+import { resolvePlaywrightPackage } from './core/playwright-resolve.mjs';
+import { runProcess } from './core/proc.mjs';
 import { evaluateTargetSafety, loadMergedQaEnv } from './origin-guard.mjs';
-import { runProcess } from './proc.mjs';
 
 /**
  * Validates that an optional `--cdp-url` points strictly to a local loopback CDP endpoint
@@ -54,8 +55,8 @@ export async function runAuthLoginCommand(options = {}) {
     return 1;
   }
 
-  const pwPkg = path.join(qaDir, 'node_modules', 'playwright', 'index.mjs');
-  if (!fs.existsSync(pwPkg)) {
+  const pwPkg = resolvePlaywrightPackage(qaDir);
+  if (!pwPkg) {
     console.error(
       lang === 'zh'
         ? `在 ${qaDir} 中未找到 playwright 包，请先安装依赖。`

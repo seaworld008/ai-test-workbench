@@ -14,7 +14,8 @@ import {
   parseCsvList,
   parseLowerCsvList,
 } from './origin-guard.mjs';
-import { redactSecrets } from './proc.mjs';
+import { resolvePlaywrightPackage } from './core/playwright-resolve.mjs';
+import { redactSecrets } from './core/redact.mjs';
 
 export const MAX_EXPLORE_PAGES = 500;
 export const DEFAULT_EXPLORE_PAGES = 60;
@@ -422,17 +423,6 @@ export function generateSystemOverviewMarkdown(topology, lang = 'zh') {
   return lines.join('\n');
 }
 
-function loadPlaywrightChromium(qaDir) {
-  const candidates = [
-    path.join(qaDir, 'node_modules', 'playwright', 'index.mjs'),
-    path.join(qaDir, 'node_modules', '@playwright', 'test', 'index.mjs'),
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
-  }
-  return null;
-}
-
 function loadJsonIfValid(filePath) {
   if (!fs.existsSync(filePath)) return null;
   try {
@@ -475,7 +465,7 @@ export async function runExploreCommand(options = {}) {
     return 2;
   }
 
-  const pwPkg = loadPlaywrightChromium(qaDir);
+  const pwPkg = resolvePlaywrightPackage(qaDir);
   if (!pwPkg) {
     console.error(
       lang === 'zh'

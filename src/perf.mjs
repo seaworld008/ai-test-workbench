@@ -5,6 +5,7 @@ import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 import { resolveQaDirectory } from './agents.mjs';
 import { syncLivingCodeMap } from './codemap.mjs';
+import { resolvePlaywrightPackage } from './core/playwright-resolve.mjs';
 import { detectEnvelopeBusinessError, redactEndpointUrl } from './explore.mjs';
 import {
   DEFAULT_BLOCKED_ENDPOINTS,
@@ -125,14 +126,6 @@ export function evaluatePerfBudget(report, budgetInput = DEFAULT_BUDGET, baselin
   return { ok: violations.length === 0, violations, budget };
 }
 
-function loadPlaywrightPkg(qaDir) {
-  for (const rel of ['playwright/index.mjs', '@playwright/test/index.mjs']) {
-    const p = path.join(qaDir, 'node_modules', ...rel.split('/'));
-    if (fs.existsSync(p)) return p;
-  }
-  return null;
-}
-
 function readJsonSafe(p) {
   if (!fs.existsSync(p)) return null;
   try {
@@ -161,7 +154,7 @@ function p75OfNullable(nums) {
  * plus multi-sample median/P75 aggregation and optional CDP CPU throttling (`P-02`).
  */
 export async function runBrowserPerfProfile(qaDir, baseURL, routes, options = {}) {
-  const pwPkg = loadPlaywrightPkg(qaDir);
+  const pwPkg = resolvePlaywrightPackage(qaDir);
   if (!pwPkg) return [];
 
   const samplesPerRoute = Math.min(7, Math.max(1, Number(options.samples || 2)));

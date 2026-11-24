@@ -3,7 +3,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
-import { SCHEMA_VERSIONS } from './version.mjs';
+import { groupOutcomesBySpecFile } from './core/playwright-results.mjs';
+import { SCHEMA_VERSIONS } from './core/version.mjs';
 
 const IGNORE_DIRS = new Set([
   'node_modules',
@@ -417,26 +418,7 @@ export function indexQaSpecs(qaDir) {
 }
 
 function collectTestOutcomesByFile(resultsJson) {
-  const map = new Map();
-  if (!resultsJson || !Array.isArray(resultsJson.suites)) return map;
-  const walkSuite = (suite, fileHint = '') => {
-    const curFile = normalizeSlash(suite.file || fileHint);
-    for (const spec of suite.specs || []) {
-      const f = normalizeSlash(spec.file || curFile);
-      const specKey = f.startsWith('tests/') ? f : f ? `tests/${f}` : 'unknown';
-      const statuses = (spec.tests || []).map((t) => t.status);
-      const prev = map.get(specKey) || { passed: 0, failed: 0, flaky: 0 };
-      for (const s of statuses) {
-        if (s === 'expected') prev.passed += 1;
-        else if (s === 'unexpected') prev.failed += 1;
-        else if (s === 'flaky') prev.flaky += 1;
-      }
-      map.set(specKey, prev);
-    }
-    for (const child of suite.suites || []) walkSuite(child, curFile);
-  };
-  for (const s of resultsJson.suites) walkSuite(s);
-  return map;
+  return groupOutcomesBySpecFile(resultsJson);
 }
 
 function computeTopologySnapshotId(topology) {

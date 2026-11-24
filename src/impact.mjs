@@ -2,8 +2,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
+import { compileGlob } from './core/glob.mjs';
+import { runProcess } from './core/proc.mjs';
 import { readLedgerHistory } from './ledger.mjs';
-import { runProcess } from './proc.mjs';
 import { resolveGitRoot } from '../templates/playwright-qa/support/gate-kernel.mjs';
 
 const GLOBAL_INFRA_PATTERNS = [
@@ -25,25 +26,6 @@ const GLOBAL_INFRA_PATTERNS = [
 const GRAPH_EXTS = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '/index.ts', '/index.tsx', '/index.js', '/index.vue'];
 const GRAPH_IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'reports', 'playwright-report', 'test-results', '.aitest']);
 const MAX_GRAPH_FILES = 3000;
-
-function globToRegex(glob) {
-  let out = '';
-  for (let i = 0; i < glob.length; i += 1) {
-    const ch = glob[i];
-    if (ch === '*' && glob[i + 1] === '*') {
-      out += '.*';
-      i += 1;
-      if (glob[i + 1] === '/') i += 1;
-    } else if (ch === '*') {
-      out += '[^/]*';
-    } else if ('.+^${}()|[]\\'.includes(ch)) {
-      out += `\\${ch}`;
-    } else {
-      out += ch;
-    }
-  }
-  return new RegExp(`^${out}$`, 'i');
-}
 
 function isOverbroadCatchAllGlob(pattern) {
   const clean = String(pattern || '').trim().replace(/^\.\//, '');
@@ -363,7 +345,7 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
 
   const compiledRules = rules.map((r) => ({
     rawMatch: Array.isArray(r.match) ? r.match.join(', ') : String(r.source || r.match || ''),
-    patterns: (Array.isArray(r.match) ? r.match : [r.source || r.match]).filter(Boolean).map(globToRegex),
+    patterns: (Array.isArray(r.match) ? r.match : [r.source || r.match]).filter(Boolean).map(compileGlob),
     specs: Array.isArray(r.specs) ? r.specs : [],
     fullSuite: Boolean(r.fullSuite),
   }));

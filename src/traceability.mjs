@@ -2,7 +2,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
-import { SCHEMA_VERSIONS } from './version.mjs';
+import { groupOutcomesBySpecFile } from './core/playwright-results.mjs';
+import { SCHEMA_VERSIONS } from './core/version.mjs';
 
 const REQ_ID_RE = /\b(REQ-[A-Z0-9]+(?:-[A-Z0-9]+)*)\b/g;
 
@@ -94,23 +95,7 @@ export function buildRequirementTraceMatrix(qaDir) {
   if (fs.existsSync(resultsPath)) {
     try {
       const resultsObj = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
-      /** @type {Map<string, { passed: number, failed: number }>} */
-      const fileStatus = new Map();
-      const walkSuite = (s, fileHint = '') => {
-        const cur = String(s.file || fileHint).replace(/\\/g, '/');
-        for (const sp of s.specs || []) {
-          const f = String(sp.file || cur).replace(/\\/g, '/');
-          const norm = f.startsWith('tests/') ? f : `tests/${f}`;
-          const prev = fileStatus.get(norm) || { passed: 0, failed: 0 };
-          for (const t of sp.tests || []) {
-            if (t.status === 'expected') prev.passed += 1;
-            else if (t.status === 'unexpected' || t.status === 'flaky') prev.failed += 1;
-          }
-          fileStatus.set(norm, prev);
-        }
-        for (const c of s.suites || []) walkSuite(c, cur);
-      };
-      for (const s of resultsObj.suites || []) walkSuite(s);
+      const fileStatus = groupOutcomesBySpecFile(resultsObj);
 
       for (const rec of requirements.values()) {
         if (rec.linkedTests.length === 0) continue;
@@ -119,7 +104,7 @@ export function buildRequirementTraceMatrix(qaDir) {
         for (const tf of rec.linkedTests) {
           const st = fileStatus.get(tf);
           if (!st) continue;
-          if (st.failed > 0) anyFail = true;
+          if (st.failed > 0 || st.flaky > 0) anyFail = true;
           else if (st.passed > 0) anyPass = true;
         }
         if (anyFail) rec.status = 'failed';
