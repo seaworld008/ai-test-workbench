@@ -16,7 +16,9 @@ import { resolvePlaywrightCli } from './proc.mjs';
 import { executeSuiteCore } from './runner.mjs';
 import { buildRequirementTraceMatrix } from './traceability.mjs';
 import {
+  TRUST_LEVEL_DEFINITIONS,
   buildInTotoVerdictAttestation,
+  describeTrustLevel,
   resolveVerdictTrustTier,
   tryCosignKeylessSign,
 } from './trust.mjs';
@@ -55,6 +57,9 @@ function buildSarifReport(verdictObj) {
     });
   }
 
+  const trustLevel = verdictObj.trustLevel || verdictObj.trustTier || 'T0';
+  const trustDef = TRUST_LEVEL_DEFINITIONS[trustLevel] || TRUST_LEVEL_DEFINITIONS.T0;
+
   return {
     $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
     version: '2.1.0',
@@ -66,6 +71,17 @@ function buildSarifReport(verdictObj) {
             version: WORKBENCH_VERSION,
             informationUri: 'https://github.com/seaworld008/ai-test-workbench',
           },
+        },
+        properties: {
+          verdict: verdictObj.verdict,
+          trustLevel,
+          mergeGradeGreen: trustDef.mergeGradeGreen && verdictObj.verdict === 'pass',
+          trustLevelDefinition: {
+            zh: trustDef.zh,
+            en: trustDef.en,
+          },
+          acceptanceScope: verdictObj.acceptanceScope,
+          runId: verdictObj.runId || null,
         },
         results,
       },
@@ -81,18 +97,8 @@ function buildPrVerdictMarkdown(verdict, lang = 'zh') {
       : verdict.verdict === 'blocked'
         ? 'BLOCKED'
         : 'FAIL';
-  const trustLabel =
-    verdict.trustTier === 'T2'
-      ? isZh
-        ? 'T2 CI 证明（可信绿灯）'
-        : 'T2 CI-Attested (Trustworthy Green)'
-      : verdict.trustTier === 'T1'
-        ? isZh
-          ? 'T1 本地防篡改预检（需 CI T2 终审）'
-          : 'T1 Local Tamper-Evident Pre-Check (CI T2 required to merge)'
-        : isZh
-          ? 'T0 本地建议（不可作为可信绿灯）'
-          : 'T0 Advisory Only (Not a Trustworthy Green)';
+  const trustLevel = verdict.trustLevel || verdict.trustTier || 'T0';
+  const trustLabel = describeTrustLevel(trustLevel, isZh ? 'zh' : 'en');
   const scopeLabel =
     verdict.acceptanceScope === 'business-e2e'
       ? isZh
@@ -104,10 +110,11 @@ function buildPrVerdictMarkdown(verdict, lang = 'zh') {
 
   const lines = [
     isZh
-      ? `## AI Test Workbench 变更验证判决：**${badge}**（\`${verdict.trustTier}\`）`
-      : `## AI Test Workbench Change Verdict: **${badge}** (\`${verdict.trustTier}\`)`,
+      ? `## AI Test Workbench 变更验证判决：**${badge}**（\`${trustLevel}\`）`
+      : `## AI Test Workbench Change Verdict: **${badge}** (\`${trustLevel}\`)`,
     '',
-    `- **Trust Tier**: **${trustLabel}**`,
+    `- **Trust Level**: **${trustLabel}**`,
+    `- **合入级绿灯 (` + 'mergeGradeGreen' + `)**: \`${trustLevel === 'T2' && verdict.verdict === 'pass'}\`（${isZh ? '仅 T2 可作为合入级绿灯' : 'Only T2 is a merge-grade green'}）`,
     `- **Run ID**: \`${verdict.runId || 'none'}\` · **Git SHA**: \`${verdict.gitSha}\` · **Diff Base**: \`${verdict.base?.resolved || 'none'}\` (${verdict.base?.strategy || 'unknown'})`,
     `- **验收口径 (` + 'acceptanceScope' + `)**: **${scopeLabel}** (\`${verdict.acceptanceScope}\`)`,
     `- **测试范围**: requested=\`${verdict.scope.requested}\`, actual=\`${verdict.scope.actual}\`${verdict.scope.downgraded ? ' **(DOWNGRADED -> T0)**' : ''}, executed=\`${verdict.counts?.executed ?? 0}\` (passed=\`${verdict.counts?.passed ?? 0}\`, failed=\`${verdict.counts?.failed ?? 0}\`, flaky=\`${verdict.counts?.flaky ?? 0}\`)`,
@@ -214,7 +221,12 @@ export async function verifyChangeCore(options = {}) {
   }
 
   const repoDir = target === qaDir ? path.dirname(qaDir) : target;
-  const requestedMode = String(options.mode || 'impact').toLowerCase() === 'full' ? 'full' : 'impact';
+  const rawMode = String(options.mode || options.suite || 'impact').toLowerCase();
+  const requestedMode = ['full', 'all', 'smoke', 'impact', 'e2e', 'api', 'a11y', 'critical'].includes(rawMode)
+    ? rawMode === 'all'
+      ? 'full'
+      : rawMode
+    : 'impact';
 
   // Step 0: Resolve real Git root (monorepo/worktree aware) & safe diff base (`T-05`)
   const baseResolution = resolveDefaultDiffBase(repoDir, options.base || null);
@@ -308,8 +320,20 @@ export async function verifyChangeCore(options = {}) {
   }
 
   const effectiveSuite =
-    requestedMode === 'full' ? (safety.baseURL ? 'all' : 'smoke') : safety.baseURL ? 'impact' : 'smoke';
-  const scopeDowngraded = !safety.baseURL && (requestedMode === 'full' || requestedMode === 'impact');
+    requestedMode === 'smoke'
+      ? 'smoke'
+      : requestedMode === 'full'
+        ? safety.baseURL
+          ? 'all'
+          : 'smoke'
+        : ['e2e', 'api', 'a11y', 'critical'].includes(requestedMode)
+          ? safety.baseURL
+            ? requestedMode
+            : 'smoke'
+          : safety.baseURL
+            ? 'impact'
+            : 'smoke';
+  const scopeDowngraded = !safety.baseURL && requestedMode !== 'smoke';
 
   // Step 3: Execute suite bound to Run Ledger (pass precomputedImpact so computeImpact runs ONCE!)
   const runOut = await executeSuiteCore({
@@ -423,12 +447,19 @@ export async function verifyChangeCore(options = {}) {
 
   const gitSha = resolveGitHeadSha(repoDir);
   const treeDigest = resolveGitTreeSha(repoDir);
+  const trustDef = TRUST_LEVEL_DEFINITIONS[trustTier] || TRUST_LEVEL_DEFINITIONS.T0;
   const verdictPayload = {
     schemaVersion: SCHEMA_VERSIONS.verdict,
     ok: verdictStatus === 'pass',
     exitCode,
     verdict: verdictStatus,
     trustTier,
+    trustLevel: trustTier,
+    mergeGradeGreen: trustDef.mergeGradeGreen && verdictStatus === 'pass',
+    trustLevelDefinition: {
+      zh: trustDef.zh,
+      en: trustDef.en,
+    },
     confidence: {
       level: trustTier === 'T2' ? 'high' : trustTier === 'T1' && runOut.acceptanceScope === 'business-e2e' ? 'medium-high' : 'medium',
       reasons: confidenceReasons,
@@ -494,11 +525,13 @@ export async function verifyChangeCore(options = {}) {
   }
 
   let attestationPath = null;
+  let predicatePath = null;
   let sigstoreBundlePath = null;
   if (runOut.runId) {
     const runDir = path.join(qaDir, '.aitest', 'runs', runOut.runId);
     fs.mkdirSync(runDir, { recursive: true });
     attestationPath = path.join(runDir, 'attestation.json');
+    predicatePath = path.join(runDir, 'verdict-predicate.json');
     const statement = buildInTotoVerdictAttestation({
       verdictPayload,
       qaDir,
@@ -509,6 +542,7 @@ export async function verifyChangeCore(options = {}) {
       gateKernelVersion: GATE_KERNEL_VERSION,
     });
     fs.writeFileSync(attestationPath, JSON.stringify(statement, null, 2) + '\n', 'utf8');
+    fs.writeFileSync(predicatePath, JSON.stringify(statement.predicate, null, 2) + '\n', 'utf8');
 
     const cosignRes = tryCosignKeylessSign(attestationPath);
     if (cosignRes.signed) {
@@ -522,6 +556,7 @@ export async function verifyChangeCore(options = {}) {
       summaryMdPath,
       sarifPath,
       attestationPath,
+      predicatePath,
       sigstoreBundlePath,
     },
   };

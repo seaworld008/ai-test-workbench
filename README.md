@@ -37,7 +37,44 @@
 | **种子缺陷检出率 (`SDDR`)** | 单应用靶场 **`100.0%` (`7/7`)** | 零依赖 JSON Schema 契约校验 + RBAC/并发竞态 + WCAG 2.1/2.2 |
 | **诊断分类准确率 / C→A 误判率 / 误修率** | 内部语料 + 真实 Playwright 堆栈 **`100%` · C→A `0.0%` · 误修率 `0.0%`** | 结构化运行时守卫 + C 优先于 A 值断言规则 + 防篡改自愈状态机 |
 | **凭据脱敏召回率** | 内部对抗语料 **`100.0%` (`35/35`)** | Redaction v2（结构化先解析后脱敏，保留内部 `heal_*`/`job_*` ID） |
-| **判决信任分级 (`T0 / T1 / T2`)** | 本地无密钥 `T0` · 机外 HMAC `T1` · CI 重跑 in-toto v1 签名 **`T2`** | 只有 CI 重跑并验签（`attest verify`）的 `T2` 绿灯作为合入级可信背书 |
+| **判决信任分级 (`T0 / T1 / T2`)** | **T0** = 未经验证的本地运行 · **T1** = 本地 Run Ledger + MAC（证明完整性，不证明来源）· **T2** = 在 GitHub 托管的 runner 上从干净 checkout 重跑，用 Sigstore 免密钥签名，并且校验通过签发者身份 | **只有 T2 是合入级绿灯**；详见 [可复用工作流示例](./examples/workflows/use-aitest-verify.yml) 与 `attest verify` |
+
+### 🔒 信任分级与 CI 可复用工作流（仅 T2 为合入级绿灯）
+
+- **T0**：未经验证的本地运行（非合入级绿灯）。
+- **T1**：本地 Run Ledger + MAC（证明完整性，不证明来源；非合入级绿灯）。
+- **T2**：在 GitHub 托管的 runner 上从干净 checkout 重跑，用 Sigstore 免密钥签名，并且校验通过签发者身份。**只有 T2 是合入级绿灯**。
+
+在业务仓库一行接入 T2 可复用工作流（详见 [examples/workflows/use-aitest-verify.yml](./examples/workflows/use-aitest-verify.yml)）：
+
+```yaml
+jobs:
+  aitest-t2-verdict:
+    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v5.1.0
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+      security-events: write
+    with:
+      qa-dir: qa
+      suite: impact
+      node-version: '22'
+      signer: github-attest # 默认值；可选 cosign
+```
+
+离线校验 T2 证书身份与防篡改（默认 fail-closed，缺签名 / 仅 T1 / 身份不符 / 改 1 字节一律非 0 退出且 `trustLevel <= T1`）：
+
+```bash
+npx ai-test-workbench@5.1.0 attest verify \
+  --file attestation.json \
+  --bundle attestation.sigstore.json \
+  --expect-repo owner/repo \
+  --expect-workflow .github/workflows/aitest-verify.yml \
+  --expect-ref refs/heads/main
+```
+
+> **私有仓库签名方式说明**：默认 `signer: github-attest` 使用 GitHub Artifact Attestations（`actions/attest`），私有仓库需 **GitHub Enterprise Cloud**；若切换 `signer: cosign`，公共 Sigstore 会将仓库与工作流身份写入**公开透明日志（Rekor）**，私有项目须自行评估后再决定是否启用。
 
 ---
 

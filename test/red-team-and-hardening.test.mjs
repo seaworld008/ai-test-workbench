@@ -297,15 +297,23 @@ test('Commit-before-verify diff base resolution (T-05), non-git fail-closed (T-0
     assert.equal(statement._type, 'https://in-toto.io/Statement/v1');
     fs.writeFileSync(attPath, JSON.stringify(statement, null, 2), 'utf8');
 
-    const validVerify = verifyAttestationFile(attPath);
+    const validVerify = verifyAttestationFile(attPath, { allowT1: true });
     assert.equal(validVerify.ok, true, validVerify.errors.join('\n'));
+    assert.equal(validVerify.trustLevel, 'T1');
+
+    // Without Sigstore T2 bundle, default strict verify MUST reject T1-only as non-T2!
+    const strictReject = verifyAttestationFile(attPath);
+    assert.equal(strictReject.ok, false);
+    assert.equal(strictReject.trustLevel, 'T1');
+    assert.equal(strictReject.reasonCode, 'T1_ONLY_NOT_T2');
 
     // Tamper verdict field -> verification fails!
     const tampered = JSON.parse(fs.readFileSync(attPath, 'utf8'));
     tampered.predicate.verdict = 'pass-forged';
     fs.writeFileSync(attPath, JSON.stringify(tampered, null, 2), 'utf8');
-    const badVerify = verifyAttestationFile(attPath, { requireMac: true });
+    const badVerify = verifyAttestationFile(attPath, { requireT1Mac: true, allowT1: true });
     assert.equal(badVerify.ok, false);
+    assert.equal(badVerify.reasonCode, 'DIGEST_MISMATCH');
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
     fs.rmSync(nonGitDir, { recursive: true, force: true });

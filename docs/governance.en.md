@@ -63,3 +63,17 @@ Before opening or merging a PR, one call orchestrates `governance verify` → `I
 - Machine-verifiable attestation: `<repo>/qa/.aitest/runs/<runId>/attestation.json`
 - Human-readable summary: `<repo>/qa/reports/verdict-summary.md` (explicitly labeling `local-workbench` vs `business-e2e` scope)
 - GitHub Code Scanning report: `<repo>/qa/reports/verdict.sarif.json`
+
+---
+
+## 6. Trust Levels (`T0 / T1 / T2`) & Reusable CI Attestation Workflow
+
+| Trust Level | Canonical Definition | Merge-Grade Green? |
+|---|---|---|
+| **T0** | Unverified local run | No |
+| **T1** | Local Run Ledger + MAC (proves integrity, not provenance) | No |
+| **T2** | Re-run from a clean checkout on a GitHub-hosted runner, keylessly signed with Sigstore, and verified for issuer identity | **Yes (only merge-grade green)** |
+
+- Adopt `.github/workflows/aitest-verify.yml` in one job using [examples/workflows/use-aitest-verify.yml](../examples/workflows/use-aitest-verify.yml).
+- Verify bundles offline with `npx ai-test-workbench@5.1.0 attest verify --file <attestation.json> --bundle <attestation.sigstore.json> --expect-repo <owner/repo> --expect-workflow <workflow-path> --expect-ref <ref>`. Any missing signature, T1-only MAC, byte-level tamper, or OIDC issuer / workflow SAN mismatch fails closed (non-zero exit code, `trustLevel <= T1`).
+- **Private Repository Note**: `signer: github-attest` (default) uses GitHub Artifact Attestations, which requires **GitHub Enterprise Cloud** for private repositories. `signer: cosign` with public Sigstore records repository identity in the public Rekor transparency log; private projects must evaluate that disclosure before opting in.

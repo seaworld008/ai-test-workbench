@@ -1,0 +1,49 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "schemaVersion": 2,
+  "subject": [
+    {
+      "name": "git-tree",
+      "digest": {
+        "gitTree": "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+      }
+    },
+    {
+      "name": "git-commit",
+      "digest": {
+        "gitCommit": "0123456789abcdef0123456789abcdef01234567"
+      }
+    }
+  ],
+  "predicateType": "https://github.com/seaworld008/ai-test-workbench/verdict/v1",
+  "predicate": {
+    "attestedAt": "2026-11-24T00:00:00.000Z",
+    "tool": {
+      "name": "ai-test-workbench",
+      "version": "5.1.0",
+      "gateKernelVersion": "5.1.0"
+    },
+    "environment": {
+      "isCi": true,
+      "provider": "github-actions",
+      "repository": "seaworld008/ai-test-workbench",
+      "workflow": "seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@refs/heads/main",
+      "runId": "99001122",
+      "ref": "refs/heads/main",
+      "sha": "0123456789abcdef0123456789abcdef01234567"
+    },
+    "runId": "01TESTFIXTURE0000000000000",
+    "verdict": "pass",
+    "trustTier": "T1",
+    "trustLevel": "T1",
+    "acceptanceScope": "business-e2e",
+    "gates": {
+      "governance": "pass",
+      "static": "pass",
+      "runtime": "pass",
+      "semanticDiff": "pass"
+    }
+  },
+  "statementDigest": "sha256:f21b8e26496d0bbd1a124cadeb9be03b4342a5a90d000d8b38d6ad904f1648cd",
+  "attestationDigest": "sha256:f21b8e26496d0bbd1a124cadeb9be03b4342a5a90d000d8b38d6ad904f1648cd"
+}

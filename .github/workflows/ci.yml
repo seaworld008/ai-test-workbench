@@ -26,23 +26,23 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node-version }}
 
       - name: Verify Bilingual Docs, MCP Registry Parity, Claims Mapping & Hygiene
         run: npm run lint:docs
 
-      - name: Run CLI, Adversarial, AST & Governance Unit Tests
+      - name: Run CLI, Adversarial, AST, Attestation & Governance Unit Tests
         run: npm test
 
       - name: Run Fast North-Star & Holdout Benchmark (FGER / Holdout / FPR / Triage / Redaction / MisHeal)
         run: node scripts/run-bench.mjs --fast
 
-  verify-e2e-typecheck-and-t2-attestation:
+  verify-e2e-typecheck-and-bench:
     strategy:
       fail-fast: false
       matrix:
@@ -51,10 +51,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node.js 24 LTS
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
 
@@ -73,7 +73,7 @@ jobs:
       - name: Run Offline Smoke + 4-Layer Quality Gate
         run: npm run smoke
 
-      - name: Run Full-Stack Local Demo E2E + One-Call Verify Change (T2 CI Attestation) + Web Vitals
+      - name: Run Full-Stack Local Demo E2E + One-Call Verify Change + Web Vitals
         run: npm run demo:verify
 
       - name: Run Live Seeded-Defect & Red-Team Holdout Benchmark (SDDR + FGER + FPR)
@@ -84,7 +84,7 @@ jobs:
 
       - name: Upload Template QA Reports on Failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: qa-artifacts-${{ matrix.os }}
           path: |
@@ -92,3 +92,18 @@ jobs:
             templates/playwright-qa/reports/
             templates/playwright-qa/test-results/
           retention-days: 7
+
+  self-bootstrap-verify:
+    uses: ./.github/workflows/aitest-verify.yml
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+      security-events: write
+    with:
+      qa-dir: templates/playwright-qa
+      suite: smoke
+      node-version: '22'
+      signer: github-attest
+      use-local-cli: true
+      bootstrap-from-template: true

@@ -86,6 +86,10 @@ const CLI_OPTION_DEFS = {
   'require-mac': { type: /** @type {'boolean'} */ ('boolean') },
   file: { type: /** @type {'string'} */ ('string') },
   bundle: { type: /** @type {'string'} */ ('string') },
+  'expect-repo': { type: /** @type {'string'} */ ('string') },
+  'expect-workflow': { type: /** @type {'string'} */ ('string') },
+  'expect-ref': { type: /** @type {'string'} */ ('string') },
+  'trusted-root-cert': { type: /** @type {'string'} */ ('string') },
   'allow-mutation': { type: /** @type {'boolean'} */ ('boolean') },
   'dry-run': { type: /** @type {'boolean'} */ ('boolean') },
   'skip-install': { type: /** @type {'boolean'} */ ('boolean') },
@@ -337,7 +341,8 @@ export async function runCli(argv = process.argv.slice(2)) {
           ...common,
           baseUrl: v['base-url'],
           base: v.base,
-          mode: v.mode,
+          mode: v.mode || v.suite,
+          suite: v.suite,
           budgetMs: v['budget-ms'] ? Number(v['budget-ms']) : undefined,
           allowNonGit: Boolean(v['allow-non-git']),
         });
@@ -347,6 +352,10 @@ export async function runCli(argv = process.argv.slice(2)) {
           action: v.action || parsed.positionals[1] || 'verify',
           file: v.file,
           bundle: v.bundle,
+          expectRepo: v['expect-repo'],
+          expectWorkflow: v['expect-workflow'],
+          expectRef: v['expect-ref'],
+          trustedRootCert: v['trusted-root-cert'],
           requireMac: Boolean(v['require-mac']),
         });
       case 'heal':

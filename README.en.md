@@ -37,7 +37,44 @@ When coding agents (`Claude Code`, `Codex CLI`, `Antigravity`, `Cursor`, `VS Cod
 | **Seeded-Defect Detection Rate (`SDDR`)** | Single Demo Target **`100.0%` (`7/7`)** | Zero-dep JSON Schema validator + RBAC/concurrency + WCAG 2.1/2.2 scans |
 | **Triage Accuracy / C→A Misclassification / Mis-Heal** | Internal + Real Playwright Stack Corpus **`100%` · C→A `0.0%` · Mis-Heal `0.0%`** | Structured runtime guard telemetry + C-before-A precedence + tamper-evident healer |
 | **Secret Redaction Recall** | Internal Adversarial Corpus **`100.0%` (`35/35`)** | Redaction v2 (structured parse-before-redact preserving typed `heal_*`/`job_*` IDs) |
-| **Verdict Trust Tiers (`T0 / T1 / T2`)** | Local unkeyed `T0` · Out-of-workspace HMAC `T1` · CI-signed in-toto v1 **`T2`** | Only CI-re-executed, signed `T2` attestations (`attest verify`) count as merge-grade green |
+| **Verdict Trust Levels (`T0 / T1 / T2`)** | **T0** = Unverified local run · **T1** = Local Run Ledger + MAC (proves integrity, not provenance) · **T2** = Re-run from a clean checkout on a GitHub-hosted runner, keylessly signed with Sigstore, and verified for issuer identity | **Only T2 is a merge-grade green**; see [reusable workflow example](./examples/workflows/use-aitest-verify.yml) & `attest verify` |
+
+### 🔒 Trust Levels & Reusable CI Workflow (Only T2 Is a Merge-Grade Green)
+
+- **T0**: Unverified local run (not a merge-grade green).
+- **T1**: Local Run Ledger + MAC (proves integrity, not provenance; not a merge-grade green).
+- **T2**: Re-run from a clean checkout on a GitHub-hosted runner, keylessly signed with Sigstore, and verified for issuer identity. **Only T2 is a merge-grade green**.
+
+Adopt T2 verification in one job via [examples/workflows/use-aitest-verify.yml](./examples/workflows/use-aitest-verify.yml):
+
+```yaml
+jobs:
+  aitest-t2-verdict:
+    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v5.1.0
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+      security-events: write
+    with:
+      qa-dir: qa
+      suite: impact
+      node-version: '22'
+      signer: github-attest # default; optional: cosign
+```
+
+Verify a T2 bundle offline (fail-closed by default: missing signature, T1-only MAC, digest tamper, or workflow identity mismatch always returns non-zero with `trustLevel <= T1`):
+
+```bash
+npx ai-test-workbench@5.1.0 attest verify \
+  --file attestation.json \
+  --bundle attestation.sigstore.json \
+  --expect-repo owner/repo \
+  --expect-workflow .github/workflows/aitest-verify.yml \
+  --expect-ref refs/heads/main
+```
+
+> **Private Repository Signing Tradeoffs**: The default `signer: github-attest` uses GitHub Artifact Attestations (`actions/attest`), which requires **GitHub Enterprise Cloud** for private repositories. The optional `signer: cosign` path uses public Sigstore keyless signing, which publishes the repository and workflow identity into the **public Rekor transparency log**; private repositories should evaluate that disclosure risk before opting in.
 
 ---
 

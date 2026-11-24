@@ -64,3 +64,17 @@ npx ai-test-workbench@5.1.0 governance approve --target "/path/to/repo" --approv
 - 机器可验签证明书：`<repo>/qa/.aitest/runs/<runId>/attestation.json`
 - 人类可读判决书：`<repo>/qa/reports/verdict-summary.md`（显式区分 `local-workbench` 与 `business-e2e` 验收口径）
 - GitHub Code Scanning 兼容报告：`<repo>/qa/reports/verdict.sarif.json`
+
+---
+
+## 6. 信任分级（`T0 / T1 / T2`）与可复用 CI 证明工作流
+
+| 信任分级 | 唯一对外定义 | 是否为合入级绿灯 |
+|---|---|---|
+| **T0** | 未经验证的本地运行 | 否 |
+| **T1** | 本地 Run Ledger + MAC（证明完整性，不证明来源） | 否 |
+| **T2** | 在 GitHub 托管的 runner 上从干净 checkout 重跑，用 Sigstore 免密钥签名，并且校验通过签发者身份 | **是（唯一合入级绿灯）** |
+
+- 通过 [examples/workflows/use-aitest-verify.yml](../examples/workflows/use-aitest-verify.yml) 一行接入 `.github/workflows/aitest-verify.yml`。
+- 离线验签统一执行 `npx ai-test-workbench@5.1.0 attest verify --file <attestation.json> --bundle <attestation.sigstore.json> --expect-repo <owner/repo> --expect-workflow <workflow-path> --expect-ref <ref>`；任何签名缺失、仅 T1 MAC、摘要篡改或 OIDC 签发者/工作流 SAN 不符均默认失败（退出码非 0 且 `trustLevel <= T1`）。
+- **私有仓库须知**：`signer: github-attest`（默认）依赖 GitHub Artifact Attestations，私有仓库需要 **GitHub Enterprise Cloud**；`signer: cosign` 使用公共 Sigstore 时会将仓库身份写入公开 Rekor 透明日志，私有项目须自行评估。

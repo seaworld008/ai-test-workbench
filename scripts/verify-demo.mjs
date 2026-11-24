@@ -126,13 +126,18 @@ try {
   );
   const verifyData = verifyReply?.result?.structuredContent?.data;
   const attestPath = verifyData?.artifacts?.attestationPath;
-  const attestCheck = attestPath ? verifyAttestationFile(attestPath) : { ok: false, errors: ['missing attestationPath'] };
+  const attestCheck = attestPath
+    ? verifyAttestationFile(attestPath, { allowT1: true })
+    : { ok: false, errors: ['missing attestationPath'] };
+  const strictT2RejectCheck = attestPath ? verifyAttestationFile(attestPath) : { ok: true };
   const verifyOk =
     verifyReply?.result?.structuredContent?.ok === true &&
     verifyData?.verdict === 'pass' &&
     verifyData?.gates?.semanticDiff === 'pass' &&
     verifyData?.acceptanceScope === 'business-e2e' &&
-    attestCheck.ok === true;
+    attestCheck.ok === true &&
+    strictT2RejectCheck.ok === false &&
+    strictT2RejectCheck.trustLevel !== 'T2';
 
   if (!mcpOk || !verifyOk) {
     console.error('[Demo Verify] MCP/Verify failure details:', JSON.stringify({
