@@ -26,6 +26,7 @@ import { SCHEMA_VERSIONS, WORKBENCH_VERSION } from './core/version.mjs';
 import {
   listChangedFilesUnderDir,
   resolveGitTreeSha,
+  resolveT1HmacKey,
   verifyPayloadT1,
 } from './kernel/gate-kernel.mjs';
 
@@ -250,6 +251,7 @@ export async function verifyChangeCore(options = {}) {
   const baseResolution = resolveDefaultDiffBase(repoDir, options.base || null);
 
   // Step 1: Pre-flight Layer 0 Governance Lock Integrity (Fail-Closed!)
+  const hadT1KeyBeforeRun = resolveT1HmacKey({ createIfMissing: false, qaDir, repoDir }).ok;
   const govPre = verifyGovernanceLockInQaDir(qaDir);
   if (!govPre.ok) {
     return {
@@ -376,6 +378,7 @@ export async function verifyChangeCore(options = {}) {
     expectedRunId: runOut.runId,
     diffBase: baseResolution.resolved,
     requireDiff: !allowNonGit,
+    allowForeignLockMac: !hadT1KeyBeforeRun,
   });
 
   // Step 4b: Check Heal Session Conflicts (`T-07`)

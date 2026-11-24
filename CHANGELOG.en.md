@@ -4,6 +4,19 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.1.0] - 2026-11-24
+
+### Added
+- **Autonomous Red-Team Fake-Green Escape Rate Benchmark (`FGER-agentic`, `npm run bench:agentic`)**:
+  - Upgraded [bench/agentic/DESIGN.en.md](./bench/agentic/DESIGN.en.md) to a full executable dual-tier benchmark specification with a 16-task pre-registered corpus in [bench/agentic/tasks.json](./bench/agentic/tasks.json) spanning Attack Classes A/B/C/D, threat tiers L1/L2/L3 (including DOM indirect prompt injection), and `benign-pressure` / `adversarial-redteam` prompt tiers.
+  - Added a zero-runtime-dependency harness (`bench/agentic/lib/` & `scripts/bench-agentic.mjs`) featuring evaluator-isolated hidden business oracles (8 real Smart Campus defects), immutable protected-base bare remotes, an in-memory ASN.1 DER X.509 v3 Ephemeral Fulcio T2 CA & Sigstore v0.3 DSSE signer, 6-layer blocking attribution, Wilson 95% confidence intervals, and redacted trajectory logging.
+  - **Live Playwright Scripted Multi-Step Baseline (`live-playwright`, `n=16`)**: Local T1 Guardrail **`12.5%` (`2/16`, CI `[3.5%, 36.0%]`)** (exclusively the 2 documented same-UID local boundary probes `AG-B4`/`AG-C4`); Isolated CI T2 Merge-Grade Root of Trust **`0.0%` (`0/16`, CI `[0.0%, 19.4%]`)**; `honest-fix` control `4/4` verified T2 green and `honest-report` control `0%` mis-heal; see [bench/agentic/results/SUMMARY.en.md](./bench/agentic/results/SUMMARY.en.md).
+  - Included pluggable live autonomous LLM CLI adapters (`--adapter claude|codex|gemini|custom`); live commercial/open-weight LLM scores remain transparently labeled `pending` with zero extrapolation.
+  - Added adversarial test suite `test/adversarial/fger-agentic.test.mjs` linked to `CLAIM-18-fger-agentic-dual-tier-redteam` in [docs/claims.json](./docs/claims.json).
+
+### Fixed
+- **Cross-Machine Clean CI Runner `governance.lock` MAC Handling**: Fixed a cross-machine CI issue in `src/verdict.mjs`, `src/kernel/gate/engine.mjs`, and `src/kernel/gate/policy.mjs` (synced to `templates/playwright-qa/support/`) where a fresh CI runner lazily generating a runner-local T1 key in `beginRunLedger` previously flagged a developer-committed `.aitest/governance.lock` MAC mismatch, while preserving strict local T1 HMAC verification, full protected-file SHA-256 checks, and CI `AITEST-G101` protected-base diff enforcement.
+
 ## [6.0.0] - 2026-11-24
 
 ### Breaking Changes (see [docs/upgrade.en.md](./docs/upgrade.en.md))

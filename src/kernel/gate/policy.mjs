@@ -206,7 +206,7 @@ export function isInitializedQaWorkspace(qaDir) {
  * - Missing `.aitest/governance.lock` in an initialized QA workspace returns `ok: false, status: 'blocked'`.
  * - Verifies schema, non-bot approver, protected file hashes, and T1 HMAC when present.
  * @param {string} qaDir
- * @param {{ requireT1Mac?: boolean, allowUninitialized?: boolean }} [options]
+ * @param {{ requireT1Mac?: boolean, allowUninitialized?: boolean, allowForeignMac?: boolean }} [options]
  * @returns {{ ok: boolean, status: 'pass' | 'fail' | 'blocked', enforced: boolean, trustTier: 'T0' | 'T1', lockPath: string, lockDigest?: string, errors: string[], warnings: string[], approvedBy?: string }}
  */
 export function verifyGovernanceLockInQaDir(qaDir, options = {}) {
@@ -291,7 +291,11 @@ export function verifyGovernanceLockInQaDir(qaDir, options = {}) {
     requireMac: Boolean(options.requireT1Mac),
   });
   if (!macCheck.ok) {
-    errors.push(`[Governance Tamper Blocked] ${macCheck.reason}`);
+    if (options.allowForeignMac && !options.requireT1Mac) {
+      warnings.push(`[Governance T0 Cross-Machine] ${macCheck.reason}`);
+    } else {
+      errors.push(`[Governance Tamper Blocked] ${macCheck.reason}`);
+    }
   } else if (!macCheck.verified) {
     warnings.push(`[Governance T0 Advisory] ${macCheck.reason}`);
   }

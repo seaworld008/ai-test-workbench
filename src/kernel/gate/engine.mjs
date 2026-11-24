@@ -40,6 +40,7 @@ export const GATE_KERNEL_VERSION = WORKBENCH_VERSION;
  *   allowMutation?: boolean;
  *   skipGovernanceCheck?: boolean;
  *   requireT1Mac?: boolean;
+ *   allowForeignLockMac?: boolean;
  *   allowUninitialized?: boolean;
  *   legacyWaiverCompat?: boolean;
  *   allowUnboundResults?: boolean;
@@ -101,6 +102,7 @@ export function runAuditForQaDir(qaDir, options = {}) {
   if (options.skipGovernanceCheck !== true) {
     const govRes = verifyGovernanceLockInQaDir(qaDir, {
       requireT1Mac: Boolean(options.requireT1Mac),
+      allowForeignMac: Boolean(options.allowForeignLockMac),
       allowUninitialized: Boolean(options.allowUninitialized),
     });
     lockDigest = govRes.lockDigest || null;

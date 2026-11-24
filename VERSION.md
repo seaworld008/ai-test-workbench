@@ -1,6 +1,6 @@
-# 版本与兼容性矩阵 (v6.0.0)
+# 版本与兼容性矩阵 (v6.1.0)
 
-> [English Version](./VERSION.en.md) · [简体中文主文档](./README.md) · **工作台与门禁内核版本**：`6.0.0`（单一真源：`src/core/version.mjs`） · **核验日期**：`2026-11-24`
+> [English Version](./VERSION.en.md) · [简体中文主文档](./README.md) · **工作台与门禁内核版本**：`6.1.0`（单一真源：`src/core/version.mjs`） · **核验日期**：`2026-11-24`
 
 ## 1. 运行时与工具链要求
 
@@ -17,7 +17,7 @@
 
 | 工件类型 | 当前 Schema 版本 | 对应模块 |
 |---|---|---|
-| **Gate Kernel** | `6.0.0` | 权威源码 `src/kernel/gate-kernel.mjs`（单向同步镜像 `templates/playwright-qa/support/gate-kernel.mjs`，`doctor` 与 `check:vendor` 双重校验漂移） |
+| **Gate Kernel** | `6.1.0` | 权威源码 `src/kernel/gate-kernel.mjs`（单向同步镜像 `templates/playwright-qa/support/gate-kernel.mjs`，`doctor` 与 `check:vendor` 双重校验漂移） |
 | **Governance Lock** | `v1` | `src/governance.mjs`（`.aitest/governance.lock`） |
 | **Template Manifest** | `v1` | `src/upgrade.mjs` / `src/init.mjs`（`.aitest/template-manifest.json`） |
 | **Run Ledger & Attestation** | `v1` | `src/ledger.mjs` / `src/verdict.mjs`（`.aitest/runs/<runId>/manifest.json` & `attestation.json`） |

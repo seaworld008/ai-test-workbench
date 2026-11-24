@@ -52,7 +52,7 @@ on:
         description: 'Pinned ai-test-workbench npm version'
         required: false
         type: string
-        default: '6.0.0'
+        default: '6.1.0'
       use-local-cli:
         description: 'Internal self-bootstrap option: execute ./tools/aitest.mjs instead of npx'
         required: false

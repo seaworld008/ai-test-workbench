@@ -1,8 +1,8 @@
-# AI Test Workbench (`ai-test-workbench` / `aitw` v6.0.0)
+# AI Test Workbench (`ai-test-workbench` / `aitw` v6.1.0)
 
 > Trustworthy Verification Kernel & AI-Agent-First native multi-protocol MCP Server (`stdio`, Streamable HTTP `/mcp`, Legacy HTTP+SSE `/sse`) for Playwright E2E/API verification. Supports Chinese-default docs with paired English `.en.md` docs.
 
-## Core v6.0.0 Capabilities
+## Core v6.1.0 Capabilities
 - **Authoritative 4-Layer Anti-Fake-Green Gate Kernel (`src/kernel/gate-kernel.mjs`, `src/kernel/gate/rules/`, `src/governance.mjs`, `src/ledger.mjs`)**: Pluggable `AITEST-G101..G115` AST rules with lexical scope stack and cross-file title pooling, T1 MAC `.aitest/governance.lock`, `tsc` + `eslint-plugin-playwright`, and ULID `Run Ledger` input-hash binding (`FGER-internal = 0.0% (26/26)`, `FGER-holdout = 0.0% (24/24)`, real-world unseen holdout FPR `6.1% [2.1%, 16.5%]`).
 - **Native Multi-Protocol MCP Server & Job Runner (`src/mcp/`, `src/jobs.mjs`)**: Zero runtime npm dependencies; supports MCP `2024-11-05`..`2025-11-25` with **17 canonical typed tools** (`aitest_heal` and `aitest_job` action-dispatched, with 6 v5 deprecated aliases retained in v6.x), isolated child-process jobs (`syncBudgetMs`), `_meta.progressToken` heartbeats, `notifications/cancelled` process-tree termination, concurrent read tools, and per-workspace write locks.
 - **One-Call Change Verdict & Stateful Healer (`src/verdict.mjs`, `src/heal.mjs`, `src/traceability.mjs`)**: `aitest_verify_change` emits `attestation.json` (in-toto v1 + T0/T1/T2), `verdict-summary.md`, and `verdict.sarif.json`; `aitest_heal(action="begin"|"attempt"|"conclude")` hard-blocks Class B/C/D test edits (`0.0%` mis-heal rate) and maps `REQ-xxx` traceability.
