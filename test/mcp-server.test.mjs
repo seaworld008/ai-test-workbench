@@ -18,7 +18,7 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKBENCH_ROOT = path.resolve(__dirname, '..');
 
-test('MCP server negotiates all supported protocol versions (2024-11-05 .. 2025-11-25) and exposes 21 typed tools (zero governance_approve)', async () => {
+test('MCP server negotiates all supported protocol versions (2024-11-05 .. 2025-11-25) and exposes 17 canonical typed tools (zero governance_approve)', async () => {
   for (const ver of SUPPORTED_MCP_VERSIONS) {
     const res = await handleMcpJsonRpcMessage({
       jsonrpc: '2.0',
@@ -42,10 +42,12 @@ test('MCP server negotiates all supported protocol versions (2024-11-05 .. 2025-
   assert.equal(futureRes.result.protocolVersion, '2025-11-25');
 
   const tools = getMcpToolDefinitions();
-  assert.equal(tools.length, 21);
+  assert.equal(tools.length, 17);
   assert.equal(tools.some((t) => t.name === 'aitest_verify_change'), true);
-  assert.equal(tools.some((t) => t.name === 'aitest_heal_begin'), true);
-  assert.equal(tools.some((t) => t.name === 'aitest_job_status'), true);
+  assert.equal(tools.some((t) => t.name === 'aitest_heal'), true);
+  assert.equal(tools.some((t) => t.name === 'aitest_job'), true);
+  assert.equal(tools.some((t) => t.name === 'aitest_heal_begin'), false);
+  assert.equal(tools.some((t) => t.name === 'aitest_job_status'), false);
   assert.equal(tools.some((t) => t.name.includes('governance')), false);
 
   for (const tool of tools) {
@@ -304,7 +306,7 @@ test('MCP Streamable HTTP (/mcp) enforces initialize-only sessions, 404 on unkno
     assert.equal(batchOkRes.status, 200);
     const batchJson = await batchOkRes.json();
     assert.equal(batchJson.length, 2);
-    assert.equal(batchJson[1].result.tools.length, 21);
+    assert.equal(batchJson[1].result.tools.length, 17);
 
     const delRes = await fetch(`${baseUrl}/mcp`, {
       method: 'DELETE',

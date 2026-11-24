@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { TOOL_REGISTRY } from '../src/mcp/registry.mjs';
+import { DEPRECATED_TOOL_ALIASES, TOOL_REGISTRY } from '../src/mcp/registry.mjs';
 import { WORKBENCH_VERSION } from '../src/version.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -64,7 +64,10 @@ const ACTIVE_MCP_TOOL_DOCS = new Set([
   'skills/ai-test-workbench/references/mcp-server-protocol.en.md',
 ]);
 
-const REGISTERED_MCP_TOOLS = new Set(TOOL_REGISTRY.map((t) => t.name));
+const REGISTERED_MCP_TOOLS = new Set([
+  ...TOOL_REGISTRY.map((t) => t.name),
+  ...Object.keys(DEPRECATED_TOOL_ALIASES),
+]);
 
 const CHINESE_CHAR_RE = /[\u4e00-\u9fff]/;
 

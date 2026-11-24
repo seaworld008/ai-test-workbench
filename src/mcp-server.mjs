@@ -5,7 +5,7 @@ import {
   SUPPORTED_MCP_VERSIONS,
   handleMcpJsonRpcMessage,
 } from './mcp/protocol.mjs';
-import { TOOL_REGISTRY, getMcpToolDefinitions } from './mcp/registry.mjs';
+import { DEPRECATED_TOOL_ALIASES, TOOL_REGISTRY, getMcpToolDefinitions } from './mcp/registry.mjs';
 import {
   getMcpPromptDefinitions,
   getMcpResourceDefinitions,
@@ -35,6 +35,7 @@ import { startStdioMcpServer } from './mcp/transport-stdio.mjs';
  */
 
 export {
+  DEPRECATED_TOOL_ALIASES,
   MCP_SERVER_INFO,
   SUPPORTED_MCP_VERSIONS,
   TOOL_REGISTRY,

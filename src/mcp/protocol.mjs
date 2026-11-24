@@ -1,9 +1,8 @@
 // @ts-check
-import { detectLang } from '../i18n.mjs';
+import { detectLang } from '../core/i18n.mjs';
+import { WORKBENCH_VERSION } from '../core/version.mjs';
 import { defaultJobManager } from '../jobs.mjs';
-import { MCP_PILLARS, MCP_PRESETS, MCP_PROFILES } from '../mcp-hub.mjs';
-import { WORKBENCH_VERSION } from '../version.mjs';
-import { TOOL_BY_NAME, getMcpToolDefinitions, validateToolArguments } from './registry.mjs';
+import { getMcpToolDefinitions, resolveToolCall, validateToolArguments } from './registry.mjs';
 import {
   buildPromptMessages,
   getMcpPromptDefinitions,
@@ -60,7 +59,6 @@ function buildBoundedTextPayload(structuredContent) {
     return fullJson;
   }
 
-  // Keep top-level envelope + compact summary of key `data` fields
   const rawData = structuredContent.data || {};
   /** @type {Record<string, any>} */
   const compactData = {};
@@ -81,6 +79,7 @@ function buildBoundedTextPayload(structuredContent) {
     'budgetPassed',
     'mode',
     'async',
+    '_deprecation',
   ]) {
     if (rawData[key] !== undefined) compactData[key] = rawData[key];
   }
@@ -104,14 +103,26 @@ function buildBoundedTextPayload(structuredContent) {
 }
 
 function wrapEnvelope(toolName, ok, exitCode, summary, data, nextActions, options = {}) {
-  const { target = null, resourceSuffix = null, protocolVersion = '2025-11-25' } = options;
+  const { target = null, resourceSuffix = null, protocolVersion = '2025-11-25', deprecation = null } = options;
+  const finalData = data && typeof data === 'object' ? { ...data } : {};
+  let finalSummary = String(summary || '');
+  const finalNextActions = Array.isArray(nextActions) ? [...nextActions] : [];
+
+  if (deprecation) {
+    finalData._deprecation = deprecation;
+    finalSummary = `[DEPRECATED ${deprecation.deprecatedTool} -> ${deprecation.replacement}] ${finalSummary}`;
+    finalNextActions.push(
+      `Migrate from deprecated "${deprecation.deprecatedTool}" to "${deprecation.replacement}" before v${deprecation.removeIn}.`
+    );
+  }
+
   const structuredContent = {
     ok,
     exitCode,
     tool: toolName,
-    summary: String(summary || '').slice(0, 300),
-    data: data || {},
-    nextRecommendedActions: nextActions || [],
+    summary: finalSummary.slice(0, 300),
+    data: finalData,
+    nextRecommendedActions: finalNextActions,
   };
 
   /** @type {Array<Record<string, any>>} */
@@ -138,7 +149,6 @@ function wrapEnvelope(toolName, ok, exitCode, summary, data, nextActions, option
     content: contentItems,
     isError: !ok,
   };
-  // Always attach structuredContent for modern MCP versions (and default 2025-11-25)
   if (supportsStructured || protocolVersion === '2025-03-26') {
     result.structuredContent = structuredContent;
   }
@@ -150,8 +160,8 @@ function wrapEnvelope(toolName, ok, exitCode, summary, data, nextActions, option
 }
 
 /**
- * Executes a registered MCP tool with strict JSON Schema validation, workspace boundary checks,
- * session-scoped job management, and per-request progress notification routing (`M-01..M-15`).
+ * Executes a registered MCP tool (or deprecated v5 alias) with strict JSON Schema validation,
+ * workspace boundary enforcement, declarative in-memory `execute` hooks, and Job Runner dispatch.
  *
  * @param {string} name
  * @param {Record<string, any>} [rawArgs]
@@ -159,20 +169,19 @@ function wrapEnvelope(toolName, ok, exitCode, summary, data, nextActions, option
  * @param {Record<string, any>} [meta]
  */
 async function executeMcpTool(name, rawArgs = {}, ctx = {}, meta = {}) {
-  const toolEntry = TOOL_BY_NAME.get(name);
-  if (!toolEntry) {
+  const resolved = resolveToolCall(name, rawArgs);
+  if (!resolved.found || !resolved.toolEntry) {
     return { unknownTool: true };
   }
 
-  /** @type {Record<string, any>} */
-  const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {};
+  const { toolEntry, effectiveArgs: args, deprecation } = resolved;
   const protocolVersion = ctx.protocolVersion || SUPPORTED_MCP_VERSIONS[0];
   const sessionId = ctx.sessionId || 'default';
   const jobManager = ctx.jobManager || defaultJobManager;
   const target = args.target || ctx.defaultTarget || null;
   const lang = detectLang(args.lang || ctx.defaultLang);
 
-  // 1. Validate arguments against declared inputSchema (`M-08`)
+  // 1. Validate arguments against declared inputSchema + cross-field rules (`M-08`)
   const schemaCheck = validateToolArguments(toolEntry, args, ctx.defaultTarget || null);
   if (!schemaCheck.ok) {
     return wrapEnvelope(
@@ -182,12 +191,13 @@ async function executeMcpTool(name, rawArgs = {}, ctx = {}, meta = {}) {
       `[Schema Validation Failed] ${schemaCheck.errors.slice(0, 3).join('; ')}`,
       { validationErrors: schemaCheck.errors },
       ['Fix invalid or unknown tool parameters to match inputSchema.'],
-      { protocolVersion }
+      { protocolVersion, deprecation }
     );
   }
 
   // 2. Enforce strict workspace root intersection & path parameter boundaries (`M-02`, `M-03`)
-  if (!toolEntry.inMemory && !(name === 'aitest_mcp_hub' && args.action === 'presets')) {
+  const skipBoundary = Boolean(toolEntry.inMemory || toolEntry.skipWorkspaceBoundary?.(args));
+  if (!skipBoundary) {
     const allowedRoots = getEffectiveAllowedRoots(ctx);
     const pathCheck = validateToolPathArgs(args, target, allowedRoots);
     if (!pathCheck.ok) {
@@ -198,89 +208,25 @@ async function executeMcpTool(name, rawArgs = {}, ctx = {}, meta = {}) {
         pathCheck.error || '[Workspace Boundary Blocked]',
         { blockedTarget: pathCheck.blockedPath || target, allowedRoots },
         ['Pass target/repo/output paths strictly inside an authorized workspace root.'],
-        { protocolVersion }
+        { protocolVersion, deprecation }
       );
     }
   }
 
-  // 3. Fast in-memory session-isolated Job control tools (`M-05`)
-  if (name === 'aitest_job_status') {
-    const status = jobManager.getPublicStatus(args.jobId, sessionId);
-    if (!status) {
-      return wrapEnvelope(name, false, 1, `Unknown jobId "${args.jobId}"`, { jobId: args.jobId }, [], { protocolVersion });
+  // 3. Declarative in-memory tool execution hook (e.g. aitest_job, aitest_mcp_hub presets)
+  if (typeof toolEntry.execute === 'function') {
+    const outcome = await toolEntry.execute(args, { jobManager, sessionId, target, lang, protocolVersion });
+    if (outcome !== null) {
+      return wrapEnvelope(
+        name,
+        outcome.ok,
+        outcome.exitCode,
+        outcome.summary,
+        outcome.data,
+        outcome.nextActions ?? toolEntry.nextActions(outcome.ok, args),
+        { target, resourceSuffix: toolEntry.resourceSuffix, protocolVersion, deprecation }
+      );
     }
-    return wrapEnvelope(
-      name,
-      true,
-      0,
-      `Job ${status.jobId} is ${status.status}`,
-      status,
-      status.status === 'running'
-        ? [`Call aitest_job_result(jobId="${status.jobId}", waitMs=5000) or aitest_job_cancel.`]
-        : [`Call aitest_job_result(jobId="${status.jobId}") to read full output.`],
-      { protocolVersion }
-    );
-  }
-
-  if (name === 'aitest_job_result') {
-    const waited = await jobManager.waitForResult(args.jobId, Number(args.waitMs || 0), sessionId);
-    if (!waited) {
-      return wrapEnvelope(name, false, 1, `Unknown jobId "${args.jobId}"`, { jobId: args.jobId }, [], { protocolVersion });
-    }
-    const stillRunning = waited.status === 'running';
-    const jobOk = stillRunning || waited.status === 'succeeded';
-    return wrapEnvelope(
-      name,
-      jobOk,
-      stillRunning ? 0 : waited.exitCode ?? 1,
-      stillRunning
-        ? `Job ${waited.jobId} is still running (${waited.lastMessage})`
-        : `Job ${waited.jobId} finished with status=${waited.status} (exitCode=${waited.exitCode})`,
-      waited,
-      stillRunning ? [`Poll aitest_job_result(jobId="${waited.jobId}", waitMs=5000) again.`] : [],
-      { protocolVersion }
-    );
-  }
-
-  if (name === 'aitest_job_cancel') {
-    const cancelRes = jobManager.cancelByJobId(args.jobId, sessionId);
-    if (!cancelRes.found) {
-      return wrapEnvelope(name, false, 1, `Unknown jobId "${args.jobId}"`, cancelRes, [], { protocolVersion });
-    }
-    return wrapEnvelope(
-      name,
-      true,
-      0,
-      cancelRes.cancelled ? `Cancelled job ${args.jobId} and terminated process tree` : `Job ${args.jobId} already ${cancelRes.status}`,
-      cancelRes,
-      [],
-      { protocolVersion }
-    );
-  }
-
-  // 4. Fast in-memory MCP presets lookup
-  if (name === 'aitest_mcp_hub' && args.action === 'presets') {
-    const data = {
-      pillars: MCP_PILLARS,
-      profiles: MCP_PROFILES,
-      presets: Object.fromEntries(
-        Object.entries(MCP_PRESETS).map(([k, v]) => [
-          k,
-          {
-            pillar: v.pillar,
-            riskLevel: v.riskLevel,
-            pinnedVersion: v.pinnedVersion,
-            readonly: v.readonly,
-            command: v.command,
-            args: v.args,
-            description: v.description,
-          },
-        ])
-      ),
-    };
-    return wrapEnvelope(name, true, 0, 'Listed 7-pillar pinned MCP presets', data, toolEntry.nextActions(true, args), {
-      protocolVersion,
-    });
   }
 
   if (!toolEntry.buildCliArgs) {
@@ -329,9 +275,9 @@ async function executeMcpTool(name, rawArgs = {}, ctx = {}, meta = {}) {
       `${name} moved to background job ${js.jobId} (status=running)`,
       { async: true, ...js },
       [
-        `Call aitest_job_status(jobId="${js.jobId}") or aitest_job_result(jobId="${js.jobId}", waitMs=10000) to retrieve results.`,
+        `Call aitest_job(action="status", jobId="${js.jobId}") or aitest_job(action="result", jobId="${js.jobId}", waitMs=10000) to retrieve results.`,
       ],
-      { target, resourceSuffix: toolEntry.resourceSuffix, protocolVersion }
+      { target, resourceSuffix: toolEntry.resourceSuffix, protocolVersion, deprecation }
     );
   }
 
@@ -344,7 +290,6 @@ async function executeMcpTool(name, rawArgs = {}, ctx = {}, meta = {}) {
       : completed.stdout
         ? { output: completed.stdout.slice(0, 4000) }
         : {};
-  // Omit stderr on success (`M-11`)
   if (!ok && completed.stderr) {
     data.stderr = completed.stderr.slice(0, 1500);
   }
@@ -363,6 +308,7 @@ async function executeMcpTool(name, rawArgs = {}, ctx = {}, meta = {}) {
     target,
     resourceSuffix: toolEntry.resourceSuffix,
     protocolVersion,
+    deprecation,
   });
 }
 
@@ -380,8 +326,6 @@ export async function handleMcpJsonRpcMessage(msg, ctx = {}, requestMeta = {}) {
       return rpcError(msg?.id ?? null, -32600, 'Invalid JSON-RPC 2.0 request');
     }
 
-    // Per JSON-RPC 2.0 spec: notifications omit `id` (`!('id' in msg)` or `msg.id === undefined`).
-    // Explicit `id: null` is NOT a notification (`M-15`).
     const isNotification = !Object.prototype.hasOwnProperty.call(msg, 'id') || msg.id === undefined;
     const method = msg.method;
 
@@ -417,7 +361,6 @@ export async function handleMcpJsonRpcMessage(msg, ctx = {}, requestMeta = {}) {
         if (ctx) {
           ctx.protocolVersion = protocolVersion;
           ctx.initialized = true;
-          // Client roots can ONLY narrow server roots via intersection in security.mjs (`M-02`)!
           if (Array.isArray(msg.params?.roots)) {
             ctx.clientRoots = parseWorkspaceRoots(msg.params.roots.map((r) => r?.uri || r).filter(Boolean));
           }
@@ -432,7 +375,7 @@ export async function handleMcpJsonRpcMessage(msg, ctx = {}, requestMeta = {}) {
           },
           serverInfo: MCP_SERVER_INFO,
           instructions:
-            'Prefer aitest_verify_change for one-call fail-closed verification, and aitest_heal_begin -> aitest_heal_attempt -> aitest_heal_conclude for governed triage. Local runs are T0/T1 pre-checks; CI-attested T2 verdicts are required for trustworthy merge green. Never target production, modify protected governance files, or weaken assertions.',
+            'Prefer aitest_verify_change for one-call fail-closed verification, and aitest_heal(action="begin"|"attempt"|"conclude") for governed triage. Local runs are T0/T1 pre-checks; CI-attested T2 verdicts are required for trustworthy merge green. Never target production, modify protected governance files, or weaken assertions.',
         });
       }
       case 'ping':

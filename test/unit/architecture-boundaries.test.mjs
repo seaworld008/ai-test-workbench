@@ -182,7 +182,7 @@ test('Architecture boundary: zero src/scripts -> templates inversions and vendor
     `Vendored template mirror drifted from src/kernel/: drifted=${JSON.stringify(vendorCheck.drifted)}, stale=${JSON.stringify(vendorCheck.stale)}. Run "npm run sync:vendor".`
   );
 
-  // Build src/** import graph for cycle ratchet (4 in WU-02 MCP hub/server, tightened to 0 in WU-07).
+  // Enforce ZERO circular imports across the entire src/** module graph (WU-07).
   const srcGraph = new Map();
   for (const file of srcFiles) {
     const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
@@ -195,26 +195,33 @@ test('Architecture boundary: zero src/scripts -> templates inversions and vendor
     srcGraph.set(rel, deps);
   }
   const srcCycles = findCycles(srcGraph);
-  const MAX_ALLOWED_SRC_CYCLES = 4;
-  assert.ok(
-    srcCycles.length <= MAX_ALLOWED_SRC_CYCLES,
-    `Circular imports inside src/** increased (${srcCycles.length} > ${MAX_ALLOWED_SRC_CYCLES}): ${JSON.stringify(srcCycles)}`
+  assert.deepEqual(
+    srcCycles,
+    [],
+    `Circular imports inside src/** must be zero, found ${srcCycles.length}: ${JSON.stringify(srcCycles)}`
   );
 });
 
-test('Architecture boundary (WU-06): decomposed trust/explore/codemap/perf domains stay <= 500 LOC and auth-login has no temp-file codegen', () => {
-  for (const domain of ['trust', 'explore', 'codemap', 'perf']) {
+test('Architecture boundary (WU-06 & WU-07): decomposed domains, MCP tools, and CLI stay <= 500 LOC with no auth-login temp codegen', () => {
+  for (const domain of ['trust', 'explore', 'codemap', 'perf', 'mcp-hub', 'cli']) {
     const dir = path.join(REPO_ROOT, 'src', domain);
     const files = walkMjs(dir);
-    assert.ok(files.length >= 2, `Expected decomposed modules under src/${domain}/`);
+    assert.ok(files.length >= 1, `Expected decomposed modules under src/${domain}/`);
     for (const file of files) {
       const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
       const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/).length;
       assert.ok(lines <= 500, `Decomposed module ${rel} has ${lines} lines (> 500 ceiling)`);
     }
-    const facadePath = path.join(REPO_ROOT, 'src', `${domain}.mjs`);
+  }
+  for (const facade of ['trust', 'explore', 'codemap', 'perf', 'cli']) {
+    const facadePath = path.join(REPO_ROOT, 'src', `${facade}.mjs`);
     const facadeLines = fs.readFileSync(facadePath, 'utf8').split(/\r?\n/).length;
-    assert.ok(facadeLines <= 260, `Facade src/${domain}.mjs has ${facadeLines} lines (> 260 ceiling)`);
+    assert.ok(facadeLines <= 260, `Facade src/${facade}.mjs has ${facadeLines} lines (> 260 ceiling)`);
+  }
+  for (const mcpFile of walkMjs(path.join(REPO_ROOT, 'src', 'mcp'))) {
+    const rel = path.relative(REPO_ROOT, mcpFile).replace(/\\/g, '/');
+    const lines = fs.readFileSync(mcpFile, 'utf8').split(/\r?\n/).length;
+    assert.ok(lines <= 500, `MCP module ${rel} has ${lines} lines (> 500 ceiling)`);
   }
 
   const authLoginText = fs.readFileSync(path.join(REPO_ROOT, 'src', 'auth-login.mjs'), 'utf8');
