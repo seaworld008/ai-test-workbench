@@ -3,8 +3,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { probeToolVersion, redactSecrets, runNpm, resolvePlaywrightCli, runPlaywright } from './proc.mjs';
-import { GATE_KERNEL_VERSION } from '../templates/playwright-qa/support/gate-kernel.mjs';
+import { resolvePlaywrightCli } from './core/playwright-resolve.mjs';
+import { probeToolVersion, runNpm, runPlaywright } from './core/proc.mjs';
+import { redactSecrets } from './core/redact.mjs';
+import { WORKBENCH_VERSION } from './core/version.mjs';
+import { GATE_KERNEL_VERSION } from './kernel/gate-kernel.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKBENCH_ROOT = path.resolve(__dirname, '..');
@@ -47,6 +50,58 @@ export function inspectBrowserCache() {
     }
   }
   return { exists: false, dir: candidates[0] || '', entries: [], chromiumEntries: [] };
+}
+
+/**
+ * Detects the installed Gate Kernel version inside a host `<repo>/qa` directory.
+ * Checks `.aitest/template-manifest.json`, vendored `support/core/version.mjs`,
+ * `support/gate/engine.mjs`, `@workbench-version` stamp, and legacy single-file `support/gate-kernel.mjs`.
+ * @param {string} qaDir
+ * @returns {{ present: boolean, version: string, source: string }}
+ */
+export function detectHostGateKernelVersion(qaDir) {
+  const hostKernelPath = path.join(qaDir, 'support', 'gate-kernel.mjs');
+  if (!fs.existsSync(hostKernelPath)) {
+    return { present: false, version: 'missing', source: 'none' };
+  }
+
+  const manifestPath = path.join(qaDir, '.aitest', 'template-manifest.json');
+  if (fs.existsSync(manifestPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      const ver = parsed.gateKernelVersion || parsed.workbenchVersion;
+      if (typeof ver === 'string' && ver.trim()) {
+        return { present: true, version: ver.trim(), source: '.aitest/template-manifest.json' };
+      }
+    } catch {
+      // fall through to code inspection
+    }
+  }
+
+  const vendoredVersionPath = path.join(qaDir, 'support', 'core', 'version.mjs');
+  if (fs.existsSync(vendoredVersionPath)) {
+    const raw = fs.readFileSync(vendoredVersionPath, 'utf8');
+    const m = /WORKBENCH_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(raw);
+    if (m) return { present: true, version: m[1], source: 'support/core/version.mjs' };
+  }
+
+  const enginePath = path.join(qaDir, 'support', 'gate', 'engine.mjs');
+  if (fs.existsSync(enginePath)) {
+    const raw = fs.readFileSync(enginePath, 'utf8');
+    const m = /GATE_KERNEL_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(raw);
+    if (m) return { present: true, version: m[1], source: 'support/gate/engine.mjs' };
+    const banner = /@workbench-version:\s*([0-9][^\s]+)/.exec(raw);
+    if (banner) return { present: true, version: banner[1], source: 'support/gate/engine.mjs(@workbench-version)' };
+  }
+
+  const hostSrc = fs.readFileSync(hostKernelPath, 'utf8');
+  const banner = /@workbench-version:\s*([0-9][^\s]+)/.exec(hostSrc);
+  if (banner) return { present: true, version: banner[1], source: 'support/gate-kernel.mjs(@workbench-version)' };
+
+  const legacy = /GATE_KERNEL_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(hostSrc);
+  if (legacy) return { present: true, version: legacy[1], source: 'support/gate-kernel.mjs(legacy)' };
+
+  return { present: true, version: 'unknown', source: 'support/gate-kernel.mjs' };
 }
 
 export async function runDoctor(options = {}) {
@@ -205,20 +260,22 @@ export async function runDoctor(options = {}) {
         : `Target directory does not exist: ${targetDir}`
     );
 
-    const hostKernelPath = path.join(candidateQa, 'support', 'gate-kernel.mjs');
     if (fs.existsSync(candidateQa) && fs.existsSync(path.join(candidateQa, 'playwright.config.ts'))) {
-      if (!fs.existsSync(hostKernelPath)) {
-        add('WARN', 'Gate Kernel Drift', `Host QA directory predates Gate Kernel v${GATE_KERNEL_VERSION}; update support/gate-kernel.mjs.`);
+      const detected = detectHostGateKernelVersion(candidateQa);
+      if (!detected.present) {
+        add(
+          'WARN',
+          'Gate Kernel Drift',
+          `Host QA directory predates Gate Kernel v${GATE_KERNEL_VERSION}; run "npx ai-test-workbench@${WORKBENCH_VERSION} upgrade --target <repo>".`
+        );
       } else {
-        const hostSrc = fs.readFileSync(hostKernelPath, 'utf8');
-        const m = /GATE_KERNEL_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(hostSrc);
-        const hostVer = m ? m[1] : 'unknown';
+        const hostVer = detected.version;
         add(
           hostVer === GATE_KERNEL_VERSION ? 'OK' : 'WARN',
           'Gate Kernel Version',
           hostVer === GATE_KERNEL_VERSION
-            ? `v${hostVer} matches workbench`
-            : `Host QA kernel v${hostVer} != workbench v${GATE_KERNEL_VERSION}`
+            ? `v${hostVer} matches workbench (${detected.source})`
+            : `Host QA kernel v${hostVer} (${detected.source}) != workbench v${GATE_KERNEL_VERSION}; run "npx ai-test-workbench@${WORKBENCH_VERSION} upgrade --target <repo>"`
         );
       }
     }

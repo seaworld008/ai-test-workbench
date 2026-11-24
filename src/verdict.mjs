@@ -22,12 +22,12 @@ import {
   resolveVerdictTrustTier,
   tryCosignKeylessSign,
 } from './trust.mjs';
-import { SCHEMA_VERSIONS, WORKBENCH_VERSION } from './version.mjs';
+import { SCHEMA_VERSIONS, WORKBENCH_VERSION } from './core/version.mjs';
 import {
   listChangedFilesUnderDir,
   resolveGitTreeSha,
   verifyPayloadT1,
-} from '../templates/playwright-qa/support/gate-kernel.mjs';
+} from './kernel/gate-kernel.mjs';
 
 function buildSarifReport(verdictObj) {
   const results = [];

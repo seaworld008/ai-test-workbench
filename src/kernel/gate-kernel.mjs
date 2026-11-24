@@ -1,0 +1,75 @@
+/**
+ * Authoritative 4-Layer Anti-Fake-Green Gate Kernel (v5.1.1) — Public Facade.
+ *
+ * Refactored from first principles into cohesive, single-responsibility modules under `support/gate/`:
+ * - `trust-hmac.mjs`    — T1 out-of-workspace HMAC-SHA256 tamper-evidence
+ * - `git-utils.mjs`     — Non-ASCII-safe Git (`core.quotePath=off -z`), merge-base & workspace hashing
+ * - `policy.mjs`        — Declarative protection globs, fail-closed governance lock, waivers & quarantine
+ * - `ast-analyzer.mjs`  — TypeScript Compiler API AST semantic analyzer & base/head diff guard
+ * - `ledger-verify.mjs` — Fail-closed Run Ledger & results.json verification (`maxSkipped=0` default)
+ * - `engine.mjs`        — 3-state (`pass | fail | blocked`) unified gate orchestrator
+ */
+
+export {
+  GATE_KERNEL_VERSION,
+  runAuditForQaDir,
+} from './gate/engine.mjs';
+
+export {
+  HMAC_PREFIX,
+  canonicalizeJson,
+  computeDomainHmac,
+  getDefaultHmacKeyFilePath,
+  resolveT1HmacKey,
+  signPayloadT1,
+  stripSignatureFields,
+  verifyPayloadT1,
+} from './gate/trust-hmac.mjs';
+
+export {
+  computeWorkspaceInputHash,
+  execGitSync,
+  getFileAtGitRef,
+  listChangedFilesUnderDir,
+  parseGitDiffHeaderPath,
+  resolveDefaultDiffBase,
+  resolveGitHeadSha,
+  resolveGitIdentity,
+  resolveGitRoot,
+  resolveGitTreeSha,
+  sha256Hex,
+  unquoteGitPath,
+} from './gate/git-utils.mjs';
+
+export {
+  BOT_APPROVER_RE,
+  DEFAULT_PROTECTED_GLOBS,
+  PROTECTED_GOVERNANCE_REL_FILES,
+  compilePolicyGlob,
+  computeProtectedFileHashes,
+  isCoveredByWaiver,
+  isInitializedQaWorkspace,
+  isProtectedDiffPath,
+  loadActiveQuarantine,
+  loadAitestConfig,
+  loadAndValidateWaivers,
+  validateAssertFunctionNames,
+  verifyGovernanceLockInQaDir,
+} from './gate/policy.mjs';
+
+export {
+  analyzeHealerDiffText,
+  analyzeSourceAst,
+  classifyAssertionStatement,
+  compareSpecSourcesAst,
+  resolveTypeScriptCompiler,
+  runGitDiffGuard,
+  runStaticSpecChecks,
+  scanSpecFilesFallback,
+} from './gate/ast-analyzer.mjs';
+
+export {
+  auditResultsJson,
+  countMutationSpecsInFiles,
+  verifyLedgerBindingInQaDir,
+} from './gate/ledger-verify.mjs';

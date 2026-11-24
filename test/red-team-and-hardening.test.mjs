@@ -25,14 +25,14 @@ import {
   resolveDefaultDiffBase,
   runAuditForQaDir,
   unquoteGitPath,
-} from '../templates/playwright-qa/support/gate-kernel.mjs';
+} from '../src/kernel/gate-kernel.mjs';
 import {
   DEFAULT_BLOCKED_ENDPOINTS,
   checkOutgoingRequestSafety,
   evaluateTargetSafety,
   normalizeGuardPathname,
   compileBlockedEndpointRules,
-} from '../templates/playwright-qa/support/target-guard.mjs';
+} from '../src/kernel/target-guard.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADV_DIR = path.join(__dirname, 'adversarial');

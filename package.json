@@ -13,6 +13,12 @@
     "url": "https://github.com/seaworld008/ai-test-workbench/issues"
   },
   "type": "module",
+  "exports": {
+    ".": "./src/kernel/index.mjs",
+    "./kernel": "./src/kernel/index.mjs",
+    "./target-guard": "./src/kernel/target-guard.mjs",
+    "./schema-validator": "./src/kernel/schema-validator.mjs"
+  },
   "bin": {
     "ai-test-workbench": "./tools/aitest.mjs",
     "aitw": "./tools/aitest.mjs"
@@ -27,6 +33,8 @@
   "scripts": {
     "test": "node scripts/run-unit-tests.mjs",
     "typecheck": "node scripts/run-typecheck.mjs",
+    "sync:vendor": "node scripts/sync-template-vendor.mjs",
+    "check:vendor": "node scripts/sync-template-vendor.mjs --check",
     "lint:docs": "node scripts/check-docs-and-hygiene.mjs",
     "bench": "node scripts/run-bench.mjs",
     "doctor": "node tools/aitest.mjs doctor",

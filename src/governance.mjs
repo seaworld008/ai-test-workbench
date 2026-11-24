@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
-import { SCHEMA_VERSIONS } from './version.mjs';
+import { SCHEMA_VERSIONS } from './core/version.mjs';
 import {
   BOT_APPROVER_RE,
   GATE_KERNEL_VERSION,
@@ -13,7 +13,7 @@ import {
   resolveGitIdentity,
   signPayloadT1,
   verifyGovernanceLockInQaDir,
-} from '../templates/playwright-qa/support/gate-kernel.mjs';
+} from './kernel/gate-kernel.mjs';
 
 export { PROTECTED_GOVERNANCE_REL_FILES, computeProtectedFileHashes, verifyGovernanceLockInQaDir };
 

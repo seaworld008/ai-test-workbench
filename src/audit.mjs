@@ -23,7 +23,7 @@ import {
   scanSpecFilesFallback,
   verifyGovernanceLockInQaDir,
   verifyLedgerBindingInQaDir,
-} from '../templates/playwright-qa/scripts/audit-results.mjs';
+} from './kernel/gate-kernel.mjs';
 
 export {
   GATE_KERNEL_VERSION,

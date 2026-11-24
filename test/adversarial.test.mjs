@@ -15,7 +15,7 @@ import { redactSecrets } from '../src/proc.mjs';
 import {
   extractOpenApiResponseSchema,
   validateJsonSchema,
-} from '../templates/playwright-qa/support/schema-validator.mjs';
+} from '../src/kernel/schema-validator.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADV_DIR = path.join(__dirname, 'adversarial');

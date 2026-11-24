@@ -11,14 +11,15 @@ import {
   verifyGovernanceLockInQaDir,
 } from './audit.mjs';
 import { generateDiagnosticsMarkdown } from './diagnose.mjs';
-import { redactSecrets, resolvePlaywrightCli } from './proc.mjs';
-import { executeSuiteCore } from './runner.mjs';
-import { SCHEMA_VERSIONS } from './version.mjs';
+import { resolvePlaywrightCli } from './core/playwright-resolve.mjs';
+import { redactSecrets } from './core/redact.mjs';
+import { SCHEMA_VERSIONS } from './core/version.mjs';
 import {
   getFileAtGitRef,
   signPayloadT1,
   verifyPayloadT1,
-} from '../templates/playwright-qa/support/gate-kernel.mjs';
+} from './kernel/gate-kernel.mjs';
+import { executeSuiteCore } from './runner.mjs';
 
 export const MAX_HEAL_ATTEMPTS = 3;
 

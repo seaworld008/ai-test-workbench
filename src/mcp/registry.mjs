@@ -1,6 +1,6 @@
 // @ts-check
 import { MAX_EXPLORE_PAGES } from '../explore.mjs';
-import { validateJsonSchema } from '../../templates/playwright-qa/support/schema-validator.mjs';
+import { validateJsonSchema } from '../kernel/schema-validator.mjs';
 
 /**
  * Single Declarative MCP Tool Registry (`M-08`, `M-14`, `M-15`).

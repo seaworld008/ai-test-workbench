@@ -5,7 +5,7 @@ import { resolveQaDirectory } from './agents.mjs';
 import { computeFlakyStats } from './core/playwright-results.mjs';
 import { SCHEMA_VERSIONS } from './core/version.mjs';
 import { readPerTestLedgerRuns } from './ledger.mjs';
-import { signPayloadT1 } from '../templates/playwright-qa/support/gate-kernel.mjs';
+import { signPayloadT1 } from './kernel/gate-kernel.mjs';
 
 /**
  * Computes historical flaky & failure rates per test from Run Ledger (`R1-2`).

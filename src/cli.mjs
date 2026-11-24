@@ -21,8 +21,9 @@ import { runSuiteCommand } from './runner.mjs';
 import { runSkillInstallCommand } from './skill-install.mjs';
 import { runTraceMatrixCommand } from './traceability.mjs';
 import { runAttestCommand } from './trust.mjs';
+import { runUpgradeCommand } from './upgrade.mjs';
 import { runVerifyChangeCommand } from './verdict.mjs';
-import { WORKBENCH_VERSION } from './version.mjs';
+import { WORKBENCH_VERSION } from './core/version.mjs';
 
 const CLI_OPTION_DEFS = {
   help: { type: /** @type {'boolean'} */ ('boolean'), short: 'h' },
@@ -30,6 +31,7 @@ const CLI_OPTION_DEFS = {
   target: { type: /** @type {'string'} */ ('string') },
   name: { type: /** @type {'string'} */ ('string') },
   'qa-dir': { type: /** @type {'string'} */ ('string') },
+  scope: { type: /** @type {'string'} */ ('string') },
   preset: { type: /** @type {'string'} */ ('string') },
   suite: { type: /** @type {'string'} */ ('string') },
   'base-url': { type: /** @type {'string'} */ ('string') },
@@ -241,6 +243,16 @@ export async function runCli(argv = process.argv.slice(2)) {
           skipInstall: Boolean(v['skip-install']),
           skipBrowser: Boolean(v['skip-browser']),
           bridgeRoot: Boolean(v['bridge-root']),
+        });
+      case 'upgrade':
+        return await runUpgradeCommand({
+          lang,
+          target: typeof v.target === 'string' ? v.target : undefined,
+          qaDir: typeof v['qa-dir'] === 'string' ? v['qa-dir'] : undefined,
+          dryRun: Boolean(v['dry-run']),
+          force: Boolean(v.force),
+          json: Boolean(v.json),
+          scope: typeof v.scope === 'string' ? v.scope : undefined,
         });
       case 'auth-login':
         return await runAuthLoginCommand({

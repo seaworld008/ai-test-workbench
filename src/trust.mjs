@@ -3,13 +3,13 @@ import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { WORKBENCH_VERSION } from './core/version.mjs';
 import {
   canonicalizeJson,
   sha256Hex,
   signPayloadT1,
   verifyPayloadT1,
-} from '../templates/playwright-qa/support/gate-kernel.mjs';
-import { WORKBENCH_VERSION } from './version.mjs';
+} from './kernel/gate-kernel.mjs';
 
 export { canonicalizeJson, signPayloadT1, verifyPayloadT1 };
 

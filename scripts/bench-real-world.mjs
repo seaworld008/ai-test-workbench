@@ -4,8 +4,8 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compareSpecSourcesAst, resolveTypeScriptCompiler } from '../templates/playwright-qa/support/gate/ast-analyzer.mjs';
-import { GATE_KERNEL_VERSION } from '../templates/playwright-qa/support/gate/engine.mjs';
+import { compareSpecSourcesAst, resolveTypeScriptCompiler } from '../src/kernel/gate/ast-analyzer.mjs';
+import { GATE_KERNEL_VERSION } from '../src/kernel/gate/engine.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');

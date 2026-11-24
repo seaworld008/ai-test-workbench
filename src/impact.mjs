@@ -5,7 +5,7 @@ import { resolveQaDirectory } from './agents.mjs';
 import { compileGlob } from './core/glob.mjs';
 import { runProcess } from './core/proc.mjs';
 import { readLedgerHistory } from './ledger.mjs';
-import { resolveGitRoot } from '../templates/playwright-qa/support/gate-kernel.mjs';
+import { resolveGitRoot } from './kernel/gate-kernel.mjs';
 
 const GLOBAL_INFRA_PATTERNS = [
   /(^|\/)package\.json$/i,

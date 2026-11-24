@@ -2,11 +2,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { syncOfficialAgents } from './agents.mjs';
+import { runNpm, runPlaywright, runProcess } from './core/proc.mjs';
+import { WORKBENCH_VERSION } from './core/version.mjs';
 import { inspectBrowserCache } from './doctor.mjs';
 import { ensureInitialGovernanceLock } from './governance.mjs';
-import { runNpm, runPlaywright, runProcess } from './proc.mjs';
-import { syncOfficialAgents } from './agents.mjs';
-import { WORKBENCH_VERSION } from './version.mjs';
+import { writeTemplateManifest } from './upgrade.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKBENCH_ROOT = path.resolve(__dirname, '..');
@@ -370,6 +371,9 @@ export async function runInit(options = {}) {
       fs.writeFileSync(step.dest, step.content, 'utf8');
     }
   }
+
+  // Record per-file template SHA-256 manifest for safe 3-way `aitw upgrade` & accurate `doctor` drift checks
+  writeTemplateManifest(qaDir, plan.map((s) => s.rel));
 
   // Create initial .aitest/governance.lock ONLY if not already present (never overwrites existing human lock!)
   ensureInitialGovernanceLock(qaDir);

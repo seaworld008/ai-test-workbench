@@ -10,7 +10,7 @@ import {
   resolveGitHeadSha,
   sha256Hex,
   signPayloadT1,
-} from '../templates/playwright-qa/support/gate-kernel.mjs';
+} from './kernel/gate-kernel.mjs';
 
 const CROCKFORD_BASE32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 

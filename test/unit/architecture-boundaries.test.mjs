@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import { syncTemplateVendor } from '../../scripts/sync-template-vendor.mjs';
 import { REPO_ROOT } from '../../src/core/version.mjs';
 
-const STATIC_IMPORT_RE = /(?:import|export)\s+(?:[^'"]*\s+from\s+)?['"]([^'"]+)['"]/g;
-const DYNAMIC_IMPORT_RE = /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+const STATIC_FROM_RE = /^[ \t]*(?:import|export)\b[\s\S]*?\bfrom\s*['"]([^'"]+)['"]/gm;
+const SIDE_EFFECT_IMPORT_RE = /^[ \t]*import\s*['"]([^'"]+)['"]/gm;
+const DYNAMIC_IMPORT_RE = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
 
 /**
  * @param {string} dir
@@ -34,7 +36,8 @@ function extractImports(filePath) {
   const raw = fs.readFileSync(filePath, 'utf8');
   const text = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/.*$/gm, '$1');
   const specs = [];
-  for (const m of text.matchAll(STATIC_IMPORT_RE)) specs.push(m[1]);
+  for (const m of text.matchAll(STATIC_FROM_RE)) specs.push(m[1]);
+  for (const m of text.matchAll(SIDE_EFFECT_IMPORT_RE)) specs.push(m[1]);
   for (const m of text.matchAll(DYNAMIC_IMPORT_RE)) specs.push(m[1]);
   return specs;
 }
@@ -117,7 +120,34 @@ test('Architecture boundary: src/core/** only imports node:* or sibling src/core
   assert.deepEqual(cycles, [], `Unexpected circular imports inside src/core/: ${JSON.stringify(cycles)}`);
 });
 
-test('Architecture ratchet: no new src/scripts -> templates inversions or extra src/** circular imports', () => {
+test('Architecture boundary: src/kernel/** only imports node:*, src/core/*, or sibling src/kernel/** with zero cycles', () => {
+  const kernelDir = path.join(REPO_ROOT, 'src', 'kernel');
+  const kernelFiles = walkMjs(kernelDir);
+  assert.ok(kernelFiles.length >= 9, 'Expected authoritative kernel modules under src/kernel/');
+
+  const graph = new Map();
+  for (const file of kernelFiles) {
+    const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
+    const deps = [];
+    for (const spec of extractImports(file)) {
+      if (spec.startsWith('node:')) continue;
+      assert.ok(spec.startsWith('.'), `Forbidden bare package import in ${rel}: "${spec}" (root must be zero-dep)`);
+      const target = resolveRepoRel(file, spec);
+      const allowed = target.startsWith('src/kernel/') || target.startsWith('src/core/');
+      assert.ok(
+        allowed,
+        `Kernel boundary violation: ${rel} imports ${target} (only node:*, src/core/*, src/kernel/* allowed)`
+      );
+      if (target.startsWith('src/kernel/')) deps.push(target);
+    }
+    graph.set(rel, deps);
+  }
+
+  const cycles = findCycles(graph);
+  assert.deepEqual(cycles, [], `Unexpected circular imports inside src/kernel/: ${JSON.stringify(cycles)}`);
+});
+
+test('Architecture boundary: zero src/scripts -> templates inversions and vendor mirror is byte-identical', () => {
   const srcFiles = walkMjs(path.join(REPO_ROOT, 'src'));
   const scriptFiles = walkMjs(path.join(REPO_ROOT, 'scripts'));
 
@@ -134,14 +164,21 @@ test('Architecture ratchet: no new src/scripts -> templates inversions or extra 
     }
   }
 
-  // Ratchet cap: 14 in WU-01 (12 src + 2 scripts), tightened to 0 in WU-02 when src/kernel/ lands.
-  const MAX_ALLOWED_TEMPLATE_INVERSIONS = 14;
-  assert.ok(
-    templateInversions.length <= MAX_ALLOWED_TEMPLATE_INVERSIONS,
-    `Template dependency inversions increased (${templateInversions.length} > ${MAX_ALLOWED_TEMPLATE_INVERSIONS}):\n${templateInversions.join('\n')}`
+  assert.deepEqual(
+    templateInversions,
+    [],
+    `Forbidden src/scripts -> templates dependency inversions found:\n${templateInversions.join('\n')}`
   );
 
-  // Build src/** import graph for cycle ratchet (4 in WU-01 MCP hub/server, tightened to 0 in WU-07).
+  // Enforce byte-identical vendor mirror between src/kernel/ and templates/playwright-qa/support/
+  const vendorCheck = syncTemplateVendor({ checkOnly: true });
+  assert.equal(
+    vendorCheck.ok,
+    true,
+    `Vendored template mirror drifted from src/kernel/: drifted=${JSON.stringify(vendorCheck.drifted)}, stale=${JSON.stringify(vendorCheck.stale)}. Run "npm run sync:vendor".`
+  );
+
+  // Build src/** import graph for cycle ratchet (4 in WU-02 MCP hub/server, tightened to 0 in WU-07).
   const srcGraph = new Map();
   for (const file of srcFiles) {
     const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
