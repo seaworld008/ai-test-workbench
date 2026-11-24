@@ -34,7 +34,7 @@ export function generatePageAriaSpecMarkdown(pageInfo, lang = 'zh') {
 
 /**
  * @typedef {{ route: string, title?: string, breadcrumbs?: string[], tableHeaders?: string[], filterLabels?: string[], readonlyButtons?: string[], mutationButtons?: string[], tableRowCount?: number | null, archetype?: string, tabsExplored?: any[], dialogsExplored?: any[], a11y?: { hasMainLandmark?: boolean, hasH1?: boolean, inputsMissingLabel?: number } | null }} OverviewPage
- * @typedef {{ baseURL?: string, snapshotId?: string, exploredAt?: string, readOnly?: boolean, maxPages?: number, techStack?: string[], authKeyNames?: string[], portals?: Array<{ name: string, mode?: string, id?: string | number, notes?: string }>, pages?: OverviewPage[], endpoints?: Array<{ method: string, endpoint: string, status: number }>, consoleErrors?: Array<{ route?: string, message?: string } | string>, serverErrors?: string[], envelopeErrors?: Array<{ route?: string, method?: string, endpoint?: string, httpStatus?: number, code?: number | null, message?: string | null }>, brokenRoutes?: Array<{ route: string, actualPath?: string | null, reason?: string }>, blockedWriteRequests?: Array<{ method?: string, endpoint?: string, reason?: string | null }>, blockedApiHosts?: string[] }} ExploreTopology
+ * @typedef {{ baseURL?: string, snapshotId?: string, exploredAt?: string, readOnly?: boolean, maxPages?: number, techStack?: string[], authKeyNames?: string[], authRequired?: boolean, loginRoute?: string | null, authRedirectCount?: number, authRedirectRoutes?: string[], firewallAbortedConsoleCount?: number, portals?: Array<{ name: string, mode?: string, id?: string | number, notes?: string }>, pages?: OverviewPage[], endpoints?: Array<{ method: string, endpoint: string, status: number }>, consoleErrors?: Array<{ route?: string, message?: string } | string>, serverErrors?: string[], envelopeErrors?: Array<{ route?: string, method?: string, endpoint?: string, httpStatus?: number, code?: number | null, message?: string | null }>, brokenRoutes?: Array<{ route: string, actualPath?: string | null, reason?: string }>, blockedWriteRequests?: Array<{ method?: string, endpoint?: string, reason?: string | null }>, blockedApiHosts?: string[] }} ExploreTopology
  * @param {ExploreTopology} topology
  * @param {string} [lang]
  */
@@ -49,6 +49,10 @@ export function generateSystemOverviewMarkdown(topology, lang = 'zh') {
   const brokenRoutes = Array.isArray(topology?.brokenRoutes) ? topology.brokenRoutes : [];
   const blockedWrites = Array.isArray(topology?.blockedWriteRequests) ? topology.blockedWriteRequests : [];
   const blockedApiHosts = Array.isArray(topology?.blockedApiHosts) ? topology.blockedApiHosts : [];
+  const authRedirectRoutes = Array.isArray(topology?.authRedirectRoutes) ? topology.authRedirectRoutes : [];
+  const authRedirectCount = Number(topology?.authRedirectCount || authRedirectRoutes.length || 0);
+  const authRequired = Boolean(topology?.authRequired);
+  const firewallAbortedConsoleCount = Number(topology?.firewallAbortedConsoleCount || 0);
   const totalTabsExplored = pages.reduce((s, p) => s + (Array.isArray(p.tabsExplored) ? p.tabsExplored.length : 0), 0);
   const totalDialogsExplored = pages.reduce((s, p) => s + (Array.isArray(p.dialogsExplored) ? p.dialogsExplored.length : 0), 0);
 
@@ -63,7 +67,12 @@ export function generateSystemOverviewMarkdown(topology, lang = 'zh') {
         `- **探索模式**：\`${topology.readOnly ? 'strict-readonly (默认拒绝全部非 GET/HEAD 请求)' : 'standard'}\`（最大页数上限 \`${topology.maxPages || pages.length}\`，已拦截写请求 \`${blockedWrites.length}\` 次）`,
         `- **技术栈探测**：${(topology.techStack || []).join(' / ') || '通用 Web 应用'}`,
         `- **鉴权存储键名（脱敏）**：${(topology.authKeyNames || []).map((k) => `\`${k}\``).join(', ') || '无 / 未登录态'}`,
-        `- **已探索页面数**：\`${pages.length}\` 个路由（页内 Tab \`${totalTabsExplored}\` 次、只读详情弹窗/抽屉 \`${totalDialogsExplored}\` 次、断链/缺模块路由 \`${brokenRoutes.length}\` 个） · **API 端点**：\`${endpoints.length}\` 个 · **预存 Console 错误**：\`${consoleErrors.length}\` · **服务端 5xx**：\`${serverErrors.length}\` · **HTTP 200 包裹业务异常**：\`${envelopeErrors.length}\``,
+        `- **已探索页面数**：\`${pages.length}\` 个路由（页内 Tab \`${totalTabsExplored}\` 次、只读详情弹窗/抽屉 \`${totalDialogsExplored}\` 次、断链/缺模块路由 \`${brokenRoutes.length}\` 个） · **API 端点**：\`${endpoints.length}\` 个 · **预存 Console 错误**：\`${consoleErrors.length}\`${firewallAbortedConsoleCount > 0 ? `（已过滤防火墙自拦截 \`${firewallAbortedConsoleCount}\` 条）` : ''} · **服务端 5xx**：\`${serverErrors.length}\` · **HTTP 200 包裹业务异常**：\`${envelopeErrors.length}\``,
+        ...(authRequired
+          ? [
+              `- **登录态提示**：检测到 \`${authRedirectCount}\` 条受保护路由重定向至 \`${topology.loginRoute || '/login'}\`（如 ${authRedirectRoutes.slice(0, 6).map((r) => `\`${r}\``).join(', ')}）；请先人工运行 \`auth-login\`（或 \`--cdp-url\`）捕获登录会话后再深度探索业务页面。`,
+            ]
+          : []),
         ...(blockedApiHosts.length > 0
           ? [
               `- **独立 API 网关提示**：拦截了跨源 XHR/Fetch 主机 ${blockedApiHosts.map((h) => `\`${h}\``).join(', ')}；若属于当前测试环境后端网关，请将其加入 \`TEST_ALLOWED_HOSTS\`。`,
@@ -76,7 +85,12 @@ export function generateSystemOverviewMarkdown(topology, lang = 'zh') {
         `- **Mode**: \`${topology.readOnly ? 'strict-readonly (default-deny non-GET/HEAD)' : 'standard'}\` (max pages \`${topology.maxPages || pages.length}\`, blocked write attempts \`${blockedWrites.length}\`)`,
         `- **Detected Stack**: ${(topology.techStack || []).join(' / ') || 'Standard Web App'}`,
         `- **Auth Storage Keys (Names Only)**: ${(topology.authKeyNames || []).map((k) => `\`${k}\``).join(', ') || 'None / Anonymous'}`,
-        `- **Pages Explored**: \`${pages.length}\` (tabs clicked \`${totalTabsExplored}\`, read-only dialogs/drawers \`${totalDialogsExplored}\`, broken routes \`${brokenRoutes.length}\`) · **API Endpoints**: \`${endpoints.length}\` · **Console Errors**: \`${consoleErrors.length}\` · **Server 5xx**: \`${serverErrors.length}\` · **HTTP 200 Envelope Errors**: \`${envelopeErrors.length}\``,
+        `- **Pages Explored**: \`${pages.length}\` (tabs clicked \`${totalTabsExplored}\`, read-only dialogs/drawers \`${totalDialogsExplored}\`, broken routes \`${brokenRoutes.length}\`) · **API Endpoints**: \`${endpoints.length}\` · **Console Errors**: \`${consoleErrors.length}\`${firewallAbortedConsoleCount > 0 ? ` (filtered \`${firewallAbortedConsoleCount}\` self-inflicted firewall aborts)` : ''} · **Server 5xx**: \`${serverErrors.length}\` · **HTTP 200 Envelope Errors**: \`${envelopeErrors.length}\``,
+        ...(authRequired
+          ? [
+              `- **Authentication Required**: Detected \`${authRedirectCount}\` protected route(s) redirecting to \`${topology.loginRoute || '/login'}\` (${authRedirectRoutes.slice(0, 6).map((r) => `\`${r}\``).join(', ')}); capture a session via \`auth-login\` (or \`--cdp-url\`) before crawling authenticated views.`,
+            ]
+          : []),
         ...(blockedApiHosts.length > 0
           ? [
               `- **Separated API Gateway Hint**: Blocked cross-origin XHR/fetch host(s) ${blockedApiHosts.map((h) => `\`${h}\``).join(', ')}; if these belong to your test API gateway, add them to \`TEST_ALLOWED_HOSTS\`.`,
@@ -187,4 +201,61 @@ export function generateSystemOverviewMarkdown(topology, lang = 'zh') {
   }
   lines.push('');
   return lines.join('\n');
+}
+
+/**
+ * Derives the initial crawl entry path from `--entry-path` or any non-root path in `baseURL`.
+ * @param {string} baseURL
+ * @param {string | undefined} explicitEntryPath
+ */
+export function resolveExploreEntryPath(baseURL, explicitEntryPath) {
+  if (explicitEntryPath) return String(explicitEntryPath);
+  try {
+    const parsed = new URL(baseURL);
+    if (parsed.pathname && parsed.pathname !== '/') return parsed.pathname + parsed.search;
+  } catch {
+    // fallback '/'
+  }
+  return '/';
+}
+
+/**
+ * Builds the uniform `--json` CLI summary envelope for `explore`.
+ * @param {any} topology
+ * @param {{ entryPath: string, dryRun?: boolean, topologyPath?: string, overviewPath?: string, pagesSpecDir?: string, codeMapSync?: any }} meta
+ */
+export function buildExploreCliSummary(topology, meta) {
+  const tabsExploredCount = topology.pages.reduce((/** @type {number} */ s, /** @type {any} */ p) => s + (p.tabsExplored?.length || 0), 0);
+  const dialogsExploredCount = topology.pages.reduce((/** @type {number} */ s, /** @type {any} */ p) => s + (p.dialogsExplored?.length || 0), 0);
+  const base = {
+    ok: true,
+    exitCode: 0,
+    snapshotId: topology.snapshotId,
+    entryPath: meta.entryPath,
+    authRequired: Boolean(topology.authRequired),
+    loginRoute: topology.loginRoute ?? null,
+    authRedirectCount: Number(topology.authRedirectCount || 0),
+    pagesCount: topology.pages.length,
+    tabsExploredCount,
+    dialogsExploredCount,
+    endpointsCount: topology.endpoints.length,
+    blockedWritesCount: topology.blockedWriteRequests.length,
+    firewallAbortedConsoleCount: Number(topology.firewallAbortedConsoleCount || 0),
+  };
+  if (meta.dryRun) return { ...base, dryRun: true };
+  return {
+    ...base,
+    authRedirectRoutes: topology.authRedirectRoutes || [],
+    topologyPath: meta.topologyPath,
+    overviewPath: meta.overviewPath,
+    pagesSpecDir: meta.pagesSpecDir,
+    codeMapPath: meta.codeMapSync?.codeMapPath,
+    systemMapMdPath: meta.codeMapSync?.systemMapMdPath,
+    revision: meta.codeMapSync?.revision,
+    portalsCount: topology.portals.length,
+    brokenRoutesCount: topology.brokenRoutes.length,
+    envelopeErrorsCount: topology.envelopeErrors.length,
+    consoleErrorsCount: topology.consoleErrors.length,
+    blockedApiHosts: topology.blockedApiHosts,
+  };
 }

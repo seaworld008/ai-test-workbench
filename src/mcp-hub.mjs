@@ -291,7 +291,7 @@ export async function runMcpCommand(options = {}) {
   if (action === 'presets') {
     const summary = getMcpPresetsSummary();
     if (options.json) {
-      console.log(JSON.stringify(summary, null, 2));
+      console.log(JSON.stringify({ ok: true, exitCode: 0, ...summary }, null, 2));
       return 0;
     }
     console.log(
@@ -352,8 +352,9 @@ export async function runMcpCommand(options = {}) {
       );
     }
 
+    const exitCode = audit.ok ? 0 : 2;
     if (options.json) {
-      console.log(JSON.stringify({ ...audit, mcpLockPath: fs.existsSync(mcpLockPath) ? mcpLockPath : null }, null, 2));
+      console.log(JSON.stringify({ ...audit, exitCode, mcpLockPath: fs.existsSync(mcpLockPath) ? mcpLockPath : null }, null, 2));
     } else {
       console.log(
         lang === 'zh'
@@ -364,7 +365,7 @@ export async function runMcpCommand(options = {}) {
       for (const iss of audit.issues) console.error(`  [FAIL] ${iss}`);
       if (audit.ok) console.log('  [OK] All MCP configurations enforce supply-chain, read-only & secret hygiene guardrails.');
     }
-    return audit.ok ? 0 : 2;
+    return exitCode;
   }
 
   if (action === 'add') {
@@ -404,7 +405,7 @@ export async function runMcpCommand(options = {}) {
     }
 
     if (options.json) {
-      console.log(JSON.stringify({ mcpJsonPath, codexTomlPath, envExamplePath, added: jsonMerge.added, kept: jsonMerge.kept }, null, 2));
+      console.log(JSON.stringify({ ok: true, exitCode: 0, mcpJsonPath, codexTomlPath, envExamplePath, added: jsonMerge.added, kept: jsonMerge.kept }, null, 2));
     } else {
       console.log(
         lang === 'zh'

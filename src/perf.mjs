@@ -134,6 +134,8 @@ export async function runPerfCommand(options = {}) {
     apiBenchmark,
   };
 
+  const exitCode = options.enforceBudget && !evalOut.ok ? 1 : 0;
+
   if (!options.dryRun) {
     const reportsDir = path.join(qaDir, 'reports');
     fs.mkdirSync(reportsDir, { recursive: true });
@@ -147,7 +149,7 @@ export async function runPerfCommand(options = {}) {
     }
 
     if (options.json) {
-      console.log(JSON.stringify({ jsonPath, mdPath, ...report }, null, 2));
+      console.log(JSON.stringify({ ok: exitCode === 0, exitCode, jsonPath, mdPath, ...report }, null, 2));
     } else {
       console.log(
         lang === 'zh'
@@ -159,11 +161,8 @@ export async function runPerfCommand(options = {}) {
       for (const v of evalOut.violations) console.warn(`  [PERF WARN] ${v}`);
     }
   } else if (options.json) {
-    console.log(JSON.stringify({ dryRun: true, ...report }, null, 2));
+    console.log(JSON.stringify({ ok: exitCode === 0, exitCode, dryRun: true, ...report }, null, 2));
   }
 
-  if (options.enforceBudget && !evalOut.ok) {
-    return 1;
-  }
-  return 0;
+  return exitCode;
 }

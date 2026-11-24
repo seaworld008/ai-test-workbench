@@ -147,6 +147,26 @@ test('CLI per-command strict option tables reject unrelated cross-command flags 
     } finally {
       if (prevMcp !== undefined) process.env.AITEST_MCP_SUBPROCESS = prevMcp;
     }
+
+    // 4. `governance status --json` exits 2 (blocked) and emits `exitCode: 2` when governance.lock is missing
+    const lockPath = path.join(tmpRepo, 'qa', '.aitest', 'governance.lock');
+    fs.rmSync(lockPath, { force: true });
+    const origLog = console.log;
+    const stdoutLines = [];
+    console.log = (...args) => stdoutLines.push(args.join(' '));
+    try {
+      const govBlockedCode = await runCli(['governance', 'status', '--target', tmpRepo, '--json']);
+      assert.equal(govBlockedCode, 2, 'governance status must exit 2 on blocked status');
+      const govJson = JSON.parse(stdoutLines.join('\n'));
+      assert.equal(govJson.ok, false);
+      assert.equal(govJson.status, 'blocked');
+      assert.equal(govJson.exitCode, 2);
+    } finally {
+      console.log = origLog;
+    }
+
+    // 5. `explore` accepts positive boolean flags (--explore-portals/--explore-tabs/--explore-dialogs)
+    assert.equal(await runCli(['explore', '--explore-portals', '--explore-tabs', '--explore-dialogs', '--help']), 0);
   } finally {
     console.error = origErr;
     fs.rmSync(tmpRepo, { recursive: true, force: true });

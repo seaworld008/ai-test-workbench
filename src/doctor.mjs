@@ -308,9 +308,10 @@ export async function runDoctor(options = {}) {
 
   const failCount = checks.filter((c) => c.status === 'FAIL').length;
   const warnCount = checks.filter((c) => c.status === 'WARN').length;
+  const exitCode = failCount === 0 ? 0 : 1;
 
   if (options.json) {
-    console.log(JSON.stringify({ ok: failCount === 0, failCount, warnCount, checks }, null, 2));
+    console.log(JSON.stringify({ ok: exitCode === 0, exitCode, failCount, warnCount, checks }, null, 2));
   } else {
     console.log(`\n=== ${lang === 'zh' ? 'AI Test Workbench 环境体检 (doctor)' : 'AI Test Workbench Environment Doctor'} ===`);
     for (const c of checks) {
@@ -322,5 +323,5 @@ export async function runDoctor(options = {}) {
     );
   }
 
-  return failCount === 0 ? 0 : 1;
+  return exitCode;
 }

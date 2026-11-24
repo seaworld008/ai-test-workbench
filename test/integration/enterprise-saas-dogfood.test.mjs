@@ -296,3 +296,107 @@ test('runExploreCommand deep-explores multi-portal switcher, tabs, read-only dia
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test('runExploreCommand preserves base-url entryPath, short-circuits unauthenticated login redirect storms, filters firewall console noise, and emits uniform JSON envelope', async (t) => {
+  if (!hasPlaywrightChromium(TEMPLATE_MODULES)) {
+    t.skip('Playwright Chromium binary not installed in this environment');
+    return;
+  }
+
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    if (u.pathname !== '/login') {
+      res.writeHead(302, { Location: '/login' });
+      res.end();
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(`<!doctype html>
+<html>
+<head><title>SaaS Login</title></head>
+<body>
+  <main>
+    <h3>Portal Login</h3>
+    <input type="text" placeholder="Phone" />
+    <input type="password" placeholder="Password" />
+    <button type="submit">Sign In</button>
+    <nav>
+      <a href="/admin/users">Users</a>
+      <a href="/admin/roles">Roles</a>
+      <a href="/admin/audit">Audit</a>
+      <a href="/admin/billing">Billing</a>
+      <a href="/admin/tenants">Tenants</a>
+      <a href="/admin/settings">Settings</a>
+    </nav>
+  </main>
+  <script>
+    // Triggers read-only firewall block (POST) which causes Chromium net::ERR_BLOCKED_BY_CLIENT console error
+    fetch('/api/telemetry', { method: 'POST', body: '{}' }).catch(() => {});
+  </script>
+</body>
+</html>`);
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const addr = server.address();
+  const baseURL = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aitest-auth-redirect-explore-'));
+  const origLog = console.log;
+  const captured = [];
+  console.log = (...args) => captured.push(args.join(' '));
+
+  try {
+    await runCli(['init', '--name', 'auth-redirect-mock', '--target', tmpDir, '--skip-install', '--loop', 'none']);
+    fs.symlinkSync(TEMPLATE_MODULES, path.join(tmpDir, 'qa', 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
+    fs.writeFileSync(
+      path.join(tmpDir, 'qa', '.env'),
+      `TEST_ENV=local\nTEST_BASE_URL=${baseURL}\nTEST_ALLOWED_HOSTS=127.0.0.1,localhost\nREQUIRE_TEST_TARGET=1\n`,
+      'utf8'
+    );
+    captured.length = 0;
+
+    const code = await runCli([
+      'explore',
+      '--target',
+      tmpDir,
+      '--base-url',
+      `${baseURL}/overview/platform`,
+      '--max-pages',
+      '15',
+      '--explore-portals',
+      '--explore-tabs',
+      '--explore-dialogs',
+      '--json',
+    ]);
+    assert.equal(code, 0);
+
+    const parsed = JSON.parse(captured.join('\n'));
+    assert.equal(parsed.ok, true);
+    assert.equal(parsed.exitCode, 0);
+    assert.equal(parsed.entryPath, '/overview/platform');
+    assert.equal(parsed.authRequired, true);
+    assert.equal(parsed.loginRoute, '/login');
+    assert.ok(parsed.authRedirectCount >= 4, `Expected >=4 auth redirects detected, got ${parsed.authRedirectCount}`);
+    assert.ok(parsed.pagesCount <= 3, `Expected login redirect deduplication to keep pagesCount <= 3, got ${parsed.pagesCount}`);
+    assert.ok(parsed.blockedWritesCount >= 1, 'Expected POST telemetry request to be blocked by read-only firewall');
+    assert.equal(parsed.consoleErrorsCount, 0, 'Self-inflicted ERR_BLOCKED_BY_CLIENT firewall errors must not pollute app consoleErrors');
+    assert.ok(parsed.firewallAbortedConsoleCount >= 1, 'Expected firewallAbortedConsoleCount >= 1');
+
+    const overviewZh = generateSystemOverviewMarkdown(
+      JSON.parse(fs.readFileSync(path.join(tmpDir, 'qa', 'reports', 'system-topology.json'), 'utf8')),
+      'zh'
+    );
+    assert.match(overviewZh, /登录态提示.*\/login/);
+    assert.match(overviewZh, /已过滤防火墙自拦截/);
+    const overviewEn = generateSystemOverviewMarkdown(
+      JSON.parse(fs.readFileSync(path.join(tmpDir, 'qa', 'reports', 'system-topology.json'), 'utf8')),
+      'en'
+    );
+    assert.match(overviewEn, /Authentication Required.*\/login/);
+    assert.match(overviewEn, /self-inflicted firewall aborts/);
+  } finally {
+    console.log = origLog;
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

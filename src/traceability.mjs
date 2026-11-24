@@ -188,7 +188,7 @@ export async function runTraceMatrixCommand(options = {}) {
   }
 
   if (options.json) {
-    console.log(JSON.stringify(matrix, null, 2));
+    console.log(JSON.stringify({ ok: true, exitCode: 0, ...matrix }, null, 2));
     return 0;
   }
   console.log(

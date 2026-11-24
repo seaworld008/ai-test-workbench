@@ -202,7 +202,7 @@ export async function runFlakyCommand(options = {}) {
   const out = { ...report, syncResult };
 
   if (options.json) {
-    console.log(JSON.stringify(out, null, 2));
+    console.log(JSON.stringify({ ok: true, exitCode: 0, ...out }, null, 2));
     return 0;
   }
 

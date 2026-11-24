@@ -6,7 +6,12 @@ import { resolveQaDirectory } from './agents.mjs';
 import { syncLivingCodeMap } from './codemap.mjs';
 import { resolvePlaywrightPackage } from './core/playwright-resolve.mjs';
 import { executeExploreCrawl } from './explore/crawler.mjs';
-import { generatePageAriaSpecMarkdown, generateSystemOverviewMarkdown } from './explore/reporter.mjs';
+import {
+  buildExploreCliSummary,
+  generatePageAriaSpecMarkdown,
+  generateSystemOverviewMarkdown,
+  resolveExploreEntryPath,
+} from './explore/reporter.mjs';
 import {
   DEFAULT_EXPLORE_PAGES,
   MAX_EXPLORE_PAGES,
@@ -108,7 +113,7 @@ export async function runExploreCommand(options = {}) {
   const maxTabsPerPage = Math.max(0, Math.min(12, Number(options.maxTabsPerPage ?? 6)));
   const maxDialogsPerPage = Math.max(0, Math.min(5, Number(options.maxDialogsPerPage ?? 2)));
   const maxPortals = Math.max(1, Math.min(5, Number(options.maxPortals ?? 3)));
-  const entryPath = options.entryPath ? String(options.entryPath) : '/';
+  const entryPath = resolveExploreEntryPath(safety.baseURL, options.entryPath);
   const userAuthPath = path.join(qaDir, 'playwright', '.auth', 'user.json');
   const sessionAuthPath = path.join(qaDir, 'playwright', '.auth', 'session.json');
   const sessionData = loadJsonIfValid(sessionAuthPath);
@@ -152,19 +157,7 @@ export async function runExploreCommand(options = {}) {
 
   if (options.dryRun) {
     if (options.json) {
-      console.log(
-        JSON.stringify(
-          {
-            dryRun: true,
-            snapshotId: topology.snapshotId,
-            pagesCount: topology.pages.length,
-            endpointsCount: topology.endpoints.length,
-            blockedWritesCount: topology.blockedWriteRequests.length,
-          },
-          null,
-          2
-        )
-      );
+      console.log(JSON.stringify(buildExploreCliSummary(topology, { entryPath, dryRun: true }), null, 2));
     }
     return 0;
   }
@@ -190,40 +183,29 @@ export async function runExploreCommand(options = {}) {
     syncImpact: !options.noSyncImpact,
   });
 
-  const totalDialogsExplored = topology.pages.reduce((s, p) => s + (p.dialogsExplored?.length || 0), 0);
-  const totalTabsExplored = topology.pages.reduce((s, p) => s + (p.tabsExplored?.length || 0), 0);
+  const summary = buildExploreCliSummary(topology, {
+    entryPath,
+    topologyPath,
+    overviewPath,
+    pagesSpecDir,
+    codeMapSync,
+  });
 
   if (options.json) {
-    console.log(
-      JSON.stringify(
-        {
-          snapshotId: topology.snapshotId,
-          topologyPath,
-          overviewPath,
-          pagesSpecDir,
-          codeMapPath: codeMapSync.codeMapPath,
-          systemMapMdPath: codeMapSync.systemMapMdPath,
-          revision: codeMapSync.revision,
-          pagesCount: topology.pages.length,
-          portalsCount: topology.portals.length,
-          tabsExploredCount: totalTabsExplored,
-          dialogsExploredCount: totalDialogsExplored,
-          brokenRoutesCount: topology.brokenRoutes.length,
-          envelopeErrorsCount: topology.envelopeErrors.length,
-          blockedApiHosts: topology.blockedApiHosts,
-          endpointsCount: topology.endpoints.length,
-          blockedWritesCount: topology.blockedWriteRequests.length,
-        },
-        null,
-        2
-      )
-    );
+    console.log(JSON.stringify(summary, null, 2));
   } else {
     console.log(
       lang === 'zh'
-        ? `\n[Explore] 从 0 到 1 只读探索完成 (snapshot=${topology.snapshotId})：覆盖 ${topology.portals.length} 个门户上下文、${topology.pages.length} 个路由（Tab ${totalTabsExplored} 次 / 只读弹窗 ${totalDialogsExplored} 次 / 断链 ${topology.brokenRoutes.length} 个）、${topology.endpoints.length} 个脱敏 API 端点（包裹异常 ${topology.envelopeErrors.length} 次，拦截写请求 ${topology.blockedWriteRequests.length} 次），同步活体知识图谱 (Revision #${codeMapSync.revision})。`
-        : `\n[Explore] Zero-to-one read-only exploration complete (snapshot=${topology.snapshotId}): ${topology.portals.length} portal(s), ${topology.pages.length} route(s) (tabs=${totalTabsExplored}, readonly dialogs=${totalDialogsExplored}, broken=${topology.brokenRoutes.length}), ${topology.endpoints.length} redacted API endpoint(s) (envelopeErrors=${topology.envelopeErrors.length}, blockedWrites=${topology.blockedWriteRequests.length}), synced Living Code Map (Revision #${codeMapSync.revision}).`
+        ? `\n[Explore] 从 0 到 1 只读探索完成 (snapshot=${topology.snapshotId})：覆盖 ${topology.portals.length} 个门户上下文、${topology.pages.length} 个路由（Tab ${summary.tabsExploredCount} 次 / 只读弹窗 ${summary.dialogsExploredCount} 次 / 断链 ${topology.brokenRoutes.length} 个）、${topology.endpoints.length} 个脱敏 API 端点（包裹异常 ${topology.envelopeErrors.length} 次，拦截写请求 ${topology.blockedWriteRequests.length} 次），同步活体知识图谱 (Revision #${codeMapSync.revision})。`
+        : `\n[Explore] Zero-to-one read-only exploration complete (snapshot=${topology.snapshotId}): ${topology.portals.length} portal(s), ${topology.pages.length} route(s) (tabs=${summary.tabsExploredCount}, readonly dialogs=${summary.dialogsExploredCount}, broken=${topology.brokenRoutes.length}), ${topology.endpoints.length} redacted API endpoint(s) (envelopeErrors=${topology.envelopeErrors.length}, blockedWrites=${topology.blockedWriteRequests.length}), synced Living Code Map (Revision #${codeMapSync.revision}).`
     );
+    if (topology.authRequired) {
+      console.warn(
+        lang === 'zh'
+          ? `  [鉴权提示] 检测到 ${topology.authRedirectCount} 条受保护路由重定向至登录页 (${topology.loginRoute || '/login'})；请先人工运行 auth-login（或 --cdp-url）保存会话后再探索业务页面。`
+          : `  [Auth Hint] Detected ${topology.authRedirectCount} protected route(s) redirecting to ${topology.loginRoute || '/login'}; capture an authenticated session via auth-login (or --cdp-url) before crawling authenticated pages.`
+      );
+    }
     if (topology.blockedApiHosts.length > 0) {
       console.warn(
         lang === 'zh'

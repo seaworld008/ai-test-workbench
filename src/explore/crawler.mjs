@@ -2,7 +2,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { redactSecrets } from '../core/redact.mjs';
-import { evaluateExploreRequestSafety } from '../origin-guard.mjs';
 import {
   capturePageSnapshot,
   discoverPortalSwitcherOptions,
@@ -12,13 +11,11 @@ import {
   switchPortalOption,
   waitPageSettled,
 } from './dom-probes.mjs';
+import { attachExploreObservers } from './observers.mjs';
 import {
   classifyActionSafety,
   createStratifiedRouteQueue,
-  detectEnvelopeBusinessError,
   detectPageArchetype,
-  detectUrlQueryAnomalies,
-  redactEndpointUrl,
   sanitizeUntrustedDomText,
 } from './safety.mjs';
 
@@ -81,6 +78,11 @@ export async function executeExploreCrawl({
     queryAnomalies: /** @type {Array<{ route: string, detail: string, endpoint: string }>} */ ([]),
     duplicateWaterfalls: /** @type {Array<{ route: string, endpoint: string, count: number }>} */ ([]),
     consoleErrors: /** @type {Array<{ route: string, message: string }>} */ ([]),
+    firewallAbortedConsoleCount: 0,
+    authRequired: false,
+    loginRoute: /** @type {string | null} */ (null),
+    authRedirectCount: 0,
+    authRedirectRoutes: /** @type {string[]} */ ([]),
     serverErrors: /** @type {string[]} */ ([]),
     waitNotes: /** @type {Array<{ route: string, stage: string, note: string }>} */ ([]),
   };
@@ -95,153 +97,15 @@ export async function executeExploreCrawl({
   }
 
   const context = await browser.newContext(contextOpts);
-
-  // Block non-allowlisted WebSockets during exploration (`E-05`)
-  if (typeof context.routeWebSocket === 'function') {
-    await context.routeWebSocket('**/*', (/** @type {any} */ ws) => {
-      const check = evaluateExploreRequestSafety('GET', ws.url(), null, guardConfig);
-      if (check.blocked) {
-        if (topology.blockedWriteRequests.length < 50) {
-          topology.blockedWriteRequests.push({
-            method: 'WS',
-            endpoint: redactEndpointUrl(ws.url()),
-            reason: check.reason,
-          });
-        }
-        void ws.close({ code: 1008, reason: 'Blocked by Explore Firewall' });
-        return;
-      }
-      ws.connectToServer();
-    });
-  }
-
-  // Block sendBeacon writes & restore optional sessionStorage
-  await context.addInitScript(
-    (/** @type {{ sessionPayload: any }} */ { sessionPayload }) => {
-      if (navigator && typeof navigator.sendBeacon === 'function') {
-        navigator.sendBeacon = () => false;
-      }
-      if (sessionPayload?.origin && Array.isArray(sessionPayload.entries) && window.location.origin === sessionPayload.origin) {
-        for (const [k, v] of sessionPayload.entries) {
-          window.sessionStorage.setItem(k, v);
-        }
-      }
-    },
-    { sessionPayload: sessionData }
-  );
-
-  /** @type {Set<string>} */
-  const blockedApiHostSet = new Set();
-  await context.route('**/*', async (/** @type {any} */ route) => {
-    const req = route.request();
-    const method = req.method().toUpperCase();
-    const url = req.url();
-    const postData = req.postData() || null;
-    const check = evaluateExploreRequestSafety(method, url, postData, guardConfig);
-    if (check.blocked) {
-      if ((req.resourceType() === 'xhr' || req.resourceType() === 'fetch') && /allowlist|not in allowed/i.test(String(check.reason || ''))) {
-        try {
-          const h = new URL(url).hostname.toLowerCase();
-          if (h && h !== new URL(safety.baseURL).hostname.toLowerCase()) blockedApiHostSet.add(h);
-        } catch {
-          // ignore
-        }
-      }
-      if (topology.blockedWriteRequests.length < 50) {
-        topology.blockedWriteRequests.push({
-          method,
-          endpoint: redactEndpointUrl(url),
-          reason: check.reason,
-        });
-      }
-      await route.abort('blockedbyclient');
-      return;
-    }
-    await route.continue();
+  const observers = await attachExploreObservers({
+    context,
+    safety,
+    guardConfig,
+    sessionData,
+    topology,
+    entryPath,
   });
-
-  const page = await context.newPage();
-  let activeRouteLabel = entryPath;
-  /** @type {Set<string>} */
-  const seenEndpointKeys = new Set();
-  /** @type {Map<string, number>} */
-  let routeApiCounts = new Map();
-  /** @type {Set<string>} */
-  const seenAnomalyKeys = new Set();
-
-  page.on('pageerror', (/** @type {any} */ err) => {
-    topology.consoleErrors.push({
-      route: activeRouteLabel,
-      message: redactSecrets(err?.message || String(err)),
-    });
-  });
-
-  page.on('console', (/** @type {any} */ msg) => {
-    if (msg.type() === 'error') {
-      topology.consoleErrors.push({
-        route: activeRouteLabel,
-        message: redactSecrets(msg.text()),
-      });
-    }
-  });
-
-  page.on('response', (/** @type {any} */ res) => {
-    const status = res.status();
-    const reqType = res.request().resourceType();
-    const url = res.url();
-    if (status >= 500) {
-      topology.serverErrors.push(`${status} ${res.request().method()} ${redactEndpointUrl(url)}`);
-    }
-    if (reqType === 'xhr' || reqType === 'fetch') {
-      const cleanEp = redactEndpointUrl(url);
-      const key = `${res.request().method()} ${cleanEp} ${status}`;
-      if (!seenEndpointKeys.has(key)) {
-        seenEndpointKeys.add(key);
-        topology.endpoints.push({
-          method: res.request().method(),
-          endpoint: cleanEp,
-          status,
-        });
-      }
-      const contentType = String(res.headers()?.['content-type'] || '');
-      if (status >= 200 && status < 400 && /application\/json/i.test(contentType)) {
-        const capturedRoute = activeRouteLabel;
-        const capturedMethod = res.request().method();
-        void res
-          .json()
-          .then((/** @type {any} */ body) => {
-            const envErr = detectEnvelopeBusinessError(status, body);
-            if (envErr.isError && topology.envelopeErrors.length < 50) {
-              topology.envelopeErrors.push({
-                route: capturedRoute,
-                method: capturedMethod,
-                endpoint: cleanEp,
-                httpStatus: status,
-                code: envErr.code,
-                message: envErr.message,
-              });
-            }
-          })
-          .catch(() => {});
-      }
-      if (res.request().method().toUpperCase() === 'GET') {
-        let pathnameOnly = cleanEp;
-        try {
-          pathnameOnly = new URL(url).pathname;
-        } catch {
-          // keep cleanEp
-        }
-        routeApiCounts.set(pathnameOnly, (routeApiCounts.get(pathnameOnly) || 0) + 1);
-      }
-      for (const detail of detectUrlQueryAnomalies(url)) {
-        const aKey = `${activeRouteLabel}:${detail}`;
-        if (!seenAnomalyKeys.has(aKey)) {
-          seenAnomalyKeys.add(aKey);
-          topology.queryAnomalies.push({ route: activeRouteLabel, detail, endpoint: cleanEp });
-        }
-      }
-    }
-  });
+  const { page } = observers;
 
   /** @type {Set<string>} */
   const visited = new Set();
@@ -258,6 +122,8 @@ export async function executeExploreCrawl({
     routeQueue.enqueue(initialRoute);
     let crawledInPortal = 0;
     let effectivePortalBudget = portalPageBudget;
+    let consecutiveAuthRedirects = 0;
+    let capturedAuthPortalOnce = false;
     /** @type {{ selector: string | null, options: string[] }} */
     let switcherInfo = { selector: null, options: [] };
 
@@ -270,8 +136,7 @@ export async function executeExploreCrawl({
       const visitKey = `${portalLabel}::${normalizedKey}`;
       if (visited.has(visitKey)) continue;
       visited.add(visitKey);
-      activeRouteLabel = normalizedKey;
-      routeApiCounts = new Map();
+      observers.beginRoute(normalizedKey);
 
       try {
         if (crawledInPortal > 0) {
@@ -383,8 +248,9 @@ export async function executeExploreCrawl({
         }
       }
 
-      const apisObserved = [...routeApiCounts.keys()];
-      for (const [epPath, count] of routeApiCounts.entries()) {
+      const currentApiCounts = observers.getRouteApiCounts();
+      const apisObserved = [...currentApiCounts.keys()];
+      for (const [epPath, count] of currentApiCounts.entries()) {
         if (count >= 2) {
           topology.duplicateWaterfalls.push({ route: normalizedKey, endpoint: epPath, count });
         }
@@ -417,8 +283,44 @@ export async function executeExploreCrawl({
         archetype: '',
       };
       pageEntry.archetype = detectPageArchetype(pageEntry);
-      topology.pages.push(pageEntry);
-      crawledInPortal += 1;
+
+      const landedOnLogin =
+        Boolean(snap.actualPath) &&
+        (pageEntry.archetype === 'auth-portal' || /\/(login|signin|sso|auth)\b/i.test(snap.actualPath));
+      const isAuthRedirect = landedOnLogin && snap.actualPath !== expectedPathname;
+
+      if (isAuthRedirect) {
+        topology.authRedirectCount += 1;
+        if (!topology.authRedirectRoutes.includes(normalizedKey)) {
+          topology.authRedirectRoutes.push(normalizedKey);
+        }
+        if (!topology.loginRoute) {
+          topology.loginRoute = snap.actualPath;
+        }
+        if (crawledInPortal === 0) {
+          topology.authRequired = true;
+        }
+        consecutiveAuthRedirects += 1;
+      } else {
+        consecutiveAuthRedirects = 0;
+      }
+
+      const isDuplicateLoginRedirect = isAuthRedirect && capturedAuthPortalOnce;
+      if (landedOnLogin) {
+        capturedAuthPortalOnce = true;
+        if (!topology.loginRoute && snap.actualPath) topology.loginRoute = snap.actualPath;
+      }
+
+      if (!isDuplicateLoginRedirect) {
+        topology.pages.push(pageEntry);
+        crawledInPortal += 1;
+      }
+
+      // Stop burning page budget when an unauthenticated session redirects repeatedly to the same login screen
+      if (consecutiveAuthRedirects >= 4) {
+        topology.authRequired = true;
+        break;
+      }
 
       for (const rawHref of snap.discoveredLinks) {
         try {
@@ -466,7 +368,7 @@ export async function executeExploreCrawl({
 
   topology.techStack = [...stackSet];
   topology.authKeyNames = [...authKeysSet];
-  topology.blockedApiHosts = [...blockedApiHostSet].sort();
+  topology.blockedApiHosts = observers.getBlockedApiHosts();
   topology.portals =
     portalMap.size > 0
       ? [...portalMap.values()]

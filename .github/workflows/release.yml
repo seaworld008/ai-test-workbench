@@ -1,6 +1,6 @@
 name: Release npm Package
 
-# Triggered ONLY when a human pushes a semver release tag (e.g., v5.1.1).
+# Triggered ONLY when a human pushes a semver release tag (e.g., v6.0.0).
 # Trusted Publishing (OIDC) is active on npmjs.com:
 #   - Package: ai-test-workbench
 #   - Repository: seaworld008/ai-test-workbench
@@ -44,14 +44,18 @@ jobs:
             exit 1
           fi
 
+      - name: Install Root Dev Dependencies (Strict TypeCheck)
+        run: npm ci --no-audit --no-fund
+
       - name: Install QA Template Locked Dependencies & Chromium
         working-directory: templates/playwright-qa
         run: |
           npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
 
-      - name: Run Full 7-Command Verification Gate
+      - name: Run Full 8-Command Verification Gate
         run: |
+          npm run check:vendor
           npm run lint:docs
           npm run typecheck
           npm test

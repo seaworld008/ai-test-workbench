@@ -760,7 +760,7 @@ export async function runImpactCommand(options = {}) {
   });
 
   if (options.json) {
-    console.log(JSON.stringify(impact, null, 2));
+    console.log(JSON.stringify({ ok: true, exitCode: 0, ...impact }, null, 2));
     return 0;
   }
 

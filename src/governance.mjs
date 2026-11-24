@@ -128,14 +128,15 @@ export async function runGovernanceCommand(options = {}) {
 
   if (action === 'status' || action === 'verify') {
     const check = verifyGovernanceLockInQaDir(qaDir);
+    const exitCode = check.ok ? 0 : check.status === 'blocked' ? 2 : 1;
     if (options.json) {
-      console.log(JSON.stringify(check, null, 2));
-      return check.ok ? 0 : 1;
+      console.log(JSON.stringify({ ...check, exitCode }, null, 2));
+      return exitCode;
     }
     for (const w of check.warnings || []) console.warn(`[WARN] ${w}`);
     if (!check.ok) {
       for (const e of check.errors) console.error(`[FAIL] ${e}`);
-      return 1;
+      return exitCode;
     }
     console.log(
       check.enforced
@@ -184,6 +185,7 @@ export async function runGovernanceCommand(options = {}) {
     const written = writeGovernanceLock(qaDir, { approvedBy: by, reason, source: 'human-cli' });
     const out = {
       ok: true,
+      exitCode: 0,
       lockPath: written.lockPath,
       approvedBy: written.lock.approvedBy,
       approvedAt: written.lock.approvedAt,

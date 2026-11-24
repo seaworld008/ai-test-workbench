@@ -152,7 +152,7 @@ export async function runMapCommand(options = {}) {
   });
 
   if (options.json) {
-    console.log(JSON.stringify(out, null, 2));
+    console.log(JSON.stringify({ ok: true, exitCode: 0, ...out }, null, 2));
   } else {
     for (const w of out.warnings || []) console.warn(`[CodeMap WARN] ${w}`);
     console.log(

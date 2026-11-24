@@ -69,7 +69,7 @@ export async function runSkillInstallCommand(options = {}) {
 
   if (fs.existsSync(destDir) && !force) {
     if (options.json) {
-      console.log(JSON.stringify({ ok: true, status: 'preserved', client, destination: destDir }, null, 2));
+      console.log(JSON.stringify({ ok: true, exitCode: 0, status: 'preserved', client, destination: destDir }, null, 2));
     } else {
       console.log(
         lang === 'zh'
@@ -82,7 +82,7 @@ export async function runSkillInstallCommand(options = {}) {
 
   if (dryRun) {
     if (options.json) {
-      console.log(JSON.stringify({ ok: true, status: 'dry-run', client, destination: destDir, source: SKILL_SRC_DIR }, null, 2));
+      console.log(JSON.stringify({ ok: true, exitCode: 0, status: 'dry-run', client, destination: destDir, source: SKILL_SRC_DIR }, null, 2));
     } else {
       console.log(`[DRY-RUN] Would copy skill "${SKILL_SRC_DIR}" -> "${destDir}"`);
     }
@@ -92,7 +92,7 @@ export async function runSkillInstallCommand(options = {}) {
   fs.mkdirSync(path.dirname(destDir), { recursive: true });
   fs.cpSync(SKILL_SRC_DIR, destDir, { recursive: true, force: true });
   if (options.json) {
-    console.log(JSON.stringify({ ok: true, status: 'installed', client, destination: destDir }, null, 2));
+    console.log(JSON.stringify({ ok: true, exitCode: 0, status: 'installed', client, destination: destDir }, null, 2));
   } else {
     console.log(
       lang === 'zh'

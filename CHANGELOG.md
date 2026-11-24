@@ -23,6 +23,9 @@
 - **严格类型安全（[ADR-0003](./docs/adr/0003-strict-checkjs-type-safety.md)）**：根包 `devDependencies` 精确锁定 `typescript@6.0.3` 与 `@types/node@26.6.6`（运行时 `dependencies` 保持为空），`tsconfig.check.json` 启用 `strict: true, noImplicitAny: true, useUnknownInCatchVariables: true` 全量 0 错误、0 抑制注释，`run-typecheck.mjs` 全环境 fail-closed。
 - **三层测试重组与行覆盖率门禁**：重组 `test/{unit,integration,adversarial}/`，完整保留所有既有对抗/红队/E1–E6 用例并补齐核心命令覆盖率，`scripts/run-unit-tests.mjs` 强制启用 `--test-coverage-lines=80`。
 - **文档单一真源与打包卫生**：归档过时文档至 `docs/history/`，收敛 5 份编号 ADR（`0001..0005`），新增 `scripts/generate-docs.mjs` 自动同步 8 份核心文档中的 17 工具表，强化 `lint:docs`（自动表防漂移、核心双语 H2 对等、CLI 旗标校验），收紧 `package.json#files` 剔除审查/归档/内部脚本并新增打包卫生单测。
+- **真实多端企业 SaaS 实测沉淀（`explore` / CLI / `governance` / 发布流水线）**：
+  - `explore` 自动从 `--base-url` 路径派生初始 `entryPath`（不再丢失非根入口路径）；新增未登录重定向风暴去重与早停（输出 `authRequired`、`loginRoute`、`authRedirectCount` 与 `auth-login` 引导，避免浪费 `maxPages` 配额）；自动过滤只读防火墙自拦截产生的 `net::ERR_BLOCKED_BY_CLIENT` 控制台噪声（单独计入 `firewallAbortedConsoleCount`）；CLI 同步支持正向布尔参数 `--explore-portals` / `--explore-tabs` / `--explore-dialogs`。
+  - 统一 `doctor` / `explore` / `perf` / `report` / `map` / `flaky` / `impact` / `trace-matrix` / `mcp` / `skill-install` / `governance` 全部 `--json` 信封携带 `ok` 与 `exitCode`，并将 `governance status|verify` 遇 `blocked` 收紧为退出码 `2`；同步在 `release.yml` 补齐根包开发依赖安装与 `check:vendor` 门禁（不改动 OIDC 发布权限）。
 
 ## [5.1.1] - 2026-11-24
 
