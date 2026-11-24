@@ -190,7 +190,14 @@ function readAndVerifySession(qaDir, sessionId) {
 function resolveSpecBaseline(qaDir, relSpec, absSpec) {
   const baseRes = resolveDefaultDiffBase(qaDir);
   if (baseRes.isGitRepo && baseRes.gitRoot && baseRes.resolved) {
-    const relFromGitRoot = path.relative(baseRes.gitRoot, absSpec).replace(/\\/g, '/');
+    let realAbsSpec = path.resolve(absSpec);
+    try {
+      realAbsSpec =
+        typeof fs.realpathSync.native === 'function' ? fs.realpathSync.native(realAbsSpec) : fs.realpathSync(realAbsSpec);
+    } catch {
+      // fall back to resolved path when spec does not exist on disk yet
+    }
+    const relFromGitRoot = path.relative(baseRes.gitRoot, realAbsSpec).replace(/\\/g, '/');
     const gitContent = getFileAtGitRef(baseRes.gitRoot, baseRes.resolved, relFromGitRoot);
     if (typeof gitContent === 'string') {
       return { content: gitContent, source: `git:${baseRes.resolved}`, baseSha: baseRes.sha };
