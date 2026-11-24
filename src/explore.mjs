@@ -48,6 +48,7 @@ export {
   sanitizeUntrustedDomText,
 };
 
+/** @param {string} filePath */
 function loadJsonIfValid(filePath) {
   if (!fs.existsSync(filePath)) return null;
   try {

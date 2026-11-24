@@ -6,28 +6,34 @@ import { matchRuntimeRouteToPattern, normalizeRoutePath } from './adapters.mjs';
 
 const STALE_RUNTIME_DAYS = 14;
 
+/** @param {any} topology @returns {string | null} */
 function computeTopologySnapshotId(topology) {
   if (!topology || typeof topology !== 'object') return null;
   if (topology.snapshotId) return String(topology.snapshotId);
   if (!topology.exploredAt && (!Array.isArray(topology.pages) || topology.pages.length === 0)) return null;
   const raw = JSON.stringify({
     exploredAt: topology.exploredAt || '',
-    pages: (topology.pages || []).map((p) => p.route),
+    pages: (topology.pages || []).map((/** @type {any} */ p) => p.route),
     consoleErrors: topology.consoleErrors || [],
     queryAnomalies: topology.queryAnomalies || [],
   });
   return `snap_${crypto.createHash('sha256').update(raw).digest('hex').slice(0, 12)}`;
 }
 
+/** @param {string} s @returns {string} */
 function escapeRegExp(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
  * Precise controller/entity correlation (`K-04`): avoids naive substring pollution (`user` matching `/user-guide`).
+ * @param {{ route: string, linkedApis?: string[], linkedBackendFiles?: string[] }} entry
+ * @param {Array<{ table: string, file: string }>} dbEntities
+ * @param {Record<string, string>} [backendFileTexts]
+ * @returns {string[]}
  */
 export function correlateDbTablesForRoute(entry, dbEntities, backendFileTexts = {}) {
-  const matched = new Set();
+  const matched = /** @type {Set<string>} */ (new Set());
   const routeSegments = entry.route
     .toLowerCase()
     .split('/')
@@ -69,6 +75,7 @@ export function correlateDbTablesForRoute(entry, dbEntities, backendFileTexts = 
   return [...matched];
 }
 
+/** @param {any} mapCandidate @returns {string} */
 function computeCodeMapContentFingerprint(mapCandidate) {
   const canonicalRoutes = Object.fromEntries(
     Object.entries(mapCandidate.routes || {})
@@ -89,7 +96,7 @@ function computeCodeMapContentFingerprint(mapCandidate) {
         },
       ])
   );
-  const canonicalDefects = (mapCandidate.defects || []).map((d) => ({
+  const canonicalDefects = (mapCandidate.defects || []).map((/** @type {any} */ d) => ({
     key: d.key,
     status: d.status,
     seenCount: d.seenCount,
@@ -110,6 +117,7 @@ function computeCodeMapContentFingerprint(mapCandidate) {
 
 /**
  * Migrates v3.0 code-map objects cleanly to `schemaVersion: 4` (`A-07`).
+ * @param {any} rawMap @returns {Record<string, any>}
  */
 export function migrateCodeMapSchema(rawMap) {
   if (!rawMap || typeof rawMap !== 'object') return {};
@@ -124,6 +132,8 @@ export function migrateCodeMapSchema(rawMap) {
  * Fuses static code index + runtime exploration topology + test results + perf snapshots into
  * Living Code Map v2 (`schemaVersion: 4`) with dynamic route matching, stale route/spec pruning,
  * snapshot-idempotent defect lifecycle (`open -> resolved-candidate -> closed`), and daily history aggregation (`K-01..K-06`).
+ * @param {any} existingMap
+ * @param {{ nowIso?: string, sourceIndex?: any, topology?: any, specIndex?: Array<{ specFile: string, uiRoutes?: string[], apiPaths: string[] }>, resultsJson?: any, perfReport?: any }} [inputs]
  */
 export function mergeLivingCodeMap(existingMap, inputs = {}) {
   const now = inputs.nowIso || new Date().toISOString();
@@ -148,13 +158,13 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
   const perfReport = inputs.perfReport || null;
   const outcomesBySpec = groupOutcomesBySpecFile(resultsJson);
 
-  const staticPatterns = (sourceIndex.frontendRoutes || []).map((r) => normalizeRoutePath(r.route));
+  const staticPatterns = (sourceIndex.frontendRoutes || []).map((/** @type {any} */ r) => normalizeRoutePath(r.route));
   const hasStaticIndex = (sourceIndex.frontendRoutes || []).length > 0;
 
   /** @type {Record<string, any>} */
   const routesObj = {};
 
-  const createBlankRoute = (key, source = 'static') => {
+  const createBlankRoute = (/** @type {string} */ key, source = 'static') => {
     const prev = base.routes?.[key] || {};
     return {
       route: key,
@@ -180,7 +190,7 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
     };
   };
 
-  const ensureRoute = (rPath, source = 'static') => {
+  const ensureRoute = (/** @type {string} */ rPath, source = 'static') => {
     const normalized = normalizeRoutePath(rPath);
     const key = source === 'runtime' ? matchRuntimeRouteToPattern(normalized, staticPatterns) : normalized;
     if (!routesObj[key]) {
@@ -246,7 +256,7 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
 
   for (const entry of Object.values(routesObj)) {
     if (entry.frontendFile) {
-      const calls = (sourceIndex.frontendApiCalls || []).filter((c) => c.file === entry.frontendFile);
+      const calls = (sourceIndex.frontendApiCalls || []).filter((/** @type {any} */ c) => c.file === entry.frontendFile);
       for (const c of calls) {
         if (!entry.linkedApis.includes(c.path)) entry.linkedApis.push(c.path);
       }
@@ -266,7 +276,7 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
     for (const sp of specIndex) {
       const normalizedSpecRoutes = (sp.uiRoutes || []).map((u) => matchRuntimeRouteToPattern(u, staticAndCurrentPatterns));
       if (normalizedSpecRoutes.includes(entry.route)) matchedSpecs.add(sp.specFile);
-      if (entry.linkedApis.some((a) => sp.apiPaths.includes(a))) matchedSpecs.add(sp.specFile);
+      if (entry.linkedApis.some((/** @type {string} */ a) => sp.apiPaths.includes(a))) matchedSpecs.add(sp.specFile);
     }
     entry.coveringSpecs = [...matchedSpecs];
 
@@ -337,7 +347,7 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
 
   if (isNewSnapshot) {
     const observedRuntimeKeys = new Set();
-    const recordRuntimeDefect = (key, severity, type, route, message) => {
+    const recordRuntimeDefect = (/** @type {string} */ key, /** @type {string} */ severity, /** @type {string} */ type, /** @type {string} */ route, /** @type {string} */ message) => {
       observedRuntimeKeys.add(key);
       const prev = defectMap.get(key);
       if (prev) {
@@ -398,7 +408,7 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
       measuredAt: perfReport.measuredAt,
       budgetPassed: perfReport.budgetPassed,
       apiP95Ms: perfReport.apiBenchmark?.p95Ms ?? null,
-      browserSummary: (perfReport.browserMetrics || []).slice(0, 5).map((m) => ({
+      browserSummary: (perfReport.browserMetrics || []).slice(0, 5).map((/** @type {any} */ m) => ({
         route: m.route,
         ttfbMs: m.ttfbMs,
         fcpMs: m.fcpMs,
@@ -409,7 +419,7 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
     });
   }
 
-  const dbTables = (sourceIndex.dbEntities || []).map((d) => d.table);
+  const dbTables = (sourceIndex.dbEntities || []).map((/** @type {any} */ d) => d.table);
   const openDefectsCount = [...defectMap.values()].filter((d) => d.status === 'open').length;
   const history = [...(base.history || [])];
   history.push({

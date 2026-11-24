@@ -18,6 +18,10 @@ const PURE_CONVERTERS = new Set(['Number', 'String', 'Boolean', 'BigInt', 'parse
 /**
  * Recursive AST constant evaluator for S0 tautology detection (`G-04`).
  * Detects `true`, `(true)`, `1 + 1`, `Number('1')`, `[1].length`, `await page.evaluate(() => 1)`, etc.
+ * @param {any} ts
+ * @param {any} sf
+ * @param {any} rawNode
+ * @returns {boolean}
  */
 export function isConstantExpressionAst(ts, sf, rawNode) {
   if (!rawNode) return false;
@@ -41,7 +45,7 @@ export function isConstantExpressionAst(ts, sf, rawNode) {
   }
 
   if (ts.isTemplateExpression(node)) {
-    return node.templateSpans.every((span) => isConstantExpressionAst(ts, sf, span.expression));
+    return node.templateSpans.every((/** @type {any} */ span) => isConstantExpressionAst(ts, sf, span.expression));
   }
 
   if (ts.isPrefixUnaryExpression(node) || ts.isTypeOfExpression(node) || ts.isVoidExpression(node)) {
@@ -53,11 +57,11 @@ export function isConstantExpressionAst(ts, sf, rawNode) {
   }
 
   if (ts.isArrayLiteralExpression(node)) {
-    return node.elements.every((el) => isConstantExpressionAst(ts, sf, el));
+    return node.elements.every((/** @type {any} */ el) => isConstantExpressionAst(ts, sf, el));
   }
 
   if (ts.isObjectLiteralExpression(node)) {
-    return node.properties.every((prop) => {
+    return node.properties.every((/** @type {any} */ prop) => {
       if (ts.isPropertyAssignment(prop)) return isConstantExpressionAst(ts, sf, prop.initializer);
       return false;
     });
@@ -98,14 +102,14 @@ export function isConstantExpressionAst(ts, sf, rawNode) {
 
   if (ts.isCallExpression(node)) {
     if (ts.isIdentifier(node.expression) && PURE_CONVERTERS.has(node.expression.text)) {
-      return node.arguments.length > 0 && node.arguments.every((a) => isConstantExpressionAst(ts, sf, a));
+      return node.arguments.length > 0 && node.arguments.every((/** @type {any} */ a) => isConstantExpressionAst(ts, sf, a));
     }
     if (
       ts.isPropertyAccessExpression(node.expression) &&
       ts.isIdentifier(node.expression.expression) &&
       ['Math', 'JSON', 'Object', 'Array'].includes(node.expression.expression.text)
     ) {
-      return node.arguments.every((a) => isConstantExpressionAst(ts, sf, a));
+      return node.arguments.every((/** @type {any} */ a) => isConstantExpressionAst(ts, sf, a));
     }
   }
 
@@ -115,6 +119,11 @@ export function isConstantExpressionAst(ts, sf, rawNode) {
 /**
  * Detects vacuous regex / predicate arguments (`new RegExp('.*')`, match-all regexes, `() => true`)
  * and self-referential DOM oracles (`expect(loc).toHaveText(await loc.textContent())`).
+ * @param {any} ts
+ * @param {any} sf
+ * @param {string} matcher
+ * @param {any} rawExpectedNode
+ * @param {any} rawActualNode
  */
 export function inspectMatcherExpectedArgAst(ts, sf, matcher, rawExpectedNode, rawActualNode) {
   if (!rawExpectedNode) {
@@ -146,6 +155,7 @@ export function inspectMatcherExpectedArgAst(ts, sf, matcher, rawExpectedNode, r
       'toStrictEqual',
     ].includes(matcher)
   ) {
+    /** @param {any} n @returns {boolean} */
     const containsSelfDomRead = (n) => {
       if (!n) return false;
       const u = unwrapExpr(ts, n);
@@ -158,7 +168,7 @@ export function inspectMatcherExpectedArgAst(ts, sf, matcher, rawExpectedNode, r
         return true;
       }
       let hit = false;
-      ts.forEachChild(u, (child) => {
+      ts.forEachChild(u, (/** @type {any} */ child) => {
         if (!hit && containsSelfDomRead(child)) hit = true;
       });
       return hit;
@@ -171,6 +181,7 @@ export function inspectMatcherExpectedArgAst(ts, sf, matcher, rawExpectedNode, r
   let isRegex = false;
   let isVacuous = false;
   let isNonEmptyRegex = false;
+  /** @param {string} pat */
   const isVacuousPattern = (pat) => {
     const trimmed = String(pat || '').trim();
     return (
@@ -185,6 +196,7 @@ export function inspectMatcherExpectedArgAst(ts, sf, matcher, rawExpectedNode, r
       trimmed === '$'
     );
   };
+  /** @param {string} pat */
   const isNonEmptyOnlyPattern = (pat) => {
     const trimmed = String(pat || '').trim();
     return trimmed === '.+' || trimmed === '^.+$' || trimmed === '[\\s\\S]+' || trimmed === '\\S+';

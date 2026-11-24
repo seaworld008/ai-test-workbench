@@ -45,6 +45,9 @@ export function resolveTypeScriptCompiler(qaDir) {
 
 /**
  * Unwraps parentheses, `as`, non-null `!`, type assertions, and `satisfies` wrappers.
+ * @param {any} ts
+ * @param {any} node
+ * @returns {any}
  */
 export function unwrapExpr(ts, node) {
   let cur = node;
@@ -66,12 +69,16 @@ export function unwrapExpr(ts, node) {
 
 /**
  * Depth-first predicate test over an AST subtree.
+ * @param {any} ts
+ * @param {any} node
+ * @param {(n: any) => boolean} predicate
+ * @returns {boolean}
  */
 export function subtreeContainsKind(ts, node, predicate) {
   if (!node) return false;
   if (predicate(node)) return true;
   let hit = false;
-  ts.forEachChild(node, (child) => {
+  ts.forEachChild(node, (/** @type {any} */ child) => {
     if (!hit && subtreeContainsKind(ts, child, predicate)) hit = true;
   });
   return hit;
@@ -79,6 +86,10 @@ export function subtreeContainsKind(ts, node, predicate) {
 
 /**
  * Computes 1-based line number for a TypeScript AST node.
+ * @param {any} ts
+ * @param {any} sf
+ * @param {any} node
+ * @returns {number}
  */
 export function getNodeLine(ts, sf, node) {
   if (!sf || !node || typeof sf.getLineAndCharacterOfPosition !== 'function') return 1;

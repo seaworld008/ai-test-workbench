@@ -20,6 +20,7 @@ import { runBrowserPerfProfile, runReadOnlyApiBenchmark } from './perf/collector
 
 export { computeLatencyPercentiles, evaluatePerfBudget, runBrowserPerfProfile };
 
+/** @param {string} p */
 function readJsonSafe(p) {
   if (!fs.existsSync(p)) return null;
   try {
@@ -29,6 +30,7 @@ function readJsonSafe(p) {
   }
 }
 
+/** @param {Record<string, any>} [options] */
 export async function runPerfCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   if (!options.target) {

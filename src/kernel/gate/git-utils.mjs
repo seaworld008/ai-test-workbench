@@ -139,6 +139,7 @@ export function parseGitDiffHeaderPath(headerLine) {
   return candidate.replace(/^[ab]\//, '').replace(/\\/g, '/') || 'unknown';
 }
 
+/** @param {string} p @returns {string} */
 function canonicalPath(p) {
   const resolved = path.resolve(p);
   try {
@@ -392,6 +393,7 @@ export function listChangedFilesUnderDir(gitRoot, diffBase, targetDir) {
   return { ok: true, error: null, changed, untracked };
 }
 
+/** @param {string | Buffer} content @returns {string} */
 export function sha256Hex(content) {
   return crypto.createHash('sha256').update(content).digest('hex');
 }
@@ -422,6 +424,7 @@ export function computeWorkspaceInputHash(qaDir, repoDir = path.dirname(qaDir)) 
     const relSub = path.relative(gitRoot, scanRoot).replace(/\\/g, '/') || '.';
     const lsRes = execGitSync(gitRoot, ['ls-files', '-s', '-z', '--', relSub], { timeoutMs: 10_000 });
     if (lsRes.status === 0) {
+      /** @param {string} p */
       const isIgnoredArtifact = (p) => {
         const segs = p.replace(/\\/g, '/').split('/');
         return (
@@ -435,14 +438,13 @@ export function computeWorkspaceInputHash(qaDir, repoDir = path.dirname(qaDir)) 
       const trackedEntries = lsRes.stdout
         .split('\0')
         .filter(Boolean)
-        .map((line) => {
+        .flatMap((line) => {
           const tabIdx = line.indexOf('\t');
-          if (tabIdx < 0) return null;
+          if (tabIdx < 0) return [];
           const meta = line.slice(0, tabIdx).trim().split(/\s+/);
           const relPath = line.slice(tabIdx + 1).replace(/\\/g, '/');
-          return { oid: meta[1] || '', relPath };
+          return isIgnoredArtifact(relPath) ? [] : [{ oid: meta[1] || '', relPath }];
         })
-        .filter((e) => e && !isIgnoredArtifact(e.relPath))
         .sort((a, b) => a.relPath.localeCompare(b.relPath));
 
       for (const entry of trackedEntries) {
@@ -487,6 +489,7 @@ export function computeWorkspaceInputHash(qaDir, repoDir = path.dirname(qaDir)) 
 
   // Non-Git fallback traversal
   const ignoreDirs = new Set(WORKSPACE_HASH_IGNORE_DIRS);
+  /** @param {string} dir @param {string} prefix @param {{ count: number }} state */
   const walk = (dir, prefix, state) => {
     if (!dir || !fs.existsSync(dir) || state.count > 10_000) return;
     let entries;

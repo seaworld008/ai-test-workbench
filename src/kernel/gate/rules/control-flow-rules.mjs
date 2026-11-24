@@ -1,9 +1,19 @@
 import { diffEventSnippets } from './governance-rules.mjs';
 
 /**
+ * @typedef {import('./governance-rules.mjs').GateFinding} GateFinding
+ * @typedef {import('./governance-rules.mjs').RuleEvalCtx} RuleEvalCtx
+ * @typedef {import('../parser.mjs').AstEvent} AstEvent
+ */
+
+/**
  * Counts events per lexical scope key (`testTitle || '<top-level>'`).
+ * @param {AstEvent[] | undefined} events
+ * @param {(ev: AstEvent) => boolean} [predicate]
+ * @returns {Map<string, number>}
  */
 function countByScope(events, predicate) {
+  /** @type {Map<string, number>} */
   const counts = new Map();
   for (const ev of events || []) {
     if (predicate && !predicate(ev)) continue;
@@ -25,16 +35,18 @@ export const ruleG105 = {
   description: 'Blocks adding test.skip, test.fixme, test.only, or expectation-inverting test.fail calls.',
   waiverKey: 'skip',
   defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
   evaluate(ctx) {
-    const { file, baseSum, headSum, canWaive } = ctx;
+    const { file = '', baseSum, headSum, canWaive = () => false } = ctx;
+    /** @type {GateFinding[]} */
     const findings = [];
     const baseStandaloneByScope = countByScope(
       baseSum?.events?.skips,
-      (e) => e.kind === 'skip' && e.isStandaloneGuard
+      (e) => e.kind === 'skip' && Boolean(e.isStandaloneGuard)
     );
     const headStandaloneByScope = countByScope(
       headSum?.events?.skips,
-      (e) => e.kind === 'skip' && e.isStandaloneGuard
+      (e) => e.kind === 'skip' && Boolean(e.isStandaloneGuard)
     );
 
     for (const ev of diffEventSnippets(baseSum?.events?.skips, headSum?.events?.skips)) {
@@ -71,8 +83,10 @@ export const ruleG106 = {
   description: 'Blocks introducing expect.soft() or expect.configure({ soft: true }).',
   waiverKey: 'soft-assertion',
   defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
   evaluate(ctx) {
-    const { file, baseSum, headSum, canWaive } = ctx;
+    const { file = '', baseSum, headSum, canWaive = () => false } = ctx;
+    /** @type {GateFinding[]} */
     const findings = [];
     for (const ev of diffEventSnippets(baseSum?.events?.softAssertions, headSum?.events?.softAssertions)) {
       if (canWaive(ev.snippet) || canWaive('AITEST-G106')) continue;
@@ -101,8 +115,10 @@ export const ruleG107 = {
   description: 'Blocks swallowing exceptions in try/catch, finally-return, or non-rethrowing .catch() handlers.',
   waiverKey: 'swallowed-catch',
   defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
   evaluate(ctx) {
-    const { file, baseSum, headSum, canWaive } = ctx;
+    const { file = '', baseSum, headSum, canWaive = () => false } = ctx;
+    /** @type {GateFinding[]} */
     const findings = [];
     for (const ev of diffEventSnippets(baseSum?.events?.swallowedCatches, headSum?.events?.swallowedCatches)) {
       if (canWaive(ev.snippet) || canWaive('AITEST-G107')) continue;
@@ -133,8 +149,10 @@ export const ruleG108 = {
   description: 'Blocks adding { force: true } which bypasses Playwright actionability checks.',
   waiverKey: 'force-true',
   defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
   evaluate(ctx) {
-    const { file, baseSum, headSum, canWaive } = ctx;
+    const { file = '', baseSum, headSum, canWaive = () => false } = ctx;
+    /** @type {GateFinding[]} */
     const findings = [];
     for (const ev of diffEventSnippets(baseSum?.events?.forceTrue, headSum?.events?.forceTrue)) {
       if (canWaive(ev.snippet) || canWaive('AITEST-G108')) continue;
@@ -161,8 +179,10 @@ export const ruleG109 = {
   description: 'Blocks retry inflation and excessive timeout masks (timeout >= 60s, toPass timeout >= 30s).',
   waiverKey: 'timeout-inflation',
   defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
   evaluate(ctx) {
-    const { file, baseSum, headSum, canWaive } = ctx;
+    const { file = '', baseSum, headSum, canWaive = () => false } = ctx;
+    /** @type {GateFinding[]} */
     const findings = [];
     for (const ev of diffEventSnippets(baseSum?.events?.timeoutOrRetry, headSum?.events?.timeoutOrRetry)) {
       if (canWaive(ev.snippet) || canWaive('AITEST-G109')) continue;
@@ -192,8 +212,10 @@ export const ruleG110 = {
   description: 'Blocks wrapping assertions in conditionals or bypassing assertions via conditional early returns.',
   waiverKey: 'conditional-assertion',
   defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
   evaluate(ctx) {
-    const { file, baseSum, headSum, canWaive } = ctx;
+    const { file = '', baseSum, headSum, canWaive = () => false } = ctx;
+    /** @type {GateFinding[]} */
     const findings = [];
     const baseEarlyByScope = countByScope(baseSum?.events?.conditionalAssertions, (e) => e.kind === 'early-return');
     const headEarlyByScope = countByScope(headSum?.events?.conditionalAssertions, (e) => e.kind === 'early-return');

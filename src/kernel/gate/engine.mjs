@@ -26,6 +26,27 @@ export const GATE_KERNEL_VERSION = WORKBENCH_VERSION;
  *   broken git base) returns `'blocked'` and NEVER silently passes.
  * - `outcome` is `'blocked'` if any gate is `'blocked'`, `'fail'` if any gate is `'fail'`
  *   or errors exist, and `'pass'` only when zero errors and zero blocked gates exist.
+ * @param {string} qaDir
+ * @param {{
+ *   resultsPath?: string;
+ *   waiversPath?: string;
+ *   maxFlaky?: number;
+ *   maxSkipped?: number;
+ *   checkSpecs?: boolean;
+ *   requireE2e?: boolean;
+ *   staticOnly?: boolean;
+ *   diffBase?: string | null;
+ *   requireDiff?: boolean;
+ *   allowMutation?: boolean;
+ *   skipGovernanceCheck?: boolean;
+ *   requireT1Mac?: boolean;
+ *   allowUninitialized?: boolean;
+ *   legacyWaiverCompat?: boolean;
+ *   allowUnboundResults?: boolean;
+ *   expectedRunId?: string;
+ *   requireCompilers?: boolean;
+ *   env?: Record<string, string | undefined>;
+ * }} [options]
  */
 export function runAuditForQaDir(qaDir, options = {}) {
   const resultsPath = options.resultsPath
@@ -49,15 +70,25 @@ export function runAuditForQaDir(qaDir, options = {}) {
       ? Boolean(options.allowMutation)
       : process.env.TEST_ALLOW_MUTATION === '1' || process.env.TEST_ALLOW_MUTATION === 'true';
 
+  /** @type {string[]} */
   const allErrors = [];
+  /** @type {string[]} */
   const allWarnings = [];
+  /** @type {ReturnType<typeof auditResultsJson>['stats'] | null} */
   let stats = null;
+  /** @type {string[]} */
   let policyExcludedTitles = [];
+  /** @type {string | null} */
   let boundRunId = null;
+  /** @type {string | null} */
   let resultsDigest = null;
+  /** @type {string | null} */
   let ledgerMac = null;
+  /** @type {string | null} */
   let lockDigest = null;
+  /** @type {'T0' | 'T1'} */
   let govTrustTier = 'T0';
+  /** @type {'T0' | 'T1'} */
   let ledgerTrustTier = 'T0';
 
   // Layer 0: Governance Integrity + Config Schema (Fail-Closed on malformed config or missing lock!)
@@ -144,7 +175,7 @@ export function runAuditForQaDir(qaDir, options = {}) {
         allErrors.push(...resAudit.errors);
         allWarnings.push(...resAudit.warnings);
       } catch (err) {
-        allErrors.push(`Failed to parse ${resultsPath}: ${err.message}`);
+        allErrors.push(`Failed to parse ${resultsPath}: ${err instanceof Error ? err.message : String(err)}`);
         runtimeStatus = 'fail';
       }
     }

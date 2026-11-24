@@ -24,18 +24,40 @@ export const BROWSER_EVAL_METHODS = new Set([
 export const RUNTIME_CAPABILITY_RE =
   /\b(?:globalThis|process\.platform|process\.versions|browserName|isWindows|isMac|isLinux|isMobile|headless|WebSocket|SharedArrayBuffer|Worker|Notification|Clipboard)\b/;
 
+/**
+ * @typedef {{
+ *   insideIf: boolean;
+ *   insideIfInTest: boolean;
+ *   insideTernary: boolean;
+ *   insideBrowserEvaluate: boolean;
+ *   scopeKind: string;
+ *   testTitle: string | null;
+ * }} ParserCtx
+ * @typedef {{
+ *   fileLabel: string;
+ *   wrapInAsyncFn: boolean;
+ *   isCustomAssertName: (name: string) => boolean;
+ *   summary: Record<string, any>;
+ *   pushViolation: (code: string, message: string, snippet?: string, meta?: Record<string, any>) => void;
+ * }} ParserState
+ */
+
+/** @param {any} ts @param {any} node @returns {boolean} */
 export function hasThrowStatement(ts, node) {
   return subtreeContainsKind(ts, node, (n) => ts.isThrowStatement(n));
 }
 
+/** @param {any} ts @param {any} node @returns {boolean} */
 export function hasReturnStatement(ts, node) {
   return subtreeContainsKind(ts, node, (n) => ts.isReturnStatement(n));
 }
 
+/** @param {any} ts @param {any} node @returns {boolean} */
 export function hasBareReturn(ts, node) {
   return subtreeContainsKind(ts, node, (n) => ts.isReturnStatement(n) && !n.expression);
 }
 
+/** @param {any} ts @param {any} sf @param {any} node @param {(name: string) => boolean} isCustomAssertName @returns {boolean} */
 export function hasExpectOrAssertCall(ts, sf, node, isCustomAssertName) {
   return subtreeContainsKind(ts, node, (n) => {
     if (!ts.isCallExpression(n)) return false;
@@ -51,6 +73,7 @@ export function hasExpectOrAssertCall(ts, sf, node, isCustomAssertName) {
   });
 }
 
+/** @param {any} ts @param {any} rawNode @returns {string | null} */
 export function extractStringLiteralText(ts, rawNode) {
   if (!rawNode) return null;
   const node = unwrapExpr(ts, rawNode);
@@ -63,12 +86,17 @@ export function extractStringLiteralText(ts, rawNode) {
 /**
  * Inspects a `route.fulfill(...)` handler subtree to classify status codes, fault injection (4xx/5xx),
  * or security honeypot traps (callback mutating a flag / asserting not hit).
+ * @param {any} ts
+ * @param {any} sf
+ * @param {any} handlerNode
  */
 export function inspectRouteFulfillHandler(ts, sf, handlerNode) {
+  /** @type {number[]} */
   const statusCodes = [];
   let hasFulfill = false;
   let setsExternalTrapVar = false;
 
+  /** @param {any} n */
   const inspect = (n) => {
     if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'fulfill') {
       hasFulfill = true;
@@ -113,6 +141,7 @@ export function inspectRouteFulfillHandler(ts, sf, handlerNode) {
 
 /**
  * Inspects a block for conditional early returns preceding test assertions (`AITEST-G110`).
+ * @param {any} ts @param {any} sf @param {any} blockNode @param {ParserCtx} ctx @param {ParserState} state
  */
 export function inspectEarlyReturnInBlock(ts, sf, blockNode, ctx, state) {
   if (!blockNode || !Array.isArray(blockNode.statements)) return;
@@ -122,6 +151,7 @@ export function inspectEarlyReturnInBlock(ts, sf, blockNode, ctx, state) {
     blockNode.parent &&
     ts.isFunctionDeclaration(blockNode.parent) &&
     blockNode.parent.name?.text === '__aitest_hunk__';
+  /** @type {string | null} */
   let sawConditionalReturn = null;
   let sawConditionalLine = 1;
   for (const stmt of blockNode.statements) {
@@ -164,6 +194,7 @@ export function inspectEarlyReturnInBlock(ts, sf, blockNode, ctx, state) {
 
 /**
  * Inspects object literal properties for `{ force: true }`, `retries`, `timeout`, `testIgnore`, and weakened ESLint rules.
+ * @param {any} ts @param {any} sf @param {any} node @param {number} line @param {ParserCtx} ctx @param {ParserState} state
  */
 export function inspectPropertyAssignment(ts, sf, node, line, ctx, state) {
   const { fileLabel, summary, pushViolation } = state;
@@ -239,6 +270,7 @@ export function inspectPropertyAssignment(ts, sf, node, line, ctx, state) {
 /**
  * Inspects `try/catch/finally` blocks for swallowed exceptions (`AITEST-G107`) while recording
  * browser-evaluate scope and negative-assertion catch clauses for FP analysis.
+ * @param {any} ts @param {any} sf @param {any} node @param {number} line @param {ParserCtx} ctx @param {ParserState} state
  */
 export function inspectTryStatement(ts, sf, node, line, ctx, state) {
   const { fileLabel, isCustomAssertName, summary, pushViolation } = state;

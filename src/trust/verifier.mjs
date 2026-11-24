@@ -22,6 +22,28 @@ import {
 
 /**
  * Cryptographically verifies a Sigstore Bundle (`.sigstore.json`) against an `attestation.json` subject file.
+ * @param {string} absAttestationPath
+ * @param {string} absBundlePath
+ * @param {{
+ *   certificateOidcIssuer?: string,
+ *   expectWorkflow?: string,
+ *   expectRepo?: string,
+ *   expectRef?: string,
+ *   certificateIdentityRegexp?: string,
+ *   trustedRootCertPath?: string,
+ *   trustedRootCertPem?: string,
+ * }} [options]
+ * @returns {{
+ *   ok: true,
+ *   reasonCode: string,
+ *   identity: { oidcIssuer: string, sanUri: string, repo: string, workflow: string, ref: string },
+ *   signedPredicateType: string | null,
+ * } | {
+ *   ok: false,
+ *   reasonCode: string,
+ *   error: string,
+ *   identity?: Record<string, any>,
+ * }}
  */
 function verifySigstoreBundleForAttestation(absAttestationPath, absBundlePath, options = {}) {
   const rawAttBytes = fs.readFileSync(absAttestationPath);
@@ -34,7 +56,7 @@ function verifySigstoreBundleForAttestation(absAttestationPath, absBundlePath, o
     return {
       ok: false,
       reasonCode: 'INVALID_BUNDLE_JSON',
-      error: `Invalid Sigstore bundle JSON: ${err?.message || err}`,
+      error: `Invalid Sigstore bundle JSON: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 
@@ -69,7 +91,7 @@ function verifySigstoreBundleForAttestation(absAttestationPath, absBundlePath, o
     return {
       ok: false,
       reasonCode: 'INVALID_SIGNING_CERTIFICATE',
-      error: `Failed to parse X.509 certificate in Sigstore bundle: ${err?.message || err}`,
+      error: `Failed to parse X.509 certificate in Sigstore bundle: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
   const leafCert = certs[0];
@@ -99,11 +121,18 @@ function verifySigstoreBundleForAttestation(absAttestationPath, absBundlePath, o
   try {
     signedStatement = JSON.parse(payloadBytes.toString('utf8'));
   } catch (err) {
-    return { ok: false, reasonCode: 'INVALID_DSSE_PAYLOAD', error: `DSSE payload is not valid JSON: ${err?.message || err}` };
+    return {
+      ok: false,
+      reasonCode: 'INVALID_DSSE_PAYLOAD',
+      error: `DSSE payload is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
 
   const subjects = Array.isArray(signedStatement.subject) ? signedStatement.subject : [];
-  const digestMatched = subjects.some((s) => String(s?.digest?.sha256 || '').toLowerCase() === actualFileSha256);
+  const digestMatched = subjects.some(
+    (/** @type {{ digest?: { sha256?: string } } | null} */ s) =>
+      String(s?.digest?.sha256 || '').toLowerCase() === actualFileSha256
+  );
   if (!digestMatched) {
     return {
       ok: false,
@@ -126,7 +155,7 @@ function verifySigstoreBundleForAttestation(absAttestationPath, absBundlePath, o
 
   // 4. Verify SAN URI workflow identity
   const sanUris = extractSanUris(leafCert.subjectAltName);
-  const parsedSans = sanUris.map(parseGithubWorkflowSanUri).filter(Boolean);
+  const parsedSans = sanUris.map(parseGithubWorkflowSanUri).filter((p) => p !== null);
   if (parsedSans.length === 0) {
     return {
       ok: false,
@@ -157,8 +186,11 @@ function verifySigstoreBundleForAttestation(absAttestationPath, absBundlePath, o
   // 5. Verify certificate trust chain
   if (options.trustedRootCertPath || options.trustedRootCertPem) {
     try {
-      const rootPem =
-        options.trustedRootCertPem || fs.readFileSync(path.resolve(options.trustedRootCertPath), 'utf8');
+      const rootPem = options.trustedRootCertPem
+        ? options.trustedRootCertPem
+        : options.trustedRootCertPath
+          ? fs.readFileSync(path.resolve(options.trustedRootCertPath), 'utf8')
+          : '';
       const chainRes = verifyCertChainToTrustedRoot(leafCert, certs.slice(1), rootPem);
       if (!chainRes.ok) {
         return {
@@ -172,7 +204,7 @@ function verifySigstoreBundleForAttestation(absAttestationPath, absBundlePath, o
       return {
         ok: false,
         reasonCode: 'UNTRUSTED_CERT_CHAIN',
-        error: `Failed to verify certificate against trusted root: ${err?.message || err}`,
+        error: `Failed to verify certificate against trusted root: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
   } else {
@@ -224,7 +256,9 @@ function verifySigstoreBundleForAttestation(absAttestationPath, absBundlePath, o
  * @param {Record<string, any>} [options]
  */
 export function verifyAttestationFile(attestationPath, options = {}) {
+  /** @type {string[]} */
   const errors = [];
+  /** @type {string[]} */
   const warnings = [];
   const absPath = path.resolve(attestationPath);
 
@@ -250,7 +284,7 @@ export function verifyAttestationFile(attestationPath, options = {}) {
       verifiedTier: 'T0',
       mergeGradeGreen: false,
       reasonCode: 'INVALID_ATTESTATION_JSON',
-      errors: [`Invalid JSON in attestation: ${err?.message || err}`],
+      errors: [`Invalid JSON in attestation: ${err instanceof Error ? err.message : String(err)}`],
       warnings,
     };
   }

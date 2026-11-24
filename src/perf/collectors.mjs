@@ -8,6 +8,7 @@ import { detectEnvelopeBusinessError, redactEndpointUrl } from '../explore/safet
 import { checkOutgoingRequestSafety } from '../origin-guard.mjs';
 import { computeLatencyPercentiles, medianOfNullable, p75OfNullable } from './budget.mjs';
 
+/** @param {string} p */
 function readJsonSafe(p) {
   if (!fs.existsSync(p)) return null;
   try {
@@ -20,6 +21,10 @@ function readJsonSafe(p) {
 /**
  * Profiles routes in Chromium using pre-injected `PerformanceObserver({ buffered: true })` for real LCP / CLS / INP (`P-01`),
  * plus multi-sample median/P75 aggregation and optional CDP CPU throttling (`P-02`).
+ * @param {string} qaDir
+ * @param {string} baseURL
+ * @param {string[]} routes
+ * @param {{ samples?: number | string, throttle?: boolean, guardConfig?: Record<string, any> }} [options]
  */
 export async function runBrowserPerfProfile(qaDir, baseURL, routes, options = {}) {
   const pwPkg = resolvePlaywrightPackage(qaDir);
@@ -41,11 +46,12 @@ export async function runBrowserPerfProfile(qaDir, baseURL, routes, options = {}
     if (readJsonSafe(userAuthPath)) ctxOpts.storageState = userAuthPath;
     const context = await browser.newContext(ctxOpts);
 
-    if (options.guardConfig) {
-      await context.route('**/*', async (route) => {
+    const guardCfg = options.guardConfig;
+    if (guardCfg) {
+      await context.route('**/*', async (/** @type {any} */ route) => {
         const req = route.request();
         const check = checkOutgoingRequestSafety(req.method(), req.url(), {
-          ...options.guardConfig,
+          ...guardCfg,
           strictReadonly: true,
         });
         if (check.blocked) {
@@ -57,7 +63,7 @@ export async function runBrowserPerfProfile(qaDir, baseURL, routes, options = {}
     }
 
     await context.addInitScript(
-      ({ sessionPayload }) => {
+      (/** @type {{ sessionPayload: any }} */ { sessionPayload }) => {
         if (sessionPayload?.origin && Array.isArray(sessionPayload.entries) && window.location.origin === sessionPayload.origin) {
           for (const [k, v] of sessionPayload.entries) window.sessionStorage.setItem(k, v);
         }
@@ -139,15 +145,20 @@ export async function runBrowserPerfProfile(qaDir, baseURL, routes, options = {}
 
     for (const rPath of routes) {
       const targetUrl = new URL(rPath, baseURL).toString();
+      /** @type {Array<{ ttfbMs: number | null, domReadyMs: number | null, loadMs: number | null, fcpMs: number | null, lcpMs: number | null, inpMs: number | null, cls: number, domNodes: number, transferKb: number, jsHeapMb: number | null }>} */
       const sampleRuns = [];
+      /** @type {Array<{ endpoint: string, count: number }>} */
       let lastDuplicateApis = [];
+      /** @type {Array<{ endpoint: string, status: number, ms: number }>} */
       let lastSlowestApis = [];
 
       for (let sIdx = 0; sIdx < samplesPerRoute; sIdx += 1) {
+        /** @type {Map<string, number>} */
         const apiCounts = new Map();
+        /** @type {Array<{ endpoint: string, status: number, ms: number }>} */
         const apiDurations = [];
 
-        const onRes = (res) => {
+        const onRes = (/** @type {any} */ res) => {
           const rt = res.request().resourceType();
           if (rt === 'xhr' || rt === 'fetch') {
             const clean = redactEndpointUrl(res.url()).split('?')[0];
@@ -201,9 +212,9 @@ export async function runBrowserPerfProfile(qaDir, baseURL, routes, options = {}
           const browserPerf = /** @type {any} */ (globalThis.performance);
           const nav = browserPerf.getEntriesByType('navigation')[0];
           const paints = browserPerf.getEntriesByType('paint') || [];
-          const fcp = paints.find((p) => p.name === 'first-contentful-paint');
+          const fcp = paints.find((/** @type {any} */ p) => p.name === 'first-contentful-paint');
           const resources = browserPerf.getEntriesByType('resource') || [];
-          const transferBytes = resources.reduce((sum, r) => sum + (r.transferSize || 0), 0);
+          const transferBytes = resources.reduce((/** @type {number} */ sum, /** @type {any} */ r) => sum + (r.transferSize || 0), 0);
 
           return {
             ttfbMs: nav ? Math.round(nav.responseStart) : null,
@@ -222,7 +233,7 @@ export async function runBrowserPerfProfile(qaDir, baseURL, routes, options = {}
         if (cdp) {
           try {
             const { metrics } = await cdp.send('Performance.getMetrics');
-            const heap = metrics.find((m) => m.name === 'JSHeapUsedSize');
+            const heap = metrics.find((/** @type {any} */ m) => m.name === 'JSHeapUsedSize');
             if (heap) jsHeapMb = Number((heap.value / (1024 * 1024)).toFixed(2));
           } catch {
             // ignore unsupported CDP metric
@@ -266,7 +277,9 @@ export async function runBrowserPerfProfile(qaDir, baseURL, routes, options = {}
   return metricsList;
 }
 
+/** @param {string} endpointUrl @param {number} concurrency @param {number} iterations */
 export async function runReadOnlyApiBenchmark(endpointUrl, concurrency, iterations) {
+  /** @type {number[]} */
   const latencies = [];
   let errors = 0;
   let envelopeErrors = 0;

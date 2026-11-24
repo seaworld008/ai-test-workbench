@@ -24,6 +24,10 @@ const SKIP_COPY_NAMES = new Set([
   '.gitignore',
 ]);
 
+/**
+ * @param {string} repoDir
+ * @returns {string[]}
+ */
 export function detectProjectStack(repoDir) {
   const stacks = [];
   const pkgPath = path.join(repoDir, 'package.json');
@@ -62,6 +66,9 @@ export function detectProjectStack(repoDir) {
 /**
  * Checks whether the host repository's root TypeScript/ESLint/Vitest/Jest configurations
  * would accidentally pick up `<repo>/<qaFolderName>/**` files and advises isolation excludes.
+ * @param {string} repoDir
+ * @param {string} [qaFolderName]
+ * @returns {string[]}
  */
 export function inspectHostIsolation(repoDir, qaFolderName = 'qa') {
   const advisories = [];
@@ -70,10 +77,15 @@ export function inspectHostIsolation(repoDir, qaFolderName = 'qa') {
     try {
       const raw = fs.readFileSync(tsconfigPath, 'utf8');
       const parsed = JSON.parse(raw);
-      const includesAllTs = Array.isArray(parsed.include) && parsed.include.some((p) => p === '**/*.ts' || p === '**/*.tsx');
+      const includesAllTs =
+        Array.isArray(parsed.include) &&
+        parsed.include.some((/** @type {string} */ p) => p === '**/*.ts' || p === '**/*.tsx');
       const excludesQa =
         Array.isArray(parsed.exclude) &&
-        parsed.exclude.some((p) => p === qaFolderName || p.startsWith(`${qaFolderName}/`) || p.startsWith(`./${qaFolderName}`));
+        parsed.exclude.some(
+          (/** @type {string} */ p) =>
+            p === qaFolderName || p.startsWith(`${qaFolderName}/`) || p.startsWith(`./${qaFolderName}`)
+        );
       if (includesAllTs && !excludesQa) {
         advisories.push(
           `Host tsconfig.json matches "**/*.ts" without excluding "${qaFolderName}/"; add "${qaFolderName}" to root tsconfig exclude if host typecheck scans it.`
@@ -100,6 +112,10 @@ export function inspectHostIsolation(repoDir, qaFolderName = 'qa') {
   return advisories;
 }
 
+/**
+ * @param {string} repoDir
+ * @returns {Promise<{ isGit: boolean, dirtyFiles: string[] }>}
+ */
 async function inspectGitStatus(repoDir) {
   if (!fs.existsSync(path.join(repoDir, '.git'))) {
     return { isGit: false, dirtyFiles: [] };
@@ -117,7 +133,14 @@ async function inspectGitStatus(repoDir) {
   }
 }
 
+/**
+ * @param {string} dir
+ * @param {string} [base]
+ * @param {{ mapGitignore?: boolean }} [options]
+ * @returns {Array<{ src: string, srcRel: string, rel: string }>}
+ */
 function collectFilesRecursive(dir, base = dir, { mapGitignore = false } = {}) {
+  /** @type {Array<{ src: string, srcRel: string, rel: string }>} */
   const entries = [];
   if (!fs.existsSync(dir)) return entries;
   for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -134,6 +157,11 @@ function collectFilesRecursive(dir, base = dir, { mapGitignore = false } = {}) {
   return entries;
 }
 
+/**
+ * @param {string} existing
+ * @param {string} templateContent
+ * @returns {{ changed: boolean, content: string }}
+ */
 function mergeGitignoreContent(existing, templateContent) {
   const existingLines = new Set(existing.split(/\r?\n/).map((l) => l.trim()));
   const additions = templateContent
@@ -147,6 +175,10 @@ function mergeGitignoreContent(existing, templateContent) {
   };
 }
 
+/**
+ * @param {string} projectName
+ * @returns {string}
+ */
 function toSafePackageName(projectName) {
   const slug = String(projectName || 'project')
     .toLowerCase()
@@ -156,6 +188,13 @@ function toSafePackageName(projectName) {
   return `${slug || 'project'}-qa`;
 }
 
+/**
+ * @param {string} raw
+ * @param {string} projectName
+ * @param {string} relPath
+ * @param {string} [preset]
+ * @returns {string}
+ */
 function renderContent(raw, projectName, relPath, preset = 'generic') {
   const pkgName = toSafePackageName(projectName);
 
@@ -191,6 +230,12 @@ function renderContent(raw, projectName, relPath, preset = 'generic') {
   return out;
 }
 
+/**
+ * @param {string} targetRoot
+ * @param {string} qaFolderName
+ * @param {{ dryRun?: boolean, force?: boolean }} [options]
+ * @returns {{ status: string, file: string, sidecar?: string }}
+ */
 function applyRootMcpBridge(targetRoot, qaFolderName, { dryRun = false, force = false } = {}) {
   const rootMcpPath = path.join(targetRoot, '.mcp.json');
   const cliRel = `${qaFolderName}/node_modules/@playwright/test/cli.js`;
@@ -233,9 +278,31 @@ function applyRootMcpBridge(targetRoot, qaFolderName, { dryRun = false, force = 
   }
 }
 
+/**
+ * @param {{
+ *   lang?: 'zh' | 'en' | string,
+ *   json?: boolean,
+ *   target?: string,
+ *   preset?: string,
+ *   qaDir?: string,
+ *   dryRun?: boolean,
+ *   skipInstall?: boolean,
+ *   skipBrowser?: boolean,
+ *   bridgeRoot?: boolean,
+ *   force?: boolean,
+ *   name?: string,
+ *   loop?: string,
+ * }} [options]
+ * @returns {Promise<number>}
+ */
 export async function runInit(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   const asJson = Boolean(options.json);
+  /**
+   * @param {number} exitCode
+   * @param {string} message
+   * @returns {number}
+   */
   const emitJsonError = (exitCode, message) => {
     if (asJson) {
       console.log(JSON.stringify({ ok: false, exitCode, error: message }, null, 2));

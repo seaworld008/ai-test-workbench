@@ -38,6 +38,7 @@ const VALID_LOG_LEVELS = new Set([
 
 const MAX_TEXT_ENVELOPE_BYTES = 4096;
 
+/** @param {string | number | null} id @param {number} code @param {string} message @param {unknown} [data] */
 export function rpcError(id, code, message, data) {
   /** @type {Record<string, any>} */
   const err = { code, message };
@@ -45,6 +46,7 @@ export function rpcError(id, code, message, data) {
   return { jsonrpc: '2.0', id: id ?? null, error: err };
 }
 
+/** @param {string | number | null} id @param {unknown} result */
 export function rpcResult(id, result) {
   return { jsonrpc: '2.0', id: id ?? null, result };
 }
@@ -52,6 +54,7 @@ export function rpcResult(id, result) {
 /**
  * Builds a bounded JSON text block (<= 4KB) that preserves actionable `data` fields for text-only
  * MCP clients while remaining token-efficient (`M-10`, `M-11`).
+ * @param {{ ok: boolean, exitCode: number, tool: string, summary: string, data: Record<string, any>, nextRecommendedActions: string[] }} structuredContent
  */
 function buildBoundedTextPayload(structuredContent) {
   const fullJson = JSON.stringify(structuredContent);
@@ -102,6 +105,12 @@ function buildBoundedTextPayload(structuredContent) {
   return trimmed.slice(0, MAX_TEXT_ENVELOPE_BYTES);
 }
 
+/**
+ * @param {string} toolName @param {boolean} ok @param {number} exitCode @param {string} summary
+ * @param {Record<string, any>} data @param {string[]} nextActions
+ * @param {{ target?: string | null, resourceSuffix?: string | null, protocolVersion?: string, deprecation?: { deprecatedTool: string, replacement: string, deprecatedSince: string, removeIn: string } | null }} [options]
+ * @returns {{ unknownTool: false, result: Record<string, any> }}
+ */
 function wrapEnvelope(toolName, ok, exitCode, summary, data, nextActions, options = {}) {
   const { target = null, resourceSuffix = null, protocolVersion = '2025-11-25', deprecation = null } = options;
   const finalData = data && typeof data === 'object' ? { ...data } : {};
@@ -167,6 +176,7 @@ function wrapEnvelope(toolName, ok, exitCode, summary, data, nextActions, option
  * @param {Record<string, any>} [rawArgs]
  * @param {Record<string, any>} [ctx]
  * @param {Record<string, any>} [meta]
+ * @returns {Promise<{ unknownTool: true } | { unknownTool: false, result: Record<string, any> }>}
  */
 async function executeMcpTool(name, rawArgs = {}, ctx = {}, meta = {}) {
   const resolved = resolveToolCall(name, rawArgs);
@@ -241,7 +251,7 @@ async function executeMcpTool(name, rawArgs = {}, ctx = {}, meta = {}) {
   const progressToken = meta?.progressToken;
   const onProgress =
     progressToken !== undefined && typeof notifyFn === 'function'
-      ? (info) => {
+      ? (/** @type {{ progress: number, message: string }} */ info) => {
           notifyFn({
             jsonrpc: '2.0',
             method: 'notifications/progress',
@@ -298,7 +308,7 @@ async function executeMcpTool(name, rawArgs = {}, ctx = {}, meta = {}) {
     data.verdict
       ? `Verdict=${String(data.verdict).toUpperCase()} (${data.trustTier || 'T0'}, runId=${data.runId || 'none'}, scope=${data.acceptanceScope})`
       : data.error ||
-        (completed.stderr || completed.stdout || '')
+        String(completed.stderr || completed.stdout || '')
           .split(/\r?\n/)
           .map((l) => l.trim())
           .find((l) => l && !l.startsWith('{') && !l.startsWith('}') && !l.startsWith('"')) ||
@@ -362,7 +372,7 @@ export async function handleMcpJsonRpcMessage(msg, ctx = {}, requestMeta = {}) {
           ctx.protocolVersion = protocolVersion;
           ctx.initialized = true;
           if (Array.isArray(msg.params?.roots)) {
-            ctx.clientRoots = parseWorkspaceRoots(msg.params.roots.map((r) => r?.uri || r).filter(Boolean));
+            ctx.clientRoots = parseWorkspaceRoots(msg.params.roots.map((/** @type {any} */ r) => r?.uri || r).filter(Boolean));
           }
         }
         return rpcResult(msg.id, {
@@ -438,6 +448,10 @@ export async function handleMcpJsonRpcMessage(msg, ctx = {}, requestMeta = {}) {
     if (err instanceof URIError) {
       return rpcError(msg?.id ?? null, -32602, `Invalid URI encoding: ${err.message}`);
     }
-    return rpcError(msg?.id ?? null, -32603, `Internal MCP error: ${err?.message || String(err)}`);
+    return rpcError(
+      msg?.id ?? null,
+      -32603,
+      `Internal MCP error: ${err instanceof Error && err.message ? err.message : String(err)}`
+    );
   }
 }

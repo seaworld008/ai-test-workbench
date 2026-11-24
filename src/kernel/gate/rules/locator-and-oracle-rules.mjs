@@ -1,6 +1,11 @@
 import { diffEventSnippets } from './governance-rules.mjs';
 
 /**
+ * @typedef {import('./governance-rules.mjs').GateFinding} GateFinding
+ * @typedef {import('./governance-rules.mjs').RuleEvalCtx} RuleEvalCtx
+ */
+
+/**
  * AITEST-G111: Semantic locator (`getByRole`/`Label`/`Text`/`TestId`) degraded to generic `body`/`html`/`*`/`div`.
  */
 export const ruleG111 = {
@@ -9,8 +14,9 @@ export const ruleG111 = {
   description: 'Blocks replacing semantic locators with overly generic body/html/*/div locators.',
   waiverKey: 'locator-degradation',
   defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
   evaluate(ctx) {
-    const { file, baseSum, headSum, canWaive } = ctx;
+    const { file = '', baseSum, headSum, canWaive = () => false } = ctx;
     if (!baseSum || !headSum) return [];
     if (
       headSum.semanticLocators < baseSum.semanticLocators &&
@@ -46,8 +52,9 @@ export const ruleG112 = {
   description: 'Blocks flipping expected HTTP status assertions from 2xx/4xx to 5xx.',
   waiverKey: 'oracle-5xx-flip',
   defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
   evaluate(ctx) {
-    const { file, baseSum, headSum, canWaive } = ctx;
+    const { file = '', baseSum, headSum, canWaive = () => false } = ctx;
     if (!baseSum || !headSum) return [];
     if (
       headSum.successStatuses < baseSum.successStatuses &&
@@ -85,8 +92,10 @@ export const ruleG114 = {
   description: 'Blocks mocking backend responses via route.fulfill() to fabricate fake-green oracles.',
   waiverKey: 'route-fulfill',
   defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
   evaluate(ctx) {
-    const { file, baseSum, headSum, canWaive } = ctx;
+    const { file = '', baseSum, headSum, canWaive = () => false } = ctx;
+    /** @type {GateFinding[]} */
     const findings = [];
     const headAssertions = headSum?.assertions || [];
 

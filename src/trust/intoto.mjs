@@ -41,7 +41,8 @@ export const TRUST_LEVEL_DEFINITIONS = Object.freeze({
  * @param {'zh' | 'en'} [lang]
  */
 export function describeTrustLevel(level, lang = 'zh') {
-  const entry = TRUST_LEVEL_DEFINITIONS[level] || TRUST_LEVEL_DEFINITIONS.T0;
+  const key = level === 'T1' || level === 'T2' ? level : 'T0';
+  const entry = TRUST_LEVEL_DEFINITIONS[key];
   return `${entry.level} — ${lang === 'zh' ? entry.zh : entry.en}`;
 }
 
@@ -144,7 +145,12 @@ export function buildInTotoVerdictAttestation(params) {
   }
 
   const trustLevel = verdictPayload.trustLevel || verdictPayload.trustTier || 'T0';
-  const trustDef = TRUST_LEVEL_DEFINITIONS[trustLevel] || TRUST_LEVEL_DEFINITIONS.T0;
+  const trustDef =
+    trustLevel === 'T2'
+      ? TRUST_LEVEL_DEFINITIONS.T2
+      : trustLevel === 'T1'
+        ? TRUST_LEVEL_DEFINITIONS.T1
+        : TRUST_LEVEL_DEFINITIONS.T0;
 
   const statementCore = {
     _type: INTOTO_STATEMENT_TYPE,
@@ -207,7 +213,7 @@ export function tryCosignKeylessSign(attestationPath) {
     const doc = JSON.parse(fs.readFileSync(attestationPath, 'utf8'));
     fs.writeFileSync(predicatePath, JSON.stringify(doc.predicate || doc, null, 2) + '\n', 'utf8');
   } catch (err) {
-    return { signed: false, bundlePath: null, reason: `Failed to prepare predicate: ${err?.message || err}` };
+    return { signed: false, bundlePath: null, reason: `Failed to prepare predicate: ${err instanceof Error ? err.message : String(err)}` };
   }
   const res = spawnSync(
     'cosign',

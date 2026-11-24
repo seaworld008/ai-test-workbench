@@ -12,10 +12,18 @@ import { GATE_KERNEL_VERSION } from './kernel/gate-kernel.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKBENCH_ROOT = path.resolve(__dirname, '..');
 
+/**
+ * @param {number} bytes
+ * @returns {string}
+ */
 function formatGb(bytes) {
   return `${(bytes / (1024 ** 3)).toFixed(1)} GB`;
 }
 
+/**
+ * @param {string} versionStr
+ * @returns {boolean}
+ */
 function isSupportedNodeVersion(versionStr) {
   const [maj, min] = versionStr.split('.').map((n) => Number(n));
   if (maj > 22) return true;
@@ -104,11 +112,28 @@ export function detectHostGateKernelVersion(qaDir) {
   return { present: true, version: 'unknown', source: 'support/gate-kernel.mjs' };
 }
 
+/**
+ * @param {{
+ *   lang?: 'zh' | 'en' | string,
+ *   target?: string,
+ *   qaDir?: string,
+ *   dryRun?: boolean,
+ *   force?: boolean,
+ *   json?: boolean,
+ * }} [options]
+ * @returns {Promise<number>}
+ */
 export async function runDoctor(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   const targetDir = options.target ? path.resolve(options.target) : null;
+  /** @type {Array<{ status: 'OK' | 'WARN' | 'FAIL', name: string, detail: string }>} */
   const checks = [];
 
+  /**
+   * @param {'OK' | 'WARN' | 'FAIL'} status
+   * @param {string} name
+   * @param {string} detail
+   */
   const add = (status, name, detail) => {
     checks.push({ status, name, detail });
   };
@@ -147,7 +172,7 @@ export async function runDoctor(options = {}) {
     const reg = redactSecrets(npmRegistryRes.stdout.trim() || 'unknown');
     add(npmVerRes.code === 0 ? 'OK' : 'WARN', 'npm', `v${npmVer}, registry=${reg}`);
   } catch (err) {
-    add('FAIL', 'npm', err.message);
+    add('FAIL', 'npm', err instanceof Error ? err.message : String(err));
   }
 
   // 4. Git / Codex / Claude / Docker
@@ -189,8 +214,8 @@ export async function runDoctor(options = {}) {
 
   // 5. Proxy env visibility (redacted)
   const proxyEnv = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy']
-    .filter((k) => process.env[k])
-    .map((k) => `${k}=${redactSecrets(process.env[k])}`);
+    .filter((k) => Boolean(process.env[k]))
+    .map((k) => `${k}=${redactSecrets(process.env[k] || '')}`);
   add('OK', lang === 'zh' ? '代理环境' : 'Proxy Env', proxyEnv.length > 0 ? proxyEnv.join(', ') : lang === 'zh' ? '无代理环境变量' : 'none');
 
   // 6. Disk & write permission
@@ -204,7 +229,7 @@ export async function runDoctor(options = {}) {
       `${formatGb(freeBytes)} free, writable (${WORKBENCH_ROOT})`
     );
   } catch (err) {
-    add('FAIL', lang === 'zh' ? '磁盘空间与写入权限' : 'Disk & Write Access', err.message);
+    add('FAIL', lang === 'zh' ? '磁盘空间与写入权限' : 'Disk & Write Access', err instanceof Error ? err.message : String(err));
   }
 
   // 7. Template Playwright status

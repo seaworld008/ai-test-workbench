@@ -13,6 +13,11 @@ import { computeImpact } from './impact.mjs';
 import { beginRunLedger, finalizeRunLedger } from './ledger.mjs';
 import { evaluateTargetSafety, loadMergedQaEnv } from './origin-guard.mjs';
 
+/**
+ * @param {string} suite
+ * @param {{ hasBaseUrl?: boolean }} [options]
+ * @returns {string[]}
+ */
 export function buildSuitePlaywrightArgs(suite, options = {}) {
   const s = (suite || 'smoke').toLowerCase();
   const args = [];
@@ -258,6 +263,10 @@ export async function executeSuiteCore(options = {}) {
   };
 }
 
+/**
+ * @param {Record<string, any>} [options]
+ * @returns {Promise<number>}
+ */
 export async function runSuiteCommand(options = {}) {
   const res = await executeSuiteCore({
     ...options,

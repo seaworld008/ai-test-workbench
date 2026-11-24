@@ -22,6 +22,7 @@ import {
   sanitizeUntrustedDomText,
 } from './safety.mjs';
 
+/** @param {string} filePath */
 function loadJsonIfValid(filePath) {
   if (!fs.existsSync(filePath)) return null;
   try {
@@ -34,6 +35,7 @@ function loadJsonIfValid(filePath) {
 /**
  * Runs a bounded, strictly read-only multi-portal crawl inside a Playwright browser instance.
  * Enforces HTTP/WebSocket egress & mutation firewalls and captures topology + redacted ARIA snapshots.
+ * @param {{ browser: any, safety: any, guardConfig: any, sessionData: any, userAuthPath: string, maxPages: number, exploreTabs: boolean, exploreDialogs: boolean, explorePortals: boolean, maxTabsPerPage: number, maxDialogsPerPage: number, maxPortals: number, entryPath: string }} params
  */
 export async function executeExploreCrawl({
   browser,
@@ -67,20 +69,20 @@ export async function executeExploreCrawl({
       maxDialogsPerPage,
       maxPortals,
     },
-    techStack: [],
-    authKeyNames: [],
-    portals: [],
-    pages: [],
-    brokenRoutes: [],
-    endpoints: [],
-    blockedWriteRequests: [],
-    blockedApiHosts: [],
-    envelopeErrors: [],
-    queryAnomalies: [],
-    duplicateWaterfalls: [],
-    consoleErrors: [],
-    serverErrors: [],
-    waitNotes: [],
+    techStack: /** @type {string[]} */ ([]),
+    authKeyNames: /** @type {string[]} */ ([]),
+    portals: /** @type {Array<{ name: string, mode: string, id?: string | number, notes?: string }>} */ ([]),
+    pages: /** @type {Array<{ portal: string, route: string, actualPath: string, title: string, breadcrumbs: string[], tableHeaders: string[], hasTable: boolean, tableRowCount: number, filterLabels: string[], buttons: string[], tabs: string[], tabsExplored: string[], dialogsExplored: any[], readonlyButtons: string[], mutationButtons: string[], apisObserved: string[], hasPasswordInput: boolean, hasChart: boolean, a11y: any, ariaSnapshot: string | null, archetype: string }>} */ ([]),
+    brokenRoutes: /** @type {Array<{ portal: string, route: string, actualPath: string | null, reason: string }>} */ ([]),
+    endpoints: /** @type {Array<{ method: string, endpoint: string, status: number }>} */ ([]),
+    blockedWriteRequests: /** @type {Array<{ method: string, endpoint: string, reason: string | null }>} */ ([]),
+    blockedApiHosts: /** @type {string[]} */ ([]),
+    envelopeErrors: /** @type {Array<{ route: string, method: string, endpoint: string, httpStatus: number, code: number | null, message: string | null }>} */ ([]),
+    queryAnomalies: /** @type {Array<{ route: string, detail: string, endpoint: string }>} */ ([]),
+    duplicateWaterfalls: /** @type {Array<{ route: string, endpoint: string, count: number }>} */ ([]),
+    consoleErrors: /** @type {Array<{ route: string, message: string }>} */ ([]),
+    serverErrors: /** @type {string[]} */ ([]),
+    waitNotes: /** @type {Array<{ route: string, stage: string, note: string }>} */ ([]),
   };
 
   /** @type {Record<string, any>} */
@@ -96,7 +98,7 @@ export async function executeExploreCrawl({
 
   // Block non-allowlisted WebSockets during exploration (`E-05`)
   if (typeof context.routeWebSocket === 'function') {
-    await context.routeWebSocket('**/*', (ws) => {
+    await context.routeWebSocket('**/*', (/** @type {any} */ ws) => {
       const check = evaluateExploreRequestSafety('GET', ws.url(), null, guardConfig);
       if (check.blocked) {
         if (topology.blockedWriteRequests.length < 50) {
@@ -115,7 +117,7 @@ export async function executeExploreCrawl({
 
   // Block sendBeacon writes & restore optional sessionStorage
   await context.addInitScript(
-    ({ sessionPayload }) => {
+    (/** @type {{ sessionPayload: any }} */ { sessionPayload }) => {
       if (navigator && typeof navigator.sendBeacon === 'function') {
         navigator.sendBeacon = () => false;
       }
@@ -128,8 +130,9 @@ export async function executeExploreCrawl({
     { sessionPayload: sessionData }
   );
 
+  /** @type {Set<string>} */
   const blockedApiHostSet = new Set();
-  await context.route('**/*', async (route) => {
+  await context.route('**/*', async (/** @type {any} */ route) => {
     const req = route.request();
     const method = req.method().toUpperCase();
     const url = req.url();
@@ -159,18 +162,21 @@ export async function executeExploreCrawl({
 
   const page = await context.newPage();
   let activeRouteLabel = entryPath;
+  /** @type {Set<string>} */
   const seenEndpointKeys = new Set();
+  /** @type {Map<string, number>} */
   let routeApiCounts = new Map();
+  /** @type {Set<string>} */
   const seenAnomalyKeys = new Set();
 
-  page.on('pageerror', (err) => {
+  page.on('pageerror', (/** @type {any} */ err) => {
     topology.consoleErrors.push({
       route: activeRouteLabel,
       message: redactSecrets(err?.message || String(err)),
     });
   });
 
-  page.on('console', (msg) => {
+  page.on('console', (/** @type {any} */ msg) => {
     if (msg.type() === 'error') {
       topology.consoleErrors.push({
         route: activeRouteLabel,
@@ -179,7 +185,7 @@ export async function executeExploreCrawl({
     }
   });
 
-  page.on('response', (res) => {
+  page.on('response', (/** @type {any} */ res) => {
     const status = res.status();
     const reqType = res.request().resourceType();
     const url = res.url();
@@ -203,7 +209,7 @@ export async function executeExploreCrawl({
         const capturedMethod = res.request().method();
         void res
           .json()
-          .then((body) => {
+          .then((/** @type {any} */ body) => {
             const envErr = detectEnvelopeBusinessError(status, body);
             if (envErr.isError && topology.envelopeErrors.length < 50) {
               topology.envelopeErrors.push({
@@ -237,16 +243,22 @@ export async function executeExploreCrawl({
     }
   });
 
+  /** @type {Set<string>} */
   const visited = new Set();
+  /** @type {Set<string>} */
   const stackSet = new Set();
+  /** @type {Set<string>} */
   const authKeysSet = new Set();
+  /** @type {Map<string, { name: string, mode: string, id?: string | number, notes?: string }>} */
   const portalMap = new Map();
 
+  /** @param {string} portalLabel @param {string} initialRoute @param {number} portalPageBudget @param {boolean} isPrimaryPortal */
   const crawlPortalContext = async (portalLabel, initialRoute, portalPageBudget, isPrimaryPortal) => {
     const routeQueue = createStratifiedRouteQueue();
     routeQueue.enqueue(initialRoute);
     let crawledInPortal = 0;
     let effectivePortalBudget = portalPageBudget;
+    /** @type {{ selector: string | null, options: string[] }} */
     let switcherInfo = { selector: null, options: [] };
 
     while (routeQueue.size() > 0 && topology.pages.length < maxPages && crawledInPortal < effectivePortalBudget) {
@@ -264,7 +276,7 @@ export async function executeExploreCrawl({
       try {
         if (crawledInPortal > 0) {
           const spaNav = await page
-            .evaluate(async (dest) => {
+            .evaluate(async (/** @type {string} */ dest) => {
               const appEl = /** @type {any} */ (document.querySelector('#app'));
               const router = appEl?.__vue__?.$router || appEl?.__vue_app__?.config?.globalProperties?.$router;
               if (router && typeof router.push === 'function') {
@@ -272,8 +284,9 @@ export async function executeExploreCrawl({
                   await router.push(dest);
                   return { usedSpa: true, error: null };
                 } catch (e) {
-                  if (e?.name === 'NavigationDuplicated') return { usedSpa: true, error: null };
-                  return { usedSpa: true, error: String(e?.message || e) };
+                  const errObj = /** @type {{ name?: unknown, message?: unknown } | null} */ (typeof e === 'object' && e !== null ? e : null);
+                  if (errObj?.name === 'NavigationDuplicated') return { usedSpa: true, error: null };
+                  return { usedSpa: true, error: String(errObj?.message || e) };
                 }
               }
               return { usedSpa: false, error: null };
@@ -294,12 +307,13 @@ export async function executeExploreCrawl({
           await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20_000 });
         }
       } catch (navErr) {
-        topology.waitNotes.push({ route: normalizedKey, stage: 'goto', note: String(navErr?.message || navErr).slice(0, 120) });
+        const navMsg = navErr instanceof Error ? navErr.message : String(navErr);
+        topology.waitNotes.push({ route: normalizedKey, stage: 'goto', note: navMsg.slice(0, 120) });
         topology.brokenRoutes.push({
           portal: portalLabel,
           route: normalizedKey,
           actualPath: null,
-          reason: `Navigation error: ${String(navErr?.message || navErr).slice(0, 140)}`,
+          reason: `Navigation error: ${navMsg.slice(0, 140)}`,
         });
         continue;
       }
@@ -400,6 +414,7 @@ export async function executeExploreCrawl({
         hasChart: snap.hasChart,
         a11y: snap.a11y,
         ariaSnapshot: ariaSnapshot ? ariaSnapshot.slice(0, 4000) : null,
+        archetype: '',
       };
       pageEntry.archetype = detectPageArchetype(pageEntry);
       topology.pages.push(pageEntry);

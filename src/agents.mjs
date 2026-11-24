@@ -8,11 +8,26 @@ import { resolvePlaywrightCli, runPlaywright } from './proc.mjs';
 export const SUPPORTED_LOOPS = ['claude', 'codex', 'copilot', 'opencode', 'vscode', 'vscode-legacy'];
 const MANIFEST_REL_PATH = '.aitest/agents-manifest.json';
 
+/**
+ * @typedef {{ sha256: string, loop: string, updatedAt: string }} AgentManifestEntry
+ * @typedef {{ version: number, files: Record<string, AgentManifestEntry> }} AgentsManifest
+ */
+
+/**
+ * @param {string} content
+ * @returns {string}
+ */
 export function sha256Text(content) {
   return crypto.createHash('sha256').update(content, 'utf8').digest('hex');
 }
 
+/**
+ * @param {string} dir
+ * @param {string} [baseDir]
+ * @returns {Map<string, string>}
+ */
 function walkFiles(dir, baseDir = dir) {
+  /** @type {Map<string, string>} */
   const out = new Map();
   if (!fs.existsSync(dir)) return out;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -42,6 +57,10 @@ function walkFiles(dir, baseDir = dir) {
  * Replaces any absolute path references to the temporary staging directory with qaDir
  * across native, forward-slash, backslash, and JSON-escaped backslash forms,
  * and asserts zero leftover staging marker (`aitest-agents-`).
+ * @param {string} content
+ * @param {string} tempDir
+ * @param {string} qaDir
+ * @returns {string}
  */
 export function sanitizeStagedContent(content, tempDir, qaDir) {
   const tempNative = path.resolve(tempDir);
@@ -67,6 +86,10 @@ export function sanitizeStagedContent(content, tempDir, qaDir) {
   return out;
 }
 
+/**
+ * @param {string} qaDir
+ * @returns {AgentsManifest}
+ */
 export function loadAgentsManifest(qaDir) {
   const manifestPath = path.join(qaDir, MANIFEST_REL_PATH);
   if (!fs.existsSync(manifestPath)) {
@@ -80,6 +103,10 @@ export function loadAgentsManifest(qaDir) {
   }
 }
 
+/**
+ * @param {string} qaDir
+ * @param {AgentsManifest} manifest
+ */
 export function saveAgentsManifest(qaDir, manifest) {
   const manifestPath = path.join(qaDir, MANIFEST_REL_PATH);
   fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
@@ -89,6 +116,10 @@ export function saveAgentsManifest(qaDir, manifest) {
 /**
  * Safely merges JSON MCP configs only when existing keys are either untouched since manifest
  * or disjoint from incoming keys. Returns { status: 'MERGED_JSON' | 'CONFLICT', content }.
+ * @param {string} existingStr
+ * @param {string} incomingStr
+ * @param {string | null} recordedSha
+ * @returns {{ status: 'MERGED_JSON', content: string } | { status: 'CONFLICT', content: null }}
  */
 function tryMergeMcpJson(existingStr, incomingStr, recordedSha) {
   try {
@@ -120,6 +151,10 @@ function tryMergeMcpJson(existingStr, incomingStr, recordedSha) {
   }
 }
 
+/**
+ * @param {string} qaDir
+ * @returns {boolean}
+ */
 function hasSeedProjectInConfig(qaDir) {
   const cfgPath = path.join(qaDir, 'playwright.config.ts');
   if (!fs.existsSync(cfgPath)) return false;
@@ -130,6 +165,14 @@ function hasSeedProjectInConfig(qaDir) {
 /**
  * Runs `playwright init-agents --loop=<loop>` in an isolated staging dir (`cwd = tempDir`),
  * sanitizes paths, and applies SHA-256 manifest-backed updates/conflict protection into `qaDir`.
+ * @param {string} qaDir
+ * @param {{
+ *   loops?: string[],
+ *   dryRun?: boolean,
+ *   force?: boolean,
+ *   lang?: 'zh' | 'en' | string,
+ *   preserveSeed?: boolean,
+ * }} [options]
  */
 export async function syncOfficialAgents(qaDir, options = {}) {
   const {
@@ -162,6 +205,7 @@ export async function syncOfficialAgents(qaDir, options = {}) {
   const manifest = loadAgentsManifest(qaDir);
   let manifestDirty = false;
   let conflictCount = 0;
+  /** @type {Array<{ loop: string, ok: boolean, stdout: string, actions: Array<{ file: string, status: string, sidecar?: string }> }>} */
   const results = [];
   const useSeedProject = hasSeedProjectInConfig(qaDir);
 
@@ -199,6 +243,7 @@ export async function syncOfficialAgents(qaDir, options = {}) {
       }
 
       const afterStage = walkFiles(tempDir);
+      /** @type {Array<{ rel: string, content: string }>} */
       const generatedFiles = [];
       for (const [rel, rawContent] of afterStage.entries()) {
         if (!beforeStage.has(rel) || beforeStage.get(rel) !== rawContent) {
@@ -207,6 +252,7 @@ export async function syncOfficialAgents(qaDir, options = {}) {
         }
       }
 
+      /** @type {Array<{ file: string, status: string, sidecar?: string }>} */
       const fileActions = [];
       const nowIso = new Date().toISOString();
 
@@ -229,7 +275,7 @@ export async function syncOfficialAgents(qaDir, options = {}) {
         }
 
         // 2. Brand new file -> create & record sha256 in manifest
-        if (!existed) {
+        if (!existed || existingContent === null) {
           if (!dryRun) {
             fs.mkdirSync(path.dirname(dest), { recursive: true });
             fs.writeFileSync(dest, item.content, 'utf8');
@@ -323,6 +369,18 @@ export async function syncOfficialAgents(qaDir, options = {}) {
   return { results, conflictCount };
 }
 
+/**
+ * @param {{
+ *   lang?: 'zh' | 'en' | string,
+ *   target?: string,
+ *   qaDir?: string,
+ *   loop?: string,
+ *   dryRun?: boolean,
+ *   force?: boolean,
+ *   json?: boolean,
+ * }} [options]
+ * @returns {Promise<number>}
+ */
 export async function runUpdateAgents(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   const target = options.target ? path.resolve(options.target) : null;
@@ -392,6 +450,11 @@ export async function runUpdateAgents(options = {}) {
   return 0;
 }
 
+/**
+ * @param {string} targetPath
+ * @param {string} [explicitQaDir]
+ * @returns {string | null}
+ */
 export function resolveQaDirectory(targetPath, explicitQaDir) {
   const abs = path.resolve(targetPath);
   if (explicitQaDir) {

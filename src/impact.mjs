@@ -27,15 +27,37 @@ const GRAPH_EXTS = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '/
 const GRAPH_IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'reports', 'playwright-report', 'test-results', '.aitest']);
 const MAX_GRAPH_FILES = 3000;
 
+/**
+ * @typedef {{
+ *   mode: 'full' | 'targeted' | 'only-changed',
+ *   reason: string,
+ *   specs: string[],
+ *   totalSpecsCount?: number,
+ *   reductionRatio?: number,
+ *   why: Array<{ spec: string, via: string }>,
+ *   recallEstimate: number | null,
+ *   useOnlyChanged: boolean,
+ *   changedFiles: string[],
+ *   baseRef?: string,
+ * }} ImpactResult
+ */
+
+/** @param {string} pattern @returns {boolean} */
 function isOverbroadCatchAllGlob(pattern) {
   const clean = String(pattern || '').trim().replace(/^\.\//, '');
   return clean === '**' || clean === '*' || clean === '**/*' || clean === 'src/**' || clean === 'src/**/*';
 }
 
+/**
+ * @param {string} testsDir
+ * @param {string} qaDir
+ * @returns {string[]}
+ */
 function listAllSpecFiles(testsDir, qaDir) {
+  /** @type {string[]} */
   const results = [];
   if (!fs.existsSync(testsDir)) return results;
-  const walk = (dir) => {
+  const walk = (/** @type {string} */ dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
@@ -53,6 +75,7 @@ function listAllSpecFiles(testsDir, qaDir) {
   return results.sort();
 }
 
+/** @param {string} repoDir */
 function loadTsConfigPathAliases(repoDir) {
   /** @type {Array<{ prefix: string, targetPrefix: string }>} */
   const aliases = [];
@@ -81,6 +104,13 @@ function loadTsConfigPathAliases(repoDir) {
   return aliases;
 }
 
+/**
+ * @param {string} fromFileAbs
+ * @param {string} specifier
+ * @param {string} repoDir
+ * @param {Array<{ prefix: string, targetPrefix: string }>} [pathAliases]
+ * @returns {string | null}
+ */
 function resolveRepoImport(fromFileAbs, specifier, repoDir, pathAliases = []) {
   let baseAbs = null;
   if (specifier.startsWith('./') || specifier.startsWith('../')) {
@@ -125,7 +155,7 @@ export function buildReverseImportGraph(repoDir, options = {}) {
   const importRe =
     /(?:import\s+(?:[\s\S]*?\s+from\s+)?['"`]([^'"`]+)['"`]|export\s+[\s\S]*?\s+from\s+['"`]([^'"`]+)['"`]|import\s*\(\s*['"`]([^'"`]+)['"`]\s*\)|require\s*\(\s*['"`]([^'"`]+)['"`]\s*\))/g;
 
-  const walk = (dir) => {
+  const walk = (/** @type {string} */ dir) => {
     if (scanned >= MAX_GRAPH_FILES) {
       reverse.truncated = true;
       return;
@@ -236,6 +266,9 @@ export function evaluateImpactRecall(impactResult, failedSpecFiles = []) {
 /**
  * Segment-aligned stem match (`I-03`): prevents `src/lib/user.ts` from weakly matching `user-profile.spec.ts`
  * via arbitrary substring while allowing exact segment/basename match (`courses.spec.ts` <-> `courses`).
+ * @param {string} specRel
+ * @param {string} stem
+ * @returns {boolean}
  */
 function specMatchesStemExactSegment(specRel, stem) {
   const baseNoExt = path
@@ -258,6 +291,11 @@ function specMatchesStemExactSegment(specRel, stem) {
  *   (never silently dropped when edited alongside a spec!).
  * - Every transitive dependent of a changed source file must map cleanly, else forces `full`!
  * - Graph truncation forces `full` with explicit warning.
+ * @param {string[]} changedFiles
+ * @param {string} qaDir
+ * @param {string} repoDir
+ * @param {{ canUseOnlyChanged?: boolean }} [options]
+ * @returns {ImpactResult}
  */
 export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {}) {
   const normalized = [
@@ -309,6 +347,7 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
   }
 
   const impactMapPath = path.join(qaDir, 'impact-map.json');
+  /** @type {Array<{ match?: string | string[], source?: string, specs?: string[], fullSuite?: boolean }>} */
   let rules = [];
   if (fs.existsSync(impactMapPath)) {
     try {
@@ -329,7 +368,7 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
 
   // Reject overbroad catch-all rules (`**`, `*`) that aren't `fullSuite: true` (`I-01` anti-manipulation!)
   for (const r of rules) {
-    const rawPatterns = (Array.isArray(r.match) ? r.match : [r.source || r.match]).filter(Boolean);
+    const rawPatterns = /** @type {string[]} */ ((Array.isArray(r.match) ? r.match : [r.source || r.match]).filter(Boolean));
     if (!r.fullSuite && rawPatterns.some(isOverbroadCatchAllGlob)) {
       return {
         mode: 'full',
@@ -345,7 +384,7 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
 
   const compiledRules = rules.map((r) => ({
     rawMatch: Array.isArray(r.match) ? r.match.join(', ') : String(r.source || r.match || ''),
-    patterns: (Array.isArray(r.match) ? r.match : [r.source || r.match]).filter(Boolean).map(compileGlob),
+    patterns: /** @type {string[]} */ ((Array.isArray(r.match) ? r.match : [r.source || r.match]).filter(Boolean)).map(compileGlob),
     specs: Array.isArray(r.specs) ? r.specs : [],
     fullSuite: Boolean(r.fullSuite),
   }));
@@ -365,16 +404,17 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
 
   /** @type {Map<string, string[]>} */
   const whyBySpec = new Map();
-  const addSpecReason = (specRel, reasonStr) => {
+  const addSpecReason = (/** @type {string} */ specRel, /** @type {string} */ reasonStr) => {
     const arr = whyBySpec.get(specRel) || [];
     if (!arr.includes(reasonStr)) arr.push(reasonStr);
     whyBySpec.set(specRel, arr);
   };
 
   let allInsideQa = true;
+  /** @type {string[]} */
   let qaNonSpecFiles = [];
 
-  const matchCandidateFileToSpecs = (candidateFile, chainPrefix = null) => {
+  const matchCandidateFileToSpecs = (/** @type {string} */ candidateFile, /** @type {string | null} */ chainPrefix = null) => {
     let matchedAny = false;
     for (const rule of compiledRules) {
       if (rule.patterns.some((re) => re.test(candidateFile))) {
@@ -590,15 +630,18 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
 
 /**
  * Collects changed & untracked files via `git -c core.quotePath=off ... -z` (handles Chinese/Unicode paths & monorepo subdirs, `G-07`).
+ * @param {string} repoDir
+ * @param {string} [baseRef]
  */
 export async function collectGitChangedFiles(repoDir, baseRef = 'HEAD~1') {
   const gitRoot = resolveGitRoot(repoDir);
   if (!gitRoot) {
-    return { ok: false, reason: 'Target is not a git repository.', files: [], validBaseRef: false };
+    return { ok: false, reason: 'Target is not a git repository.', files: /** @type {string[]} */ ([]), validBaseRef: false };
   }
 
+  /** @type {Set<string>} */
   const files = new Set();
-  const addNulOutput = (stdout) => {
+  const addNulOutput = (/** @type {string} */ stdout) => {
     for (const raw of String(stdout || '').split('\0')) {
       const trimmed = raw.trim();
       if (!trimmed) continue;
@@ -655,6 +698,11 @@ export async function collectGitChangedFiles(repoDir, baseRef = 'HEAD~1') {
   return { ok: true, reason: null, files: [...files].sort(), validBaseRef };
 }
 
+/**
+ * @param {string} targetDir
+ * @param {{ qaDir?: string, base?: string, files?: string[] }} [options]
+ * @returns {Promise<ImpactResult>}
+ */
 export async function computeImpact(targetDir, options = {}) {
   const repoDir = path.resolve(targetDir);
   const qaDir = resolveQaDirectory(repoDir, options.qaDir);
@@ -687,6 +735,10 @@ export async function computeImpact(targetDir, options = {}) {
   return { ...evaluated, baseRef };
 }
 
+/**
+ * @param {{ lang?: string, target?: string, qaDir?: string, base?: string, files?: string | string[], dryRun?: boolean, force?: boolean, json?: boolean }} [options]
+ * @returns {Promise<number>}
+ */
 export async function runImpactCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   if (!options.target) {

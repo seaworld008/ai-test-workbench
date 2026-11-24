@@ -28,7 +28,8 @@ export function computeLatencyPercentiles(samplesMs) {
   if (clean.length === 0) {
     return { count: 0, minMs: 0, p50Ms: 0, p75Ms: 0, p90Ms: 0, p95Ms: 0, p99Ms: 0, maxMs: 0, avgMs: 0 };
   }
-  const pick = (pct) => clean[Math.min(clean.length - 1, Math.max(0, Math.ceil((pct / 100) * clean.length) - 1))];
+  const pick = (/** @type {number} */ pct) =>
+    clean[Math.min(clean.length - 1, Math.max(0, Math.ceil((pct / 100) * clean.length) - 1))];
   const sum = clean.reduce((a, b) => a + b, 0);
   return {
     count: clean.length,
@@ -43,16 +44,21 @@ export function computeLatencyPercentiles(samplesMs) {
   };
 }
 
+/** @param {number | null | undefined} n @returns {n is number} */
+const isFiniteNumber = (n) => typeof n === 'number' && Number.isFinite(n);
+
+/** @param {Array<number | null | undefined>} nums @returns {number | null} */
 export function medianOfNullable(nums) {
-  const valid = nums.filter((n) => typeof n === 'number' && Number.isFinite(n)).sort((a, b) => a - b);
+  const valid = nums.filter(isFiniteNumber).sort((a, b) => a - b);
   if (valid.length === 0) return null;
   const mid = Math.floor(valid.length / 2);
   if (valid.length % 2 === 1) return valid[mid];
   return Number(((valid[mid - 1] + valid[mid]) / 2).toFixed(2));
 }
 
+/** @param {Array<number | null | undefined>} nums @returns {number | null} */
 export function p75OfNullable(nums) {
-  const valid = nums.filter((n) => typeof n === 'number' && Number.isFinite(n)).sort((a, b) => a - b);
+  const valid = nums.filter(isFiniteNumber).sort((a, b) => a - b);
   if (valid.length === 0) return null;
   return valid[Math.min(valid.length - 1, Math.max(0, Math.ceil(0.75 * valid.length) - 1))];
 }
@@ -60,6 +66,12 @@ export function p75OfNullable(nums) {
 /**
  * Evaluates collected browser CDP Web Vitals & concurrent API latency against `<qaDir>/perf-budget.json`
  * plus optional relative baseline regression check (`P-01`, `P-02`).
+ * @typedef {{ route: string, samples?: number, ttfbMs?: number | null, domReadyMs?: number | null, loadMs?: number | null, fcpMs?: number | null, lcpMs?: number | null, lcpP75Ms?: number | null, inpMs?: number | null, cls?: number | null, domNodes?: number | null, transferKb?: number | null, jsHeapMb?: number | null, duplicateApisCount?: number | null }} BrowserMetric
+ * @typedef {{ endpoint: string, method?: string, concurrency: number, totalRequests: number, errorCount?: number, envelopeErrorCount?: number, errorRate: number, rps: number, minMs: number, p50Ms: number, p75Ms: number, p90Ms: number, p95Ms: number, p99Ms: number, maxMs: number, avgMs?: number }} ApiBenchmark
+ * @typedef {{ baseURL: string, measuredAt: string, mode: string, readOnly?: boolean, budgetPassed: boolean, violations: string[], browserMetrics: BrowserMetric[], apiBenchmark: ApiBenchmark | null }} PerfReport
+ * @param {{ browserMetrics?: BrowserMetric[], apiBenchmark?: ApiBenchmark | null } | null | undefined} report
+ * @param {{ browser?: Partial<typeof DEFAULT_BUDGET.browser>, api?: Partial<typeof DEFAULT_BUDGET.api> } | null} [budgetInput]
+ * @param {{ browserSummary?: Array<{ route: string, lcpMs?: number | null }> } | null} [baselineSnapshot]
  */
 export function evaluatePerfBudget(report, budgetInput = DEFAULT_BUDGET, baselineSnapshot = null) {
   const budget = {
@@ -125,6 +137,7 @@ export function evaluatePerfBudget(report, budgetInput = DEFAULT_BUDGET, baselin
   return { ok: violations.length === 0, violations, budget };
 }
 
+/** @param {PerfReport} report @param {string} [lang] */
 export function buildPerfMarkdown(report, lang = 'zh') {
   const isZh = lang === 'zh';
   const lines = [

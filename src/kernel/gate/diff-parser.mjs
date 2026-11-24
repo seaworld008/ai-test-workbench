@@ -7,16 +7,26 @@ import { evaluateDiffRules } from './rules/index.mjs';
 import { resolveTypeScriptCompiler } from './ts-loader.mjs';
 
 /**
+ * @typedef {{ beforeLines: string[], afterLines: string[], addedOnlyLines: string[], removedOnlyLines: string[] }} DiffHunk
+ * @typedef {{ file: string, hunks: DiffHunk[] }} DiffFileRecord
+ */
+
+/**
  * Splits a unified diff into per-file hunk records, properly unquoting non-ASCII Git paths (`G-07`).
  * Preserves context lines (` `) alongside `-` and `+` lines so multi-line Prettier assertions
  * and multi-line `try/catch` blocks reconstruct into valid AST syntax.
+ * @param {string} diffText
+ * @returns {DiffFileRecord[]}
  */
 export function parseUnifiedDiffByFile(diffText) {
-  /** @type {Array<{ file: string, hunks: Array<{ beforeLines: string[], afterLines: string[], addedOnlyLines: string[], removedOnlyLines: string[] }> }>} */
+  /** @type {DiffFileRecord[]} */
   const files = [];
+  /** @type {DiffFileRecord | null} */
   let curFileRec = null;
+  /** @type {DiffHunk | null} */
   let curHunk = null;
 
+  /** @returns {DiffHunk} */
   const ensureHunk = () => {
     if (!curFileRec) {
       curFileRec = { file: 'unknown', hunks: [] };
@@ -26,6 +36,7 @@ export function parseUnifiedDiffByFile(diffText) {
       curHunk = { beforeLines: [], afterLines: [], addedOnlyLines: [], removedOnlyLines: [] };
       curFileRec.hunks.push(curHunk);
     }
+    return curHunk;
   };
 
   for (const line of String(diffText || '').split(/\r?\n/)) {
@@ -58,20 +69,20 @@ export function parseUnifiedDiffByFile(diffText) {
     if (line.startsWith('\\ No newline')) continue;
 
     if (line.startsWith('-')) {
-      ensureHunk();
+      const hunk = ensureHunk();
       const body = line.slice(1);
-      curHunk.beforeLines.push(body);
-      curHunk.removedOnlyLines.push(body);
+      hunk.beforeLines.push(body);
+      hunk.removedOnlyLines.push(body);
     } else if (line.startsWith('+')) {
-      ensureHunk();
+      const hunk = ensureHunk();
       const body = line.slice(1);
-      curHunk.afterLines.push(body);
-      curHunk.addedOnlyLines.push(body);
+      hunk.afterLines.push(body);
+      hunk.addedOnlyLines.push(body);
     } else if (line.startsWith(' ')) {
-      ensureHunk();
+      const hunk = ensureHunk();
       const body = line.slice(1);
-      curHunk.beforeLines.push(body);
-      curHunk.afterLines.push(body);
+      hunk.beforeLines.push(body);
+      hunk.afterLines.push(body);
     }
   }
 
@@ -80,6 +91,8 @@ export function parseUnifiedDiffByFile(diffText) {
 
 /**
  * Layer 3 Semantic Diff Guard (`AITEST-G101` .. `AITEST-G115`) over unified diff text.
+ * @param {string} diffText
+ * @param {{ assertFunctionNames?: string[], activeWaivers?: Array<Record<string, any>>, qaDir?: string, rulesConfig?: Record<string, any>, tsCompiler?: any }} [options]
  */
 export function analyzeHealerDiffText(diffText, options = {}) {
   const {
@@ -88,6 +101,7 @@ export function analyzeHealerDiffText(diffText, options = {}) {
     qaDir,
     rulesConfig = {},
   } = options;
+  /** @type {Array<Record<string, any>>} */
   const findings = [];
   const violations = [...validateAssertFunctionNames(assertFunctionNames)];
 
@@ -100,7 +114,8 @@ export function analyzeHealerDiffText(diffText, options = {}) {
 
   for (const fileRec of parsedFiles) {
     const currentFile = fileRec.file;
-    const canWaive = (key) => isCoveredByWaiver({ file: currentFile, title: key }, activeWaivers, 'diff');
+    /** @param {string} key */
+    const canWaive = (key) => Boolean(isCoveredByWaiver({ file: currentFile, title: key }, activeWaivers, 'diff'));
 
     const beforeCombined = fileRec.hunks.map((h) => h.beforeLines.join('\n')).join('\n;\n');
     const afterCombined = fileRec.hunks.map((h) => h.afterLines.join('\n')).join('\n;\n');

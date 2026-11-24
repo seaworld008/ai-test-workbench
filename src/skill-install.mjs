@@ -12,6 +12,10 @@ const SKILL_SRC_DIR = path.resolve(__dirname, '..', 'skills', 'ai-test-workbench
  * - Claude Code: `<repo>/.claude/skills/ai-test-workbench/`
  * - Codex CLI:   `<repo>/.codex/skills/ai-test-workbench/` (or cross-agent `<repo>/.agents/skills/ai-test-workbench/`)
  * - QA-isolated: `<repo>/qa/skills/ai-test-workbench/` (default zero-root-footprint mode)
+ * @param {string} targetDir
+ * @param {string} [client]
+ * @param {string} [qaDirName]
+ * @returns {string}
  */
 export function resolveSkillDestination(targetDir, client = 'qa', qaDirName = 'qa') {
   const root = path.resolve(targetDir);
@@ -35,6 +39,18 @@ export function resolveSkillDestination(targetDir, client = 'qa', qaDirName = 'q
   }
 }
 
+/**
+ * @param {{
+ *   lang?: 'zh' | 'en' | string,
+ *   target?: string,
+ *   client?: string,
+ *   qaDir?: string,
+ *   dryRun?: boolean,
+ *   force?: boolean,
+ *   json?: boolean,
+ * }} [options]
+ * @returns {Promise<number>}
+ */
 export async function runSkillInstallCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   if (!options.target) {

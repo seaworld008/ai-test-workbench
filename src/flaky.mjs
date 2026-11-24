@@ -71,6 +71,7 @@ export function computeFlakyReport(qaDir, options = {}) {
   metrics.sort((a, b) => b.flakyRate - a.flakyRate || b.failRate - a.failRate);
 
   const qPath = path.join(qaDir, '.aitest', 'quarantine.json');
+  /** @type {{ schemaVersion: number, entries: Array<Record<string, any>> }} */
   let quarantine = { schemaVersion: SCHEMA_VERSIONS.quarantine, entries: [] };
   if (fs.existsSync(qPath)) {
     try {
@@ -177,6 +178,10 @@ export function syncQuarantineFromLedger(qaDir, options = {}) {
   };
 }
 
+/**
+ * @param {{ lang?: string, target?: string, qaDir?: string, syncQuarantine?: boolean, dryRun?: boolean, force?: boolean, json?: boolean }} [options]
+ * @returns {Promise<number>}
+ */
 export async function runFlakyCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   if (!options.target) {

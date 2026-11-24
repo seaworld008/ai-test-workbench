@@ -18,9 +18,12 @@ import { verifyPayloadT1 } from './trust-hmac.mjs';
  * 4. `maxSkipped` defaults to `0` (excluding policy-excluded `@mutation` tests and valid waivers).
  */
 
+/** @param {string} testsDir @returns {Array<{ file: string, line: number, label: string }>} */
 export function countMutationSpecsInFiles(testsDir) {
   if (!fs.existsSync(testsDir)) return [];
+  /** @type {Array<{ file: string, line: number, label: string }>} */
   const found = [];
+  /** @param {string} dir */
   const walk = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
@@ -44,6 +47,7 @@ export function countMutationSpecsInFiles(testsDir) {
   return found;
 }
 
+/** @param {string | undefined} fileStr @param {number | undefined} lineNum */
 function normalizeMutationDedupKey(fileStr, lineNum) {
   const norm = String(fileStr || '')
     .replace(/\\/g, '/')
@@ -54,6 +58,16 @@ function normalizeMutationDedupKey(fileStr, lineNum) {
 /**
  * Layer 1: Audits Playwright JSON results (`reports/results.json`) with deduplicated @mutation counting
  * and strict default `maxSkipped = 0` (`G-08`).
+ * @param {Record<string, any>} resultsObj
+ * @param {{
+ *   activeWaivers?: Array<Record<string, any>>;
+ *   requireE2e?: boolean;
+ *   maxFlaky?: number;
+ *   maxSkipped?: number;
+ *   allowMutation?: boolean;
+ *   excludedMutationHints?: Array<string | { file?: string; line?: number; label?: string }>;
+ *   quarantinedTests?: Array<string | { file?: string; title?: string }>;
+ * }} [options]
  */
 export function auditResultsJson(resultsObj, options = {}) {
   const {
@@ -66,7 +80,9 @@ export function auditResultsJson(resultsObj, options = {}) {
     quarantinedTests = [],
   } = options;
 
+  /** @type {string[]} */
   const errors = [];
+  /** @type {string[]} */
   const warnings = [];
   const allTests = flattenPlaywrightResults(resultsObj);
 
@@ -78,11 +94,17 @@ export function auditResultsJson(resultsObj, options = {}) {
   let quarantinedCount = 0;
   let e2eExecuted = 0;
 
+  /** @type {string[]} */
   const failedList = [];
+  /** @type {string[]} */
   const flakyList = [];
+  /** @type {string[]} */
   const unwaivedCriticalSkips = [];
+  /** @type {string[]} */
   const waivedSkips = [];
+  /** @type {Set<string>} */
   const seenMutationKeys = new Set();
+  /** @type {string[]} */
   const policyExcludedTitles = [];
 
   for (const hint of excludedMutationHints) {
@@ -223,6 +245,11 @@ export function auditResultsJson(resultsObj, options = {}) {
  *   (unless explicit CLI-only `allowUnboundResults: true` is passed — never exposed in MCP!).
  * - Requires BOTH `manifest.resultsSha256` and `manifest.worktreeHash` to be non-empty strings.
  * - Verifies T1 HMAC signature on `manifest.json` when present (detects hand-forged manifests).
+ * @param {string} qaDir
+ * @param {string} resultsPath
+ * @param {Record<string, any>} rawResultsObj
+ * @param {{ allowUnboundResults?: boolean, requireLedger?: boolean, expectedRunId?: string, currentWorktreeHash?: string, requireT1Mac?: boolean }} [options]
+ * @returns {{ ok: boolean, status: 'pass' | 'fail' | 'blocked', enforced: boolean, trustTier: 'T0' | 'T1', runId: string | null, resultsDigest: string | null, ledgerMac: string | null, errors: string[], warnings: string[] }}
  */
 export function verifyLedgerBindingInQaDir(qaDir, resultsPath, rawResultsObj, options = {}) {
   if (options.allowUnboundResults) {
@@ -272,7 +299,9 @@ export function verifyLedgerBindingInQaDir(qaDir, resultsPath, rawResultsObj, op
     };
   }
 
+  /** @type {string[]} */
   const errors = [];
+  /** @type {string[]} */
   const warnings = [];
   let latest;
   try {
@@ -286,7 +315,7 @@ export function verifyLedgerBindingInQaDir(qaDir, resultsPath, rawResultsObj, op
       runId: null,
       resultsDigest: null,
       ledgerMac: null,
-      errors: [`[Run Ledger Blocked] Corrupted .aitest/runs/latest.json: ${err.message}`],
+      errors: [`[Run Ledger Blocked] Corrupted .aitest/runs/latest.json: ${err instanceof Error ? err.message : String(err)}`],
       warnings,
     };
   }
@@ -319,7 +348,7 @@ export function verifyLedgerBindingInQaDir(qaDir, resultsPath, rawResultsObj, op
       runId,
       resultsDigest: null,
       ledgerMac: null,
-      errors: [`[Run Ledger Blocked] Corrupted manifest.json for runId="${runId}": ${err.message}`],
+      errors: [`[Run Ledger Blocked] Corrupted manifest.json for runId="${runId}": ${err instanceof Error ? err.message : String(err)}`],
       warnings,
     };
   }

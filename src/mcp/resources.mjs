@@ -7,6 +7,7 @@ import { redactSecrets } from '../core/redact.mjs';
 import { REPO_ROOT } from '../core/version.mjs';
 import { getEffectiveAllowedRoots, isTargetWithinAllowedRoots } from './security.mjs';
 
+/** @param {string | null} [defaultTarget] */
 export function getMcpResourceDefinitions(defaultTarget = null) {
   const resources = [
     {
@@ -167,6 +168,7 @@ export function getMcpPromptDefinitions() {
   return PROMPT_DEFS;
 }
 
+/** @param {string} name @param {{ lang?: string, target?: string, baseUrl?: string }} [args] */
 export function buildPromptMessages(name, args = {}) {
   const isEn = String(args.lang || 'zh').toLowerCase() === 'en';
   const target = args.target || '<target-repo>';
@@ -256,6 +258,8 @@ export function buildPromptMessages(name, args = {}) {
 /**
  * Safely reads an MCP resource URI with malformed percent-encoding guard (`M-04`)
  * and strict workspace root boundary validation (`M-02`, `M-03`).
+ * @param {string} uri
+ * @param {Record<string, any>} [ctx]
  */
 export function readMcpResource(uri, ctx = {}) {
   const defaultTarget = ctx.defaultTarget || null;
@@ -286,6 +290,7 @@ export function readMcpResource(uri, ctx = {}) {
     };
   }
 
+  /** @type {Record<string, { rel: string, mime: string }>} */
   const artifactMapping = {
     'system-map': { rel: path.join('knowledge', 'SYSTEM_MAP.md'), mime: 'text/markdown' },
     'code-map': { rel: path.join('knowledge', 'code-map.json'), mime: 'application/json' },

@@ -6,6 +6,7 @@ import { WORKBENCH_VERSION } from './core/version.mjs';
 
 export { CLI_COMMANDS, CLI_COMMAND_NAMES };
 
+/** @param {string} a @param {string} b */
 function levenshtein(a, b) {
   const dp = Array.from({ length: a.length + 1 }, (_, i) => [i]);
   for (let j = 1; j <= b.length; j += 1) dp[0][j] = j;
@@ -18,6 +19,7 @@ function levenshtein(a, b) {
   return dp[a.length][b.length];
 }
 
+/** @param {string} unknownToken @param {string[]} candidates @param {string} [prefix] */
 function suggestClosest(unknownToken, candidates, prefix = '') {
   const bare = String(unknownToken || '').replace(/^-+/, '').split('=')[0];
   if (!bare) return null;
@@ -33,6 +35,7 @@ function suggestClosest(unknownToken, candidates, prefix = '') {
   return best;
 }
 
+/** @param {'zh' | 'en'} lang */
 function printHelp(lang) {
   console.log(`\n${t(lang, 'appTitle')}\n`);
   console.log(`${t(lang, 'usageHeader')}:`);
@@ -56,6 +59,7 @@ function printHelp(lang) {
   console.log('  -h, --help              Show help (or `<command> --help` for per-command flags)\n');
 }
 
+/** @param {string} cmd @param {(typeof CLI_COMMANDS)[string]} spec @param {'zh' | 'en'} lang */
 function printCommandHelp(cmd, spec, lang) {
   const summary = t(lang, 'helpSummary')[cmd] || '';
   const deprecatedSet = new Set(Object.keys(spec.deprecatedAliases || {}));
@@ -129,7 +133,7 @@ export async function runCli(argv = process.argv.slice(2)) {
       options: spec.options,
     });
   } catch (err) {
-    const rawMsg = String(err?.message || err);
+    const rawMsg = err instanceof Error && err.message ? err.message : String(err);
     const unkMatch = /Unknown option '([^']+)'/.exec(rawMsg);
     if (unkMatch) {
       const allowedFlags = Object.keys(spec.options).filter((k) => !(spec.deprecatedAliases && k in spec.deprecatedAliases));
@@ -164,7 +168,7 @@ export async function runCli(argv = process.argv.slice(2)) {
   try {
     return await spec.run(v, parsed.positionals, lang);
   } catch (err) {
-    console.error(`[Error] ${err?.message || String(err)}`);
+    console.error(`[Error] ${err instanceof Error && err.message ? err.message : String(err)}`);
     return 1;
   }
 }

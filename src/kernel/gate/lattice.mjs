@@ -70,6 +70,9 @@ export const DOMAIN_HELPERS = new Set(['expectAccessible', 'expectPerformanceBud
 
 /**
  * Unwraps an `expect(...)[.not].matcher(...)` AST `CallExpression`.
+ * @param {any} ts
+ * @param {any} sf
+ * @param {any} callNode
  */
 export function extractExpectChainFromCall(ts, sf, callNode) {
   if (!ts.isCallExpression(callNode)) return null;
@@ -140,6 +143,10 @@ export function extractExpectChainFromCall(ts, sf, callNode) {
 /**
  * Classifies an AST expect chain on the S0..S5 strength lattice with full negation,
  * constant-folding, self-referential oracle, and vacuous regex/predicate handling.
+ * @param {any} ts
+ * @param {any} sf
+ * @param {{ kind: string, matcher: string, actualNode: any, expectedNode: any, matcherArgs?: any, isSoft: boolean, isPoll: boolean, isNegated: boolean }} chain
+ * @param {string} rawText
  */
 export function classifyExpectChainAst(ts, sf, chain, rawText) {
   if (chain.kind === 'domainHelper') {
@@ -305,7 +312,9 @@ export function classifyAssertionStatement(stmt, qaDir) {
     try {
       const wrapped = `async function __expr__() {\n${clean}\n}`;
       const sf = ts.createSourceFile('__stmt__.ts', wrapped, ts.ScriptTarget.Latest, true);
+      /** @type {ReturnType<typeof classifyExpectChainAst> | null} */
       let found = null;
+      /** @param {any} node */
       const visit = (node) => {
         if (found) return;
         if (ts.isCallExpression(node)) {
@@ -372,6 +381,7 @@ export function classifyAssertionStatement(stmt, qaDir) {
   };
 }
 
+/** @param {string[]} assertPatterns @returns {RegExp} */
 export function buildAssertRegex(assertPatterns) {
   const safePatterns = assertPatterns.filter((p) => p && p !== '*');
   if (safePatterns.length === 0) return /\bexpect\s*\(/;
@@ -382,6 +392,7 @@ export function buildAssertRegex(assertPatterns) {
   return new RegExp(parts.join('|'));
 }
 
+/** @param {string[] | undefined} assertFunctionNames @returns {(fnName: string) => boolean} */
 export function buildCustomAssertNameMatcher(assertFunctionNames) {
   const customPatterns = (assertFunctionNames || [])
     .filter((p) => p && p !== '*' && p !== 'expect' && p !== 'expect*')

@@ -8,6 +8,7 @@ import { isCoveredByWaiver, loadAitestConfig, validateAssertFunctionNames } from
 import { isRuleEnabled } from './rules/index.mjs';
 import { resolveTypeScriptCompiler } from './ts-loader.mjs';
 
+/** @param {string[]} args @param {string} cwd */
 function execNodeSync(args, cwd) {
   return spawnSync(process.execPath, args, {
     cwd,
@@ -32,6 +33,8 @@ const STATIC_SPEC_RULE_CODES = new Set([
 /**
  * AST + Structural Static Spec Scanner (`Layer 2`).
  * Scans `*.spec.ts`, `*.spec.js`, `*.test.ts`, `*.test.js`, and nested `seed.spec.ts` (exempting only root `tests/seed.spec.ts`).
+ * @param {string} testsDir
+ * @param {{ assertFunctionNames?: string[], activeWaivers?: Array<Record<string, any>>, qaDir?: string, rulesConfig?: Record<string, any> }} [options]
  */
 export function scanSpecFilesFallback(testsDir, options = {}) {
   const { assertFunctionNames = ['expect*', 'assert*', 'verify*'], activeWaivers = [], qaDir, rulesConfig = {} } = options;
@@ -41,6 +44,7 @@ export function scanSpecFilesFallback(testsDir, options = {}) {
   const assertRegex = buildAssertRegex(assertFunctionNames);
   const ts = resolveTypeScriptCompiler(qaDir || path.dirname(testsDir));
 
+  /** @param {string} dir */
   const walk = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
@@ -110,6 +114,9 @@ export function scanSpecFilesFallback(testsDir, options = {}) {
 /**
  * Layer 2 Static Check runner (`tsc --noEmit` + `eslint` + AST semantic scanner).
  * Fail-closed when `requireCompilers` or CI environment is detected and compilers are missing.
+ * @param {string} qaDir
+ * @param {{ activeWaivers?: Array<Record<string, any>>, requireCompilers?: boolean, env?: Record<string, string | undefined> }} [options]
+ * @returns {{ ok: boolean, status: 'pass' | 'fail' | 'blocked', errors: string[], warnings: string[] }}
  */
 export function runStaticSpecChecks(qaDir, options = {}) {
   const cfg = loadAitestConfig(qaDir);
@@ -117,6 +124,7 @@ export function runStaticSpecChecks(qaDir, options = {}) {
   const requireCompilers =
     options.requireCompilers !== undefined ? Boolean(options.requireCompilers) : isCiEnvironment(options.env);
   const errors = [...validateAssertFunctionNames(cfg.assertFunctionNames)];
+  /** @type {string[]} */
   const warnings = [];
   let blocked = false;
 

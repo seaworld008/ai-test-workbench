@@ -3,7 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
 
+/**
+ * @param {string} dir
+ * @returns {string[]}
+ */
 function findTraceZips(dir) {
+  /** @type {string[]} */
   const found = [];
   if (!fs.existsSync(dir)) return found;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -14,6 +19,10 @@ function findTraceZips(dir) {
   return found;
 }
 
+/**
+ * @param {{ lang?: string, target?: string, qaDir?: string, dryRun?: boolean, force?: boolean, json?: boolean }} [options]
+ * @returns {Promise<number>}
+ */
 export async function runReportCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   if (!options.target) {

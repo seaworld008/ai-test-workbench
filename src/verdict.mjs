@@ -29,6 +29,9 @@ import {
   verifyPayloadT1,
 } from './kernel/gate-kernel.mjs';
 
+/**
+ * @param {Record<string, any>} verdictObj
+ */
 function buildSarifReport(verdictObj) {
   const results = [];
   for (const errMsg of verdictObj.gateErrors || []) {
@@ -58,7 +61,12 @@ function buildSarifReport(verdictObj) {
   }
 
   const trustLevel = verdictObj.trustLevel || verdictObj.trustTier || 'T0';
-  const trustDef = TRUST_LEVEL_DEFINITIONS[trustLevel] || TRUST_LEVEL_DEFINITIONS.T0;
+  const trustDef =
+    trustLevel === 'T2'
+      ? TRUST_LEVEL_DEFINITIONS.T2
+      : trustLevel === 'T1'
+        ? TRUST_LEVEL_DEFINITIONS.T1
+        : TRUST_LEVEL_DEFINITIONS.T0;
 
   return {
     $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
@@ -89,6 +97,11 @@ function buildSarifReport(verdictObj) {
   };
 }
 
+/**
+ * @param {Record<string, any>} verdict
+ * @param {'zh' | 'en' | string} [lang]
+ * @returns {string}
+ */
 function buildPrVerdictMarkdown(verdict, lang = 'zh') {
   const isZh = lang === 'zh';
   const badge =
@@ -147,13 +160,18 @@ function buildPrVerdictMarkdown(verdict, lang = 'zh') {
  * Checks `.aitest/heals/*.json` against modified specs in the current diff (`T-07`):
  * If an active/unclosed B/C/D heal session exists AND its spec file was edited, block the verdict!
  * Also detects tampered heal session files via T1 HMAC.
+ * @param {string} qaDir
+ * @param {{ isGitRepo?: boolean, gitRoot?: string | null, resolved?: string | null }} baseResolution
+ * @returns {{ ok: boolean, errors: string[] }}
  */
 function checkHealSessionConflicts(qaDir, baseResolution) {
   const healsDir = path.join(qaDir, '.aitest', 'heals');
   if (!fs.existsSync(healsDir)) return { ok: true, errors: [] };
 
+  /** @type {string[]} */
   const errors = [];
-  let changedInsideQa = new Set();
+  /** @type {Set<string>} */
+  const changedInsideQa = new Set();
 
   if (baseResolution.isGitRepo && baseResolution.gitRoot && baseResolution.resolved) {
     const ch = listChangedFilesUnderDir(baseResolution.gitRoot, baseResolution.resolved, qaDir);
@@ -280,6 +298,7 @@ export async function verifyChangeCore(options = {}) {
   }
 
   // Step 2: Target Safety & Scope Resolution
+  /** @type {Record<string, string>} */
   const overrides = {};
   if (options.baseUrl) overrides.TEST_BASE_URL = options.baseUrl;
   const mergedEnv = loadMergedQaEnv(qaDir, { ...process.env, ...overrides });
@@ -365,6 +384,7 @@ export async function verifyChangeCore(options = {}) {
 
   // Step 5: Structured Diagnostics on Failures
   const resultsPath = path.join(qaDir, 'reports', 'results.json');
+  /** @type {Array<{ testId: string, title: string, file: string, line: number, categoryCode: string, category: string, confidence: string, candidates: string[], traceId: string | null, traceIds: string[], errorSnippet: string, evidence: string | null }>} */
   let diagFailures = [];
   if (fs.existsSync(resultsPath)) {
     const diag = generateDiagnosticsMarkdown(qaDir, resultsPath);
@@ -562,6 +582,10 @@ export async function verifyChangeCore(options = {}) {
   };
 }
 
+/**
+ * @param {Record<string, any>} [options]
+ * @returns {Promise<number>}
+ */
 export async function runVerifyChangeCommand(options = {}) {
   /** @type {Record<string, any>} */
   const res = await verifyChangeCore(options);

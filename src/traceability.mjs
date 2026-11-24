@@ -7,6 +7,12 @@ import { SCHEMA_VERSIONS } from './core/version.mjs';
 
 const REQ_ID_RE = /\b(REQ-[A-Z0-9]+(?:-[A-Z0-9]+)*)\b/g;
 
+/**
+ * @param {string} dir
+ * @param {(name: string) => boolean} extPredicate
+ * @param {string[]} [out]
+ * @returns {string[]}
+ */
 function walkFilesByExt(dir, extPredicate, out = []) {
   if (!fs.existsSync(dir)) return out;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -131,6 +137,11 @@ export function buildRequirementTraceMatrix(qaDir) {
   };
 }
 
+/**
+ * @param {{ generatedAt: string, coveredRequirements: number, totalRequirements: number, coveragePct: number, requirements: Array<{ reqId: string, specDoc: string, title: string, linkedTests: string[], status: string }> }} matrix
+ * @param {string} [lang]
+ * @returns {string}
+ */
 export function renderTraceMatrixMarkdown(matrix, lang = 'zh') {
   const isZh = lang === 'zh';
   const lines = [
@@ -152,6 +163,10 @@ export function renderTraceMatrixMarkdown(matrix, lang = 'zh') {
   return lines.join('\n');
 }
 
+/**
+ * @param {{ lang?: string, target?: string, qaDir?: string, dryRun?: boolean, force?: boolean, json?: boolean }} [options]
+ * @returns {Promise<number>}
+ */
 export async function runTraceMatrixCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   if (!options.target) {

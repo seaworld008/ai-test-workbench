@@ -113,10 +113,12 @@ export function isProtectedDiffPath(filePath, extraGlobs = []) {
   return false;
 }
 
+/** @param {string} qaDir */
 export function loadAitestConfig(qaDir) {
   return loadAndValidateAitestConfigFile(qaDir).config;
 }
 
+/** @param {string[]} [assertFunctionNames] @returns {string[]} */
 export function validateAssertFunctionNames(assertFunctionNames = []) {
   const errors = [];
   for (const pat of assertFunctionNames) {
@@ -130,11 +132,14 @@ export function validateAssertFunctionNames(assertFunctionNames = []) {
   return errors;
 }
 
+/** @param {string} qaDir @param {readonly string[]} globs @returns {string[]} */
 function collectFilesMatchingGlobs(qaDir, globs) {
+  /** @type {Set<string>} */
   const matched = new Set();
   const compiled = globs.map(compilePolicyGlob);
   const skipDirs = new Set(['node_modules', '.git', 'reports', 'playwright-report', 'test-results', 'knowledge', '.aitest']);
 
+  /** @param {string} dir */
   const walk = (dir) => {
     if (!fs.existsSync(dir)) return;
     let entries;
@@ -202,11 +207,14 @@ export function isInitializedQaWorkspace(qaDir) {
  * - Verifies schema, non-bot approver, protected file hashes, and T1 HMAC when present.
  * @param {string} qaDir
  * @param {{ requireT1Mac?: boolean, allowUninitialized?: boolean }} [options]
+ * @returns {{ ok: boolean, status: 'pass' | 'fail' | 'blocked', enforced: boolean, trustTier: 'T0' | 'T1', lockPath: string, lockDigest?: string, errors: string[], warnings: string[], approvedBy?: string }}
  */
 export function verifyGovernanceLockInQaDir(qaDir, options = {}) {
   const aitestDir = path.join(qaDir, '.aitest');
   const lockPath = path.join(aitestDir, 'governance.lock');
+  /** @type {string[]} */
   const errors = [];
+  /** @type {string[]} */
   const warnings = [];
 
   if (!fs.existsSync(lockPath)) {
@@ -259,7 +267,7 @@ export function verifyGovernanceLockInQaDir(qaDir, options = {}) {
       enforced: true,
       trustTier: 'T0',
       lockPath,
-      errors: [`[Governance Tamper Blocked] Corrupted JSON in .aitest/governance.lock: ${err.message}`],
+      errors: [`[Governance Tamper Blocked] Corrupted JSON in .aitest/governance.lock: ${err instanceof Error ? err.message : String(err)}`],
       warnings,
     };
   }
@@ -335,7 +343,9 @@ export function loadAndValidateWaivers(waiversPath, nowMs = Date.now(), options 
   const maxWaiverDays = options.maxWaiverDays ?? 14;
   const maxWaivers = options.maxWaivers ?? 5;
   const legacyCompat = Boolean(options.legacyCompat);
+  /** @type {string[]} */
   const errors = [];
+  /** @type {Array<Record<string, any>>} */
   const activeWaivers = [];
 
   if (!waiversPath || !fs.existsSync(waiversPath)) {
@@ -346,7 +356,7 @@ export function loadAndValidateWaivers(waiversPath, nowMs = Date.now(), options 
   try {
     parsed = JSON.parse(fs.readFileSync(waiversPath, 'utf8'));
   } catch (err) {
-    return { ok: false, errors: [`Invalid JSON in waivers file (${waiversPath}): ${err.message}`], activeWaivers };
+    return { ok: false, errors: [`Invalid JSON in waivers file (${waiversPath}): ${err instanceof Error ? err.message : String(err)}`], activeWaivers };
   }
 
   const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed.waivers) ? parsed.waivers : [];
@@ -354,7 +364,7 @@ export function loadAndValidateWaivers(waiversPath, nowMs = Date.now(), options 
     errors.push(`Waiver count (${list.length}) exceeds maximum allowed active waivers (${maxWaivers}).`);
   }
 
-  list.forEach((w, idx) => {
+  list.forEach((/** @type {any} */ w, /** @type {number} */ idx) => {
     const label = `waiver[${idx}]`;
     if (!w || typeof w !== 'object') {
       errors.push(`${label}: entry must be an object.`);
@@ -418,6 +428,7 @@ export function loadAndValidateWaivers(waiversPath, nowMs = Date.now(), options 
   return { ok: errors.length === 0, errors, activeWaivers };
 }
 
+/** @param {{ file?: string, title?: string, testId?: string }} item @param {Array<Record<string, any>>} activeWaivers @param {string} [scope] @returns {Record<string, any> | null} */
 export function isCoveredByWaiver(item, activeWaivers, scope = 'test') {
   for (const w of activeWaivers) {
     if (w.scope && w.scope !== scope && w.scope !== 'all') continue;
@@ -451,6 +462,7 @@ function hasLedgerFlakyEvidence(qaDir, file, title) {
     .filter(Boolean)
     .slice(-20);
 
+  /** @type {Array<{ status?: string, retryPassed?: boolean }>} */
   const observations = [];
 
   for (const line of lines) {
@@ -494,10 +506,12 @@ export function loadActiveQuarantine(qaDir, nowOrOptions = Date.now()) {
   try {
     parsed = JSON.parse(fs.readFileSync(qPath, 'utf8'));
   } catch (err) {
-    return { ok: false, entries: [], errors: [`Invalid JSON in .aitest/quarantine.json: ${err.message}`] };
+    return { ok: false, entries: [], errors: [`Invalid JSON in .aitest/quarantine.json: ${err instanceof Error ? err.message : String(err)}`] };
   }
 
+  /** @type {string[]} */
   const errors = [];
+  /** @type {Array<Record<string, any>>} */
   const active = [];
   const list = Array.isArray(parsed.entries) ? parsed.entries : [];
 

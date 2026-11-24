@@ -31,6 +31,11 @@ export function getDefaultHmacKeyFilePath() {
   return path.join(base, 'ai-test-workbench', 't1-hmac.key');
 }
 
+/**
+ * @param {string} candidatePath
+ * @param {string} dirPath
+ * @returns {boolean}
+ */
 function isPathInsideDir(candidatePath, dirPath) {
   if (!candidatePath || !dirPath) return false;
   const normCand = path.resolve(candidatePath);
@@ -103,7 +108,7 @@ export function resolveT1HmacKey(options = {}) {
     fs.writeFileSync(keyPath, `${generated}\n`, { encoding: 'utf8', mode: 0o600 });
     return { ok: true, key: generated, source: 'user-config-keyfile', keyPath };
   } catch (err) {
-    return { ok: false, key: null, source: 'io-error', keyPath, error: err?.message || String(err) };
+    return { ok: false, key: null, source: 'io-error', keyPath, error: err instanceof Error ? err.message : String(err) };
   }
 }
 

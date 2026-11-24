@@ -41,10 +41,12 @@ const VIEW_EXTS = ['', '.vue', '.tsx', '.ts', '.jsx', '.js', '/index.vue', '/ind
 export const DEFAULT_MAX_SCAN_FILES = 2500;
 const MAX_FILE_BYTES = 256 * 1024;
 
+/** @param {string | null | undefined} p @returns {string} */
 export function normalizeSlash(p) {
   return String(p || '').replace(/\\/g, '/');
 }
 
+/** @param {string | null | undefined} routePath @returns {string} */
 export function normalizeRoutePath(routePath) {
   let clean = String(routePath || '').trim().split('?')[0].split('#')[0];
   if (!clean) return '/';
@@ -55,6 +57,8 @@ export function normalizeRoutePath(routePath) {
 
 /**
  * Converts Next.js bracket route segments (`[id]`, `[...slug]`) into parameterized pattern (`:id`, `:slug*`) (`K-03`).
+ * @param {string} seg
+ * @returns {string}
  */
 export function convertBracketSegment(seg) {
   if (/^\[\[\.\.\.([^\]]+)\]\]$/.test(seg)) return `:${seg.slice(5, -2)}*`;
@@ -103,12 +107,13 @@ export function matchRuntimeRouteToPattern(runtimeRoute, staticPatterns) {
   return norm;
 }
 
+/** @param {string} rootDir @param {number} [limit] */
 export function walkSourceFiles(rootDir, limit = DEFAULT_MAX_SCAN_FILES) {
   /** @type {string[]} */
   const out = [];
   let truncated = false;
 
-  const walk = (dir) => {
+  const walk = (/** @type {string} */ dir) => {
     if (!dir || !fs.existsSync(dir)) return;
     if (out.length >= limit) {
       truncated = true;
@@ -139,6 +144,7 @@ export function walkSourceFiles(rootDir, limit = DEFAULT_MAX_SCAN_FILES) {
   return { files: out, truncated };
 }
 
+/** @param {string} baseFile @param {string} importSpec @param {string} repoDir */
 function resolveImportCandidate(baseFile, importSpec, repoDir) {
   let resolvedBase = null;
   if (importSpec.startsWith('./') || importSpec.startsWith('../')) {
@@ -160,7 +166,9 @@ function resolveImportCandidate(baseFile, importSpec, repoDir) {
 
 // --- Frontend Framework Adapters ---
 
+/** @param {string} relFile */
 function extractNextjsRoutes(relFile) {
+  /** @type {Array<{ route: string, file: string, kind: string }>} */
   const routes = [];
   const appMatch = relFile.match(/^(?:src\/)?app(?:\/(.*))?\/page\.[jt]sx?$/i);
   if (appMatch) {
@@ -183,8 +191,11 @@ function extractNextjsRoutes(relFile) {
   return routes;
 }
 
+/** @param {string} filePath @param {string} relFile @param {string} text @param {string} repoDir */
 function extractRouterConfigRoutes(filePath, relFile, text, repoDir) {
+  /** @type {Array<{ route: string, file: string, kind: string }>} */
   const routes = [];
+  /** @type {Array<{ route: string, routerFile: string, importSpec: string, expectedFile: string | null }>} */
   const brokenImports = [];
   if (/\.(?:ts|tsx|js|jsx|mjs)$/.test(relFile) && /path\s*:\s*['"`]/.test(text)) {
     const pathPropRe = /path\s*:\s*['"`]([^'"`*?#(]+)['"`]/g;
@@ -219,7 +230,9 @@ function extractRouterConfigRoutes(filePath, relFile, text, repoDir) {
   return { routes, brokenImports };
 }
 
+/** @param {string} relFile @param {string} text */
 function extractFrontendApiCalls(relFile, text) {
+  /** @type {Array<{ method: string, path: string, file: string }>} */
   const apiCalls = [];
   for (const m of text.matchAll(/\bfetch\s*\(\s*['"`]([^'"`$]+)['"`]/g)) {
     if (m[1].startsWith('/')) apiCalls.push({ method: 'FETCH', path: normalizeRoutePath(m[1]), file: relFile });
@@ -233,6 +246,7 @@ function extractFrontendApiCalls(relFile, text) {
   return apiCalls;
 }
 
+/** @param {string} filePath @param {string} relFile @param {string} text @param {string} repoDir */
 export function extractFrontendData(filePath, relFile, text, repoDir) {
   const nextRoutes = extractNextjsRoutes(relFile);
   const routerRes = extractRouterConfigRoutes(filePath, relFile, text, repoDir);
@@ -246,8 +260,11 @@ export function extractFrontendData(filePath, relFile, text, repoDir) {
 
 // --- Backend & DB Framework Adapters ---
 
+/** @param {string} relFile @param {string} text */
 function extractSpringAdapter(relFile, text) {
+  /** @type {Array<{ method: string, path: string, file: string, framework: string }>} */
   const endpoints = [];
+  /** @type {Array<{ table: string, file: string, source: string }>} */
   const entities = [];
   const classPrefixMatch = text.match(/@RequestMapping\s*\(\s*(?:value\s*=\s*)?['"]([^'"]+)['"]/);
   const prefix = classPrefixMatch ? classPrefixMatch[1].replace(/\/$/, '') : '';
@@ -263,8 +280,11 @@ function extractSpringAdapter(relFile, text) {
   return { endpoints, entities };
 }
 
+/** @param {string} relFile @param {string} text */
 function extractNodeBackendAdapter(relFile, text) {
+  /** @type {Array<{ method: string, path: string, file: string, framework: string }>} */
   const endpoints = [];
+  /** @type {Array<{ table: string, file: string, source: string }>} */
   const entities = [];
   const ctrlMatch = text.match(/@Controller\s*\(\s*['"]([^'"]*)['"]/);
   const ctrlPrefix = ctrlMatch ? `/${ctrlMatch[1].replace(/^\/|\/$/g, '')}` : '';
@@ -290,8 +310,11 @@ function extractNodeBackendAdapter(relFile, text) {
   return { endpoints, entities };
 }
 
+/** @param {string} relFile @param {string} text */
 export function extractBackendAndDbData(relFile, text) {
+  /** @type {Array<{ method: string, path: string, file: string, framework: string }>} */
   const endpoints = [];
+  /** @type {Array<{ table: string, file: string, source: string }>} */
   const entities = [];
   const ext = path.extname(relFile).toLowerCase();
 
@@ -332,6 +355,8 @@ export function extractBackendAndDbData(relFile, text) {
 
 /**
  * Indexes static routes, API calls, backend endpoints, and DB entities from host repository files (`K-05` truncation reporting).
+ * @param {string} repoDir
+ * @param {{ maxScanFiles?: number }} [options]
  */
 export function indexRepositorySource(repoDir, options = {}) {
   const maxScanFiles = options.maxScanFiles || DEFAULT_MAX_SCAN_FILES;
@@ -340,11 +365,11 @@ export function indexRepositorySource(repoDir, options = {}) {
     fileCount: 0,
     truncated: false,
     warnings: /** @type {string[]} */ ([]),
-    frontendRoutes: [],
-    brokenRouteImports: [],
-    frontendApiCalls: [],
-    backendEndpoints: [],
-    dbEntities: [],
+    frontendRoutes: /** @type {Array<{ route: string, file: string, kind: string }>} */ ([]),
+    brokenRouteImports: /** @type {Array<{ route: string, routerFile: string, importSpec: string, expectedFile: string | null }>} */ ([]),
+    frontendApiCalls: /** @type {Array<{ method: string, path: string, file: string }>} */ ([]),
+    backendEndpoints: /** @type {Array<{ method: string, path: string, file: string, framework: string }>} */ ([]),
+    dbEntities: /** @type {Array<{ table: string, file: string, source: string }>} */ ([]),
     backendFileTexts: /** @type {Record<string, string>} */ ({}),
   };
   if (!repoDir || !fs.existsSync(repoDir)) return result;
@@ -383,12 +408,14 @@ export function indexRepositorySource(repoDir, options = {}) {
   return result;
 }
 
+/** @param {string} qaDir */
 export function indexQaSpecs(qaDir) {
   const testsDir = path.join(qaDir, 'tests');
+  /** @type {Array<{ specFile: string, uiRoutes: string[], apiPaths: string[] }>} */
   const specs = [];
   if (!fs.existsSync(testsDir)) return specs;
 
-  const walk = (dir) => {
+  const walk = (/** @type {string} */ dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
@@ -400,7 +427,9 @@ export function indexQaSpecs(qaDir) {
       ) {
         const rel = normalizeSlash(path.relative(qaDir, full));
         const text = fs.readFileSync(full, 'utf8');
+        /** @type {Set<string>} */
         const uiRoutes = new Set();
+        /** @type {Set<string>} */
         const apiPaths = new Set();
 
         for (const m of text.matchAll(

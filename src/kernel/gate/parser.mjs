@@ -19,6 +19,37 @@ import {
 import { getNodeLine, resolveTypeScriptCompiler, unwrapExpr } from './ts-loader.mjs';
 
 /**
+ * @typedef {{
+ *   tier: number; label: string; matcher: string; isSoft: boolean; isNegated: boolean;
+ *   isTautology: boolean; isSelfReferential?: boolean; isVacuous?: boolean; isAriaSnapshot: boolean;
+ *   numericExpected: number | null; actualExpr?: string; expectedArg?: string; raw: string;
+ *   line: number; scopeKind: string; testTitle: string | null;
+ *   insideIf: boolean; insideIfInTest: boolean; insideTernary: boolean; insideBrowserEvaluate: boolean;
+ * }} AstAssertion
+ * @typedef {{
+ *   line: number; scopeKind: string; testTitle: string | null; snippet: string; message: string;
+ *   kind?: string; label?: string; calleeText?: string; isStandaloneGuard?: boolean;
+ *   isCapabilityGuard?: boolean; insideBrowserEvaluate?: boolean; hasAssertionInCatch?: boolean;
+ *   capturesErrorFlag?: boolean; tryContainsAssert?: boolean; tryTextSnippet?: string;
+ *   insideIfInTest?: boolean; urlPatternText?: string; statusCodes?: number[];
+ *   isFaultInjection?: boolean; setsExternalTrapVar?: boolean;
+ * }} AstEvent
+ * @typedef {{ code: string; message: string; snippet: string; line: number; testTitle: string | null; scopeKind: string }} AstViolation
+ * @typedef {{
+ *   file: string; usedAst: boolean; compilerUnavailable: boolean;
+ *   assertions: AstAssertion[]; customAssertCalls: number; semanticLocators: number; genericLocators: number;
+ *   successStatuses: number; serverErrorStatuses: number; criticalTags: string[];
+ *   testBlocks: Array<{ title: string; line: number; assertions: AstAssertion[] }>;
+ *   events: {
+ *     configTamper: AstEvent[]; tautologies: AstEvent[]; skips: AstEvent[]; softAssertions: AstEvent[];
+ *     swallowedCatches: AstEvent[]; forceTrue: AstEvent[]; timeoutOrRetry: AstEvent[];
+ *     conditionalAssertions: AstEvent[]; emptyHelpers: AstEvent[]; routeFulfills: AstEvent[];
+ *   };
+ *   violations: AstViolation[];
+ * }} AstSummary
+ */
+
+/**
  * Extracts a structured, scope-aware semantic summary of a TS/JS spec source using the TypeScript Compiler API.
  * Captures lexical scope (`top-level | describe | hook | test | browser-evaluate | catch`),
  * enclosing `test()` titles, line numbers, and structured event arrays for all pluggable gate rules.
@@ -26,12 +57,14 @@ import { getNodeLine, resolveTypeScriptCompiler, unwrapExpr } from './ts-loader.
  * @param {string} fileLabel
  * @param {string} sourceText
  * @param {{ assertFunctionNames?: string[], qaDir?: string, wrapInAsyncFn?: boolean, tsCompiler?: any }} [options]
+ * @returns {AstSummary}
  */
 export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
   const assertFunctionNames = options.assertFunctionNames || ['expect*', 'assert*', 'verify*'];
   const isCustomAssertName = buildCustomAssertNameMatcher(assertFunctionNames);
   const ts = 'tsCompiler' in options ? options.tsCompiler : resolveTypeScriptCompiler(options.qaDir);
 
+  /** @type {AstSummary} */
   const summary = {
     file: fileLabel,
     usedAst: false,
@@ -73,6 +106,7 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
   const sf = ts.createSourceFile(fileLabel || 'spec.ts', codeToParse, ts.ScriptTarget.Latest, true);
   summary.usedAst = true;
 
+  /** @param {string} code @param {string} message @param {string} [snippet] @param {{ line?: number, testTitle?: string | null, scopeKind?: string }} [meta] */
   const pushViolation = (code, message, snippet = '', meta = {}) => {
     summary.violations.push({
       code,
@@ -92,6 +126,7 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
     pushViolation,
   };
 
+  /** @type {{ insideIf: boolean, insideIfInTest: boolean, insideTernary: boolean, insideBrowserEvaluate: boolean, scopeKind: string, testTitle: string | null }} */
   const initialCtx = {
     insideIf: false,
     insideIfInTest: false,
@@ -101,6 +136,7 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
     testTitle: null,
   };
 
+  /** @param {any} node @param {typeof initialCtx} [ctx] */
   const visit = (node, ctx = initialCtx) => {
     const line = getNodeLine(ts, sf, node);
 
@@ -151,6 +187,7 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
     }
 
     // Call expressions (test/describe scopes, assertions, skip/fixme/fail/only, .catch, route.fulfill, locators)
+    /** @type {Partial<typeof initialCtx> | null} */
     let childScopeOverride = null;
     if (ts.isCallExpression(node)) {
       const calleeText = node.expression.getText(sf).replace(/\s+/g, '');
@@ -246,7 +283,7 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
       // `expect.configure({ soft: true })` (`AITEST-G106`)
       if (calleeText === 'expect.configure' && node.arguments[0] && ts.isObjectLiteralExpression(node.arguments[0])) {
         const hasSoftTrue = node.arguments[0].properties.some(
-          (p) =>
+          (/** @type {any} */ p) =>
             ts.isPropertyAssignment(p) &&
             ((ts.isIdentifier(p.name) && p.name.text === 'soft') ||
               (ts.isStringLiteral(p.name) && p.name.text === 'soft')) &&
@@ -477,19 +514,19 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
     const nextCtx = {
       insideIf: ctx.insideIf || ts.isIfStatement(node),
       insideIfInTest:
-        childScopeOverride && 'insideIfInTest' in childScopeOverride
+        childScopeOverride?.insideIfInTest !== undefined
           ? childScopeOverride.insideIfInTest
           : ctx.insideIfInTest || (ts.isIfStatement(node) && ctx.scopeKind === 'test'),
       insideTernary: ctx.insideTernary || ts.isConditionalExpression(node),
       insideBrowserEvaluate:
-        childScopeOverride && 'insideBrowserEvaluate' in childScopeOverride
+        childScopeOverride?.insideBrowserEvaluate !== undefined
           ? childScopeOverride.insideBrowserEvaluate
           : ctx.insideBrowserEvaluate,
       scopeKind: childScopeOverride?.scopeKind || ctx.scopeKind,
-      testTitle: childScopeOverride && 'testTitle' in childScopeOverride ? childScopeOverride.testTitle : ctx.testTitle,
+      testTitle: childScopeOverride?.testTitle !== undefined ? childScopeOverride.testTitle : ctx.testTitle,
     };
 
-    ts.forEachChild(node, (child) => visit(child, nextCtx));
+    ts.forEachChild(node, (/** @type {any} */ child) => visit(child, nextCtx));
   };
 
   visit(sf, initialCtx);

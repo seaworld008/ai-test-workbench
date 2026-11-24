@@ -1,6 +1,10 @@
 // @ts-check
 import { sanitizeUntrustedDomText } from './safety.mjs';
 
+/**
+ * @param {{ route: string, title?: string, archetype?: string, ariaSnapshot?: string | null, readonlyButtons?: string[], mutationButtons?: string[], tabs?: string[], dialogsExplored?: Array<{ trigger?: string, title?: string, navigatedTo?: string }>, apisObserved?: string[] }} pageInfo
+ * @param {string} [lang]
+ */
 export function generatePageAriaSpecMarkdown(pageInfo, lang = 'zh') {
   const isZh = lang === 'zh';
   const safeAria = sanitizeUntrustedDomText(String(pageInfo.ariaSnapshot || '# (empty aria snapshot)')).slice(0, 4000);
@@ -28,6 +32,12 @@ export function generatePageAriaSpecMarkdown(pageInfo, lang = 'zh') {
   return lines.join('\n');
 }
 
+/**
+ * @typedef {{ route: string, title?: string, breadcrumbs?: string[], tableHeaders?: string[], filterLabels?: string[], readonlyButtons?: string[], mutationButtons?: string[], tableRowCount?: number | null, archetype?: string, tabsExplored?: any[], dialogsExplored?: any[], a11y?: { hasMainLandmark?: boolean, hasH1?: boolean, inputsMissingLabel?: number } | null }} OverviewPage
+ * @typedef {{ baseURL?: string, snapshotId?: string, exploredAt?: string, readOnly?: boolean, maxPages?: number, techStack?: string[], authKeyNames?: string[], portals?: Array<{ name: string, mode?: string, id?: string | number, notes?: string }>, pages?: OverviewPage[], endpoints?: Array<{ method: string, endpoint: string, status: number }>, consoleErrors?: Array<{ route?: string, message?: string } | string>, serverErrors?: string[], envelopeErrors?: Array<{ route?: string, method?: string, endpoint?: string, httpStatus?: number, code?: number | null, message?: string | null }>, brokenRoutes?: Array<{ route: string, actualPath?: string | null, reason?: string }>, blockedWriteRequests?: Array<{ method?: string, endpoint?: string, reason?: string | null }>, blockedApiHosts?: string[] }} ExploreTopology
+ * @param {ExploreTopology} topology
+ * @param {string} [lang]
+ */
 export function generateSystemOverviewMarkdown(topology, lang = 'zh') {
   const isZh = lang === 'zh';
   const pages = Array.isArray(topology?.pages) ? topology.pages : [];
@@ -136,7 +146,9 @@ export function generateSystemOverviewMarkdown(topology, lang = 'zh') {
       lines.push(`- [Envelope Code ${ee.code}] \`${ee.route || '/'}\` \`${ee.method} ${ee.endpoint}\` (HTTP ${ee.httpStatus}): ${String(ee.message || '').slice(0, 140)}`);
     }
     for (const err of consoleErrors.slice(0, 20)) {
-      lines.push(`- [Console Error] \`${err.route || '/'}\`: ${String(err.message || err).slice(0, 180)}`);
+      const route = typeof err === 'string' ? '/' : err.route || '/';
+      const msg = typeof err === 'string' ? err : err.message || err;
+      lines.push(`- [Console Error] \`${route}\`: ${String(msg).slice(0, 180)}`);
     }
     for (const srv of serverErrors.slice(0, 20)) {
       lines.push(`- [HTTP 5xx] \`${srv}\``);

@@ -1,6 +1,7 @@
 // @ts-check
 import { extractVueDynamicRoutes, isSafeReadonlyDialogTrigger, sanitizeUntrustedDomText } from './safety.mjs';
 
+/** @param {any} page @param {string} routeLabel @param {{ waitNotes: Array<{ route: string, stage: string, note: string }> }} topology */
 export async function waitPageSettled(page, routeLabel, topology) {
   try {
     await page.waitForLoadState('networkidle', { timeout: 2_500 });
@@ -24,6 +25,7 @@ export async function waitPageSettled(page, routeLabel, topology) {
   }
 }
 
+/** @param {any} page */
 export async function closeVisibleOverlays(page) {
   await page
     .evaluate(() => {
@@ -44,6 +46,7 @@ export async function closeVisibleOverlays(page) {
   await page.keyboard.press('Escape').catch(() => {});
 }
 
+/** @param {any} page */
 export async function expandCollapsedMenus(page) {
   await page
     .evaluate(() => {
@@ -66,6 +69,8 @@ export async function expandCollapsedMenus(page) {
 /**
  * Probes generic multi-portal / tenant / workspace switcher drawers or popovers and returns
  * discovered switchable portal entries.
+ * @param {any} page
+ * @returns {Promise<{ selector: string | null, options: string[] }>}
  */
 export async function discoverPortalSwitcherOptions(page) {
   const switcherSelectors = [
@@ -78,8 +83,9 @@ export async function discoverPortalSwitcherOptions(page) {
     '[data-testid*="tenant-switcher"]',
     '[data-testid*="workspace-switcher"]',
   ];
+  /** @type {{ clicked: boolean, selector: string | null }} */
   const found = await page
-    .evaluate((sels) => {
+    .evaluate((/** @type {string[]} */ sels) => {
       for (const sel of sels) {
         const el = /** @type {HTMLElement | null} */ (document.querySelector(sel));
         if (el && el.offsetParent !== null) {
@@ -94,6 +100,7 @@ export async function discoverPortalSwitcherOptions(page) {
   if (!found.clicked) return { selector: null, options: [] };
   await page.waitForTimeout(450).catch(() => {});
 
+  /** @type {string[]} */
   const optionsFound = await page
     .evaluate(() => {
       const overlay = Array.from(
@@ -130,8 +137,10 @@ export async function discoverPortalSwitcherOptions(page) {
  * Captures DOM affordances, tech stack, a11y baseline, and route links from the active page.
  * Vue route trees are projected to plain serializable objects and normalized in Node via
  * `extractVueDynamicRoutes` (single source of truth).
+ * @param {any} page
  */
 export async function capturePageSnapshot(page) {
+  /** @type {{ actualPath: string, title: string, breadcrumbs: string[], tableHeaders: string[], hasTable: boolean, tableRowCount: number, filterLabels: string[], buttons: string[], tabs: string[], hasPasswordInput: boolean, hasChart: boolean, a11y: { hasMainLandmark: boolean, hasH1: boolean, inputsMissingLabel: number, imagesMissingAlt: number }, tech: string[], authKeyNames: string[], detectedPortals: Array<{ name: string, mode: string, id?: string | number, notes?: string }>, anchors: string[], flatFrameworkRoutes: string[], vueRouteTrees: any[] }} */
   const raw = await page.evaluate(() => {
     const mainScope = document.querySelector('main, [role="main"], .app-main') || document.body;
     const buttons = Array.from(
@@ -192,9 +201,10 @@ export async function capturePageSnapshot(page) {
     if (document.querySelector('[class*="ant-"]')) tech.push('Ant Design');
 
     // Serialize minimal route tree metadata so Node-side extractVueDynamicRoutes handles all path normalization
+    /** @param {any} routes @param {number} [depth] @returns {Array<{ path: string, hidden: boolean, children: any[] }>} */
     const serializeTree = (routes, depth = 0) => {
       if (!Array.isArray(routes) || depth > 8) return [];
-      return routes.slice(0, 200).map((r) => ({
+      return routes.slice(0, 200).map((/** @type {any} */ r) => ({
         path: typeof r?.path === 'string' ? r.path : '',
         hidden: Boolean(r?.hidden || r?.meta?.hidden),
         children: Array.isArray(r?.children) ? serializeTree(r.children, depth + 1) : [],
@@ -286,9 +296,11 @@ export async function capturePageSnapshot(page) {
   };
 }
 
+/** @param {any} page @param {number} maxTabsPerPage @returns {Promise<string[]>} */
 export async function explorePageTabs(page, maxTabsPerPage) {
+  /** @type {string[]} */
   const clickedTabs = await page
-    .evaluate(async (limit) => {
+    .evaluate(async (/** @type {number} */ limit) => {
       const scope = document.querySelector('main, [role="main"], .app-main') || document.body;
       const els = Array.from(scope.querySelectorAll('[role="tab"], .el-tabs__item, .ant-tabs-tab')).filter(
         (el) => /** @type {HTMLElement} */ (el).offsetParent !== null && !el.classList.contains('is-disabled')
@@ -317,13 +329,14 @@ export async function explorePageTabs(page, maxTabsPerPage) {
   return clickedTabs.map((t) => sanitizeUntrustedDomText(t));
 }
 
+/** @param {any} page @param {string[]} buttons @param {number} maxDialogsPerPage @param {string} targetUrl @param {string} routeLabel @param {{ waitNotes: Array<{ route: string, stage: string, note: string }> }} topology */
 export async function exploreSafeReadonlyDialogs(page, buttons, maxDialogsPerPage, targetUrl, routeLabel, topology) {
   const dialogsExplored = [];
   const safeTriggerLabels = buttons.filter((b) => isSafeReadonlyDialogTrigger(b)).slice(0, maxDialogsPerPage);
   for (const triggerLabel of safeTriggerLabels) {
     const beforePath = new URL(page.url()).pathname;
     const clickOutcome = await page
-      .evaluate(async (targetText) => {
+      .evaluate(async (/** @type {string} */ targetText) => {
         const scope = document.querySelector('main, [role="main"], .app-main') || document.body;
         const candidates = Array.from(scope.querySelectorAll('button, [role="button"], .el-button--text'));
         const btn = candidates.find((el) => {
@@ -365,7 +378,7 @@ export async function exploreSafeReadonlyDialogs(page, buttons, maxDialogsPerPag
           trigger: sanitizeUntrustedDomText(triggerLabel),
           kind: 'dialog',
           title: sanitizeUntrustedDomText(clickOutcome.title || '(dialog)'),
-          buttons: (clickOutcome.overlayButtons || []).map((b) => sanitizeUntrustedDomText(b)),
+          buttons: (/** @type {string[]} */ (clickOutcome.overlayButtons || [])).map((b) => sanitizeUntrustedDomText(b)),
         });
         await closeVisibleOverlays(page);
       } else if (clickOutcome.afterPath && clickOutcome.afterPath !== beforePath) {
@@ -384,10 +397,11 @@ export async function exploreSafeReadonlyDialogs(page, buttons, maxDialogsPerPag
   return dialogsExplored;
 }
 
+/** @param {any} page @param {string} selector @param {string} optionLabel @returns {Promise<boolean>} */
 export async function switchPortalOption(page, selector, optionLabel) {
   return page
     .evaluate(
-      async ({ sel, optText }) => {
+      async (/** @type {{ sel: string, optText: string }} */ { sel, optText }) => {
         const trigger = /** @type {HTMLElement | null} */ (document.querySelector(sel));
         if (!trigger) return false;
         trigger.click();

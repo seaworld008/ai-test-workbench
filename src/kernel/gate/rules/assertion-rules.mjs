@@ -1,8 +1,15 @@
 import { diffEventSnippets } from './governance-rules.mjs';
 
 /**
+ * @typedef {import('./governance-rules.mjs').GateFinding} GateFinding
+ * @typedef {import('./governance-rules.mjs').RuleEvalCtx} RuleEvalCtx
+ */
+
+/**
  * Computes commit-level cross-file assertion & strength pooling metrics when `changesetContext`
  * contains multiple changed spec files (e.g. splitting a large spec into sibling spec files).
+ * @param {RuleEvalCtx['changesetContext']} changesetContext
+ * @param {string} currentFile
  */
 function computeChangesetPoolMetrics(changesetContext, currentFile) {
   const entries = changesetContext?.entries;
@@ -61,8 +68,9 @@ export const ruleG102 = {
   description: 'Blocks net reduction in assertion count unless consolidated into an ARIA snapshot or relocated into sibling specs in the same commit.',
   waiverKey: 'assertion-deletion',
   defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
   evaluate(ctx) {
-    const { file, baseSum, headSum, canWaive, changesetContext } = ctx;
+    const { file = '', baseSum, headSum, canWaive = () => false, changesetContext } = ctx;
     if (!baseSum || !headSum) return [];
 
     const baseCount = baseSum.assertions.length;
@@ -73,7 +81,7 @@ export const ruleG102 = {
 
     const pool = computeChangesetPoolMetrics(changesetContext, file);
     const relocatedToSibling =
-      Boolean(pool) && pool.siblingAddedCount > 0 && pool.totalHeadCount >= pool.totalBaseCount;
+      pool !== null && pool.siblingAddedCount > 0 && pool.totalHeadCount >= pool.totalBaseCount;
 
     if (
       baseCount > headCount &&
@@ -105,8 +113,9 @@ export const ruleG103 = {
   description: 'Blocks weakening assertion strength on the S0-S5 lattice or flipping positive assertions into .not checks.',
   waiverKey: 'assertion-weakening',
   defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
   evaluate(ctx) {
-    const { file, baseSum, headSum, canWaive, changesetContext } = ctx;
+    const { file = '', baseSum, headSum, canWaive = () => false, changesetContext } = ctx;
     if (!baseSum || !headSum) return [];
 
     const baseCount = baseSum.assertions.length;
@@ -126,7 +135,7 @@ export const ruleG103 = {
 
     const pool = computeChangesetPoolMetrics(changesetContext, file);
     const strengthRelocatedToSibling =
-      Boolean(pool) &&
+      pool !== null &&
       pool.siblingAddedStrength > 0 &&
       pool.totalHeadStrength >= pool.totalBaseStrength &&
       pool.totalHeadMax >= pool.totalBaseMax &&
@@ -160,8 +169,10 @@ export const ruleG104 = {
   description: 'Blocks S0 tautologies, self-referential DOM oracles, and vacuous regex/predicate matchers.',
   waiverKey: 's0-tautology',
   defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
   evaluate(ctx) {
-    const { file, baseSum, headSum, canWaive } = ctx;
+    const { file = '', baseSum, headSum, canWaive = () => false } = ctx;
+    /** @type {GateFinding[]} */
     const findings = [];
     for (const ev of diffEventSnippets(baseSum?.events?.tautologies, headSum?.events?.tautologies)) {
       if (canWaive(ev.snippet) || canWaive('AITEST-G104')) continue;
@@ -188,8 +199,9 @@ export const ruleG115 = {
   description: 'Blocks removing @critical or @smoke tags from test or describe titles.',
   waiverKey: 'tag-removal',
   defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
   evaluate(ctx) {
-    const { file, baseSum, headSum, canWaive } = ctx;
+    const { file = '', baseSum, headSum, canWaive = () => false } = ctx;
     if (!baseSum || !headSum) return [];
     if (
       headSum.criticalTags.length < baseSum.criticalTags.length &&

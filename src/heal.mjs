@@ -23,15 +23,61 @@ import { executeSuiteCore } from './runner.mjs';
 
 export const MAX_HEAL_ATTEMPTS = 3;
 
+/**
+ * @typedef {{ attemptsUsed: number, lastSessionId: string, updatedAt: string }} HealLedgerEntry
+ * @typedef {{
+ *   schemaVersion: number,
+ *   sessionId: string,
+ *   createdAt: string,
+ *   updatedAt: string,
+ *   state: string,
+ *   testId: string,
+ *   title: string,
+ *   specFile: string,
+ *   line: number,
+ *   categoryCode: string,
+ *   category: string,
+ *   confidence: string,
+ *   candidates: string[],
+ *   traceId: string | null,
+ *   errorSnippet: string,
+ *   codeCorrelation: unknown,
+ *   repairPermitted: boolean,
+ *   maxAttempts: number,
+ *   attemptsUsed: number,
+ *   remainingAttempts: number,
+ *   baselineSource: string,
+ *   baselineSha: string | null,
+ *   allowedActions: string[],
+ *   baselineSpecContent: string,
+ *   attempts: Array<Record<string, any>>,
+ *   conclusion: Record<string, any> | null,
+ *   mac?: string | Record<string, any> | null,
+ * }} HealSession
+ */
+
+/**
+ * @param {string} qaDir
+ * @returns {string}
+ */
 function getHealsDir(qaDir) {
   return path.join(qaDir, '.aitest', 'heals');
 }
 
+/**
+ * @param {string} qaDir
+ * @param {string | undefined} sessionId
+ * @returns {string}
+ */
 function getSessionPath(qaDir, sessionId) {
   const safeId = String(sessionId || '').replace(/[^a-zA-Z0-9_-]/g, '');
   return path.join(getHealsDir(qaDir), `${safeId}.json`);
 }
 
+/**
+ * @param {string} qaDir
+ * @returns {string}
+ */
 function getHealLedgerPath(qaDir) {
   return path.join(getHealsDir(qaDir), 'ledger.json');
 }
@@ -39,6 +85,8 @@ function getHealLedgerPath(qaDir) {
 /**
  * Reads cross-session per-`testId` attempt counters (`T-07`, `A-6`) so opening a new heal session
  * cannot reset the 3-attempt hard cap.
+ * @param {string} qaDir
+ * @returns {{ ok: true, byTestId: Record<string, HealLedgerEntry> } | { ok: false, error: string, byTestId: Record<string, HealLedgerEntry> }}
  */
 function readHealAttemptLedger(qaDir) {
   const lp = getHealLedgerPath(qaDir);
@@ -55,10 +103,18 @@ function readHealAttemptLedger(qaDir) {
     }
     return { ok: true, byTestId: parsed.byTestId && typeof parsed.byTestId === 'object' ? parsed.byTestId : {} };
   } catch (err) {
-    return { ok: false, error: `[Heal Governance Blocked] Corrupted heal ledger: ${err.message}`, byTestId: {} };
+    return {
+      ok: false,
+      error: `[Heal Governance Blocked] Corrupted heal ledger: ${err instanceof Error ? err.message : String(err)}`,
+      byTestId: {},
+    };
   }
 }
 
+/**
+ * @param {string} qaDir
+ * @param {Record<string, HealLedgerEntry>} byTestId
+ */
 function writeHealAttemptLedger(qaDir, byTestId) {
   const healsDir = getHealsDir(qaDir);
   fs.mkdirSync(healsDir, { recursive: true });
@@ -72,6 +128,11 @@ function writeHealAttemptLedger(qaDir, byTestId) {
   fs.writeFileSync(getHealLedgerPath(qaDir), JSON.stringify(payload, null, 2) + '\n', 'utf8');
 }
 
+/**
+ * @param {string} qaDir
+ * @param {HealSession} session
+ * @returns {HealSession}
+ */
 function writeSignedSession(qaDir, session) {
   const healsDir = getHealsDir(qaDir);
   fs.mkdirSync(healsDir, { recursive: true });
@@ -83,6 +144,11 @@ function writeSignedSession(qaDir, session) {
   return signed;
 }
 
+/**
+ * @param {string} qaDir
+ * @param {string | undefined} sessionId
+ * @returns {{ ok: true, session: HealSession, sessionPath: string } | { ok: false, exitCode: number, error: string }}
+ */
 function readAndVerifySession(qaDir, sessionId) {
   const sessionPath = getSessionPath(qaDir, sessionId);
   if (!sessionId || !fs.existsSync(sessionPath)) {
@@ -92,7 +158,11 @@ function readAndVerifySession(qaDir, sessionId) {
   try {
     session = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
   } catch (err) {
-    return { ok: false, exitCode: 2, error: `[Heal Governance Blocked] Corrupted heal session "${sessionId}": ${err.message}` };
+    return {
+      ok: false,
+      exitCode: 2,
+      error: `[Heal Governance Blocked] Corrupted heal session "${sessionId}": ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
   const macCheck = verifyPayloadT1('heal.session', session, session.mac, {
     qaDir,
@@ -112,6 +182,10 @@ function readAndVerifySession(qaDir, sessionId) {
 /**
  * Captures the authoritative baseline of `relSpec` from Git base ref (`T-07`) when available,
  * preventing agents from mutating the spec BEFORE calling `aitest_heal_begin`.
+ * @param {string} qaDir
+ * @param {string} relSpec
+ * @param {string} absSpec
+ * @returns {{ content: string, source: string, baseSha: string | null }}
  */
 function resolveSpecBaseline(qaDir, relSpec, absSpec) {
   const baseRes = resolveDefaultDiffBase(qaDir);
@@ -157,8 +231,11 @@ export function beginHealSession(qaDir, options = {}) {
     };
   }
 
-  const targetFailure = options.testId
-    ? diag.failures.find((f) => f.testId === options.testId || f.title.includes(options.testId) || f.file.includes(options.testId))
+  const requestedTestId = options.testId;
+  const targetFailure = requestedTestId
+    ? diag.failures.find(
+        (f) => f.testId === requestedTestId || f.title.includes(requestedTestId) || f.file.includes(requestedTestId)
+      )
     : diag.failures[0];
 
   if (!targetFailure) {
@@ -230,6 +307,8 @@ export function beginHealSession(qaDir, options = {}) {
  * 3) Cross-session `attemptsUsed < 3` per `testId`
  * 4) Layer 0 Governance Lock + Layer 2 Static AST + Layer 3 Full-File AST Semantic Diff Guard
  * 5) Optional targeted Playwright re-run when `skipRun !== true`
+ * @param {string} qaDir
+ * @param {{ sessionId?: string, skipRun?: boolean, assumeTestPassed?: boolean }} [options]
  */
 export async function attemptHealRepair(qaDir, options = {}) {
   const loaded = readAndVerifySession(qaDir, options.sessionId);
@@ -391,6 +470,8 @@ export async function attemptHealRepair(qaDir, options = {}) {
 
 /**
  * Concludes a Heal Session (`aitest_heal_conclude`), generating a structured Defect Ticket for Class C bugs.
+ * @param {string} qaDir
+ * @param {{ sessionId?: string, outcome?: string, summary?: string }} [options]
  */
 export function concludeHealSession(qaDir, options = {}) {
   const loaded = readAndVerifySession(qaDir, options.sessionId);
@@ -466,6 +547,24 @@ export function concludeHealSession(qaDir, options = {}) {
   };
 }
 
+/**
+ * @param {{
+ *   lang?: 'zh' | 'en' | string,
+ *   target?: string,
+ *   qaDir?: string,
+ *   action?: string,
+ *   testId?: string,
+ *   results?: string,
+ *   sessionId?: string,
+ *   skipRun?: boolean,
+ *   outcome?: string,
+ *   summary?: string,
+ *   json?: boolean,
+ *   dryRun?: boolean,
+ *   force?: boolean,
+ * }} [options]
+ * @returns {Promise<number>}
+ */
 export async function runHealCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   if (!options.target) {
@@ -503,7 +602,7 @@ export async function runHealCommand(options = {}) {
     return res.exitCode;
   }
   if (!res.ok) {
-    console.error(res.error);
+    console.error('error' in res ? res.error : undefined);
     return res.exitCode;
   }
   console.log(JSON.stringify(res, null, 2));

@@ -3,6 +3,11 @@
  * Shared by `tests/fixtures/base.ts` (`expectApiContract`) and CLI contract verification.
  */
 
+/**
+ * @param {string} refStr
+ * @param {Record<string, any>} rootDoc
+ * @returns {Record<string, any> | null}
+ */
 function resolveRef(refStr, rootDoc) {
   if (!refStr || typeof refStr !== 'string' || !refStr.startsWith('#/')) return null;
   const parts = refStr
@@ -17,6 +22,11 @@ function resolveRef(refStr, rootDoc) {
   return cur;
 }
 
+/**
+ * @param {unknown} value
+ * @param {string} expectedType
+ * @returns {boolean}
+ */
 function matchesJsonType(value, expectedType) {
   switch (expectedType) {
     case 'null':

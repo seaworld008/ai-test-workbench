@@ -1,7 +1,38 @@
 import { isProtectedDiffPath, validateAssertFunctionNames } from '../policy.mjs';
 
 /**
+ * @typedef {{
+ *   code: string;
+ *   severity: string;
+ *   file: string;
+ *   line?: number;
+ *   testTitle?: string;
+ *   message: string;
+ *   rawFormatted?: string;
+ *   evidence?: Record<string, any>;
+ * }} GateFinding
+ * @typedef {{
+ *   file?: string;
+ *   baseSum?: import('../parser.mjs').AstSummary | null;
+ *   headSum?: import('../parser.mjs').AstSummary | null;
+ *   baseSource?: string;
+ *   headSource?: string;
+ *   canWaive?: (key: string) => boolean;
+ *   protectedGlobs?: string[];
+ *   assertFunctionNames?: string[];
+ *   isDiffTextMode?: boolean;
+ *   rulesConfig?: Record<string, any>;
+ *   changesetContext?: { entries?: Array<{ filePath: string; baseSum?: import('../parser.mjs').AstSummary | null; headSum?: import('../parser.mjs').AstSummary | null }> } | null;
+ *   [key: string]: any;
+ * }} RuleEvalCtx
+ */
+
+/**
  * Helper returning newly introduced event entries present in `headEvents` and absent in `baseEvents`.
+ * @template {{ snippet?: string }} T
+ * @param {T[] | undefined} baseEvents
+ * @param {T[] | undefined} headEvents
+ * @returns {T[]}
  */
 export function diffEventSnippets(baseEvents, headEvents) {
   const baseKeys = new Set((baseEvents || []).map((e) => String(e.snippet || '').slice(0, 160)));
@@ -17,9 +48,11 @@ export const ruleG101 = {
   description: 'Blocks edits to protected governance/config files, testIgnore additions, and ESLint rule weakening.',
   waiverKey: 'protected-file',
   defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
   evaluate(ctx) {
+    /** @type {GateFinding[]} */
     const findings = [];
-    const { file, baseSum, headSum, baseSource, headSource, canWaive, protectedGlobs, isDiffTextMode } = ctx;
+    const { file = '', baseSum, headSum, baseSource, headSource, canWaive = () => false, protectedGlobs, isDiffTextMode } = ctx;
 
     const changed = isDiffTextMode ? true : baseSource !== headSource;
     if (changed && isProtectedDiffPath(file, protectedGlobs) && !canWaive('protected-file') && !canWaive('AITEST-G101')) {
@@ -57,9 +90,11 @@ export const ruleG113 = {
   description: 'Blocks custom assertion helpers containing zero real expect() calls and overly broad assertFunctionNames wildcards.',
   waiverKey: 'empty-assert-helper',
   defaultEnabled: true,
+  /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
   evaluate(ctx) {
+    /** @type {GateFinding[]} */
     const findings = [];
-    const { file, baseSum, headSum, canWaive, assertFunctionNames } = ctx;
+    const { file = '', baseSum, headSum, canWaive = () => false, assertFunctionNames } = ctx;
 
     for (const err of validateAssertFunctionNames(assertFunctionNames || [])) {
       findings.push({

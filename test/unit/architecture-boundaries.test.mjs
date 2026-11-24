@@ -227,4 +227,14 @@ test('Architecture boundary (WU-06 & WU-07): decomposed domains, MCP tools, and 
   const authLoginText = fs.readFileSync(path.join(REPO_ROOT, 'src', 'auth-login.mjs'), 'utf8');
   assert.equal(authLoginText.includes('mkdtempSync'), false, 'src/auth-login.mjs must not generate temp .mjs scripts');
   assert.equal(authLoginText.includes('node:os'), false, 'src/auth-login.mjs must not write temp scripts into os.tmpdir()');
+
+  // WU-08: Enforce zero TypeScript suppression directives across authoritative src/** modules
+  const suppressions = [];
+  for (const file of walkMjs(path.join(REPO_ROOT, 'src'))) {
+    const text = fs.readFileSync(file, 'utf8');
+    if (/@ts-(?:nocheck|ignore|expect-error)\b/.test(text)) {
+      suppressions.push(path.relative(REPO_ROOT, file).replace(/\\/g, '/'));
+    }
+  }
+  assert.deepEqual(suppressions, [], `Forbidden @ts-nocheck/@ts-ignore/@ts-expect-error found in src/**: ${suppressions.join(', ')}`);
 });

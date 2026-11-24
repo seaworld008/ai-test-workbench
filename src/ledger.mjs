@@ -35,6 +35,9 @@ export function generateRunId(nowMs = Date.now()) {
   return `${timeChars}${randChars}`;
 }
 
+/**
+ * @param {Parameters<typeof summarizePlaywrightResults>[0]} resultsObj
+ */
 function summarizeResultsForLedger(resultsObj) {
   const { counts, tests } = summarizePlaywrightResults(resultsObj);
   return {

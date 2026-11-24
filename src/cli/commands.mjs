@@ -43,6 +43,7 @@ const WORKSPACE_MUTATION_OPTS = {
   force: BOOL,
 };
 
+/** @param {Record<string, any>} v @param {'zh' | 'en'} lang */
 function makeCommon(v, lang) {
   return {
     lang,
@@ -399,8 +400,8 @@ export const CLI_COMMANDS = {
       results: STR,
       'skip-run': BOOL,
     },
-    run: (v, pos, lang) =>
-      runHealCommand({
+    run: async (v, pos, lang) =>
+      (await runHealCommand({
         ...makeCommon(v, lang),
         action: v.action || pos[0] || 'begin',
         testId: v['test-id'],
@@ -409,7 +410,7 @@ export const CLI_COMMANDS = {
         summary: v.summary,
         results: v.results,
         skipRun: Boolean(v['skip-run']),
-      }),
+      })) ?? 1,
   },
   flaky: {
     options: {

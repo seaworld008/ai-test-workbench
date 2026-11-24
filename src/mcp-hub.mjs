@@ -13,9 +13,29 @@ import {
 
 export { MCP_PILLARS, MCP_PRESETS, MCP_PROFILES, getMcpPresetsSummary };
 
+/**
+ * @typedef {{
+ *   pillar: string,
+ *   description: string,
+ *   command: string,
+ *   args: string[],
+ *   pinnedVersion: string,
+ *   riskLevel: string,
+ *   readonly: boolean,
+ *   env?: Record<string, string>,
+ *   envTemplate?: Record<string, string>,
+ * }} McpPreset
+ */
+
+/** @type {Record<string, McpPreset>} */
+const PRESETS_BY_NAME = MCP_PRESETS;
+/** @type {Record<string, string[]>} */
+const PROFILES_BY_NAME = MCP_PROFILES;
+
 const PROMPT_POISONING_RE =
   /(ignore\s+(?:all\s+)?previous\s+instructions|disregard\s+system\s+prompt|<\s*system\s*>|you\s+are\s+now\s+in\s+developer\s+mode|exfiltrate|send\s+.*\s+to\s+https?:\/\/|\bcurl\s+-X\s+POST\b)/i;
 
+/** @param {McpPreset} preset */
 function toMcpServerSpec(preset) {
   /** @type {Record<string, any>} */
   const entry = { command: preset.command, args: [...preset.args] };
@@ -25,14 +45,17 @@ function toMcpServerSpec(preset) {
   return entry;
 }
 
+/** @param {Record<string, any> | null | undefined} existingJsonObj @param {string[]} serverNames */
 export function mergeMcpServersIntoJson(existingJsonObj, serverNames) {
   const base = existingJsonObj && typeof existingJsonObj === 'object' ? { ...existingJsonObj } : {};
   const existingServers = base.mcpServers && typeof base.mcpServers === 'object' ? { ...base.mcpServers } : {};
+  /** @type {string[]} */
   const added = [];
+  /** @type {string[]} */
   const kept = [];
 
   for (const name of serverNames) {
-    const preset = MCP_PRESETS[name];
+    const preset = PRESETS_BY_NAME[name];
     if (!preset) continue;
     if (name in existingServers) {
       kept.push(name);
@@ -49,21 +72,26 @@ export function mergeMcpServersIntoJson(existingJsonObj, serverNames) {
   };
 }
 
+/** @param {unknown} val */
 function escapeTomlStr(val) {
   return `"${String(val).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
+/** @param {string} name */
 function formatTomlServerKey(name) {
   return /^[A-Za-z0-9_-]+$/.test(name) ? name : escapeTomlStr(name);
 }
 
+/** @param {string | null | undefined} existingTomlText @param {string[]} serverNames */
 export function mergeMcpServersIntoCodexToml(existingTomlText, serverNames) {
   let content = String(existingTomlText || '');
+  /** @type {string[]} */
   const added = [];
+  /** @type {string[]} */
   const kept = [];
 
   for (const name of serverNames) {
-    const preset = MCP_PRESETS[name];
+    const preset = PRESETS_BY_NAME[name];
     if (!preset) continue;
     const headerRegex = new RegExp(`^\\[mcp_servers\\.(?:"${name}"|'${name}'|${name})\\]`, 'm');
     if (headerRegex.test(content)) {
@@ -141,6 +169,9 @@ export function auditMcpDescriptorsAndLock(serverOrToolSpecs, lockedHashes = nul
 /**
  * Audits `.mcp.json` and `.codex/config.toml` for write flags, `@latest` unpinned tags, archived packages,
  * hardcoded secrets, and `.aitest/mcp.lock` drift.
+ * @param {{ mcpServers?: Record<string, Record<string, any>> } | null | undefined} mcpJsonObj
+ * @param {string} [codexTomlText]
+ * @param {{ lockedHashes?: Record<string, string> | null }} [options]
  */
 export function auditMcpSafety(mcpJsonObj, codexTomlText = '', options = {}) {
   const issues = [];
@@ -154,7 +185,7 @@ export function auditMcpSafety(mcpJsonObj, codexTomlText = '', options = {}) {
     checkedServers.push(name);
     const argsStr = Array.isArray(cfg.args) ? cfg.args.join(' ') : '';
     const env = cfg.env || {};
-    riskByServer[name] = MCP_PRESETS[name]?.riskLevel || 'unknown';
+    riskByServer[name] = PRESETS_BY_NAME[name]?.riskLevel || 'unknown';
 
     if (/@latest\b/i.test(argsStr)) {
       issues.push(`[MCP Supply Chain] Server "${name}" uses floating "@latest" tag; pin an exact semver version.`);
@@ -217,6 +248,7 @@ export function auditMcpSafety(mcpJsonObj, codexTomlText = '', options = {}) {
   };
 }
 
+/** @param {string[]} serverNames */
 function buildMcpEnvTemplate(serverNames) {
   const lines = [
     '# Optional Read-Only Full-Link System MCP Credentials (NEVER commit real secrets to Git)',
@@ -226,7 +258,7 @@ function buildMcpEnvTemplate(serverNames) {
   ];
   const seen = new Set();
   for (const name of serverNames) {
-    const preset = MCP_PRESETS[name];
+    const preset = PRESETS_BY_NAME[name];
     if (!preset?.envTemplate) continue;
     for (const [k, v] of Object.entries(preset.envTemplate)) {
       if (seen.has(k)) continue;
@@ -238,6 +270,20 @@ function buildMcpEnvTemplate(serverNames) {
   return lines.join('\n') + '\n';
 }
 
+/**
+ * @param {{
+ *   lang?: string,
+ *   action?: string,
+ *   json?: boolean,
+ *   target?: string,
+ *   qaDir?: string,
+ *   lock?: boolean,
+ *   servers?: string,
+ *   profile?: string,
+ *   dryRun?: boolean,
+ *   force?: boolean,
+ * }} [options]
+ */
 export async function runMcpCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   const action = (options.action || 'presets').toLowerCase();
@@ -322,6 +368,7 @@ export async function runMcpCommand(options = {}) {
   }
 
   if (action === 'add') {
+    /** @type {string[]} */
     let selected = [];
     if (options.servers) {
       selected = String(options.servers)
@@ -330,14 +377,14 @@ export async function runMcpCommand(options = {}) {
         .filter(Boolean);
     } else {
       const profileName = (options.profile || 'full-link').toLowerCase();
-      if (!MCP_PROFILES[profileName]) {
+      if (!PROFILES_BY_NAME[profileName]) {
         console.error(`Unknown MCP profile "${profileName}". Valid: ${Object.keys(MCP_PROFILES).join(', ')}`);
         return 1;
       }
-      selected = MCP_PROFILES[profileName];
+      selected = PROFILES_BY_NAME[profileName];
     }
 
-    const unknown = selected.filter((s) => !MCP_PRESETS[s]);
+    const unknown = selected.filter((s) => !PRESETS_BY_NAME[s]);
     if (unknown.length > 0) {
       console.error(`Unknown MCP preset(s): ${unknown.join(', ')}. Valid: ${Object.keys(MCP_PRESETS).join(', ')}`);
       return 1;

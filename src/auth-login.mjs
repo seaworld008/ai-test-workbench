@@ -35,6 +35,14 @@ export function validateLoopbackCdpUrl(rawUrl) {
   return { ok: true, url: parsed.toString() };
 }
 
+/**
+ * @param {any} context
+ * @param {any} page
+ * @param {string} expectedOrigin
+ * @param {string} storageStatePath
+ * @param {string} sessionStoragePath
+ * @param {Record<string, unknown>} [extraMeta]
+ */
 async function saveSessionSnapshot(context, page, expectedOrigin, storageStatePath, sessionStoragePath, extraMeta = {}) {
   await context.storageState({ path: storageStatePath });
   try {
@@ -42,6 +50,7 @@ async function saveSessionSnapshot(context, page, expectedOrigin, storageStatePa
   } catch {
     // ignore chmod failures on Windows filesystems
   }
+  /** @type {{ origin: string, url: string, entries: [string, string][], localStorageKeys: string[] }} */
   const sessionDump = await page
     .evaluate(() => ({
       origin: window.location.origin,
@@ -73,12 +82,14 @@ async function saveSessionSnapshot(context, page, expectedOrigin, storageStatePa
   );
 }
 
+/** @param {{ chromium: any, cdpUrl: string, expectedOrigin: string, storageStatePath: string, sessionStoragePath: string }} params */
 async function captureSessionViaCdp({ chromium, cdpUrl, expectedOrigin, storageStatePath, sessionStoragePath }) {
   const browser = await chromium.connectOverCDP(cdpUrl);
   try {
     const contexts = browser.contexts();
     let matchedContext = null;
     let matchedPage = null;
+    /** @type {string[]} */
     const openOrigins = [];
     for (const ctx of contexts) {
       for (const p of ctx.pages()) {
@@ -110,9 +121,10 @@ async function captureSessionViaCdp({ chromium, cdpUrl, expectedOrigin, storageS
   }
 }
 
+/** @param {any} page @param {string} btnLabel */
 async function ensureFloatingSaveButton(page, btnLabel) {
   try {
-    await page.evaluate((label) => {
+    await page.evaluate((/** @type {string} */ label) => {
       if (document.getElementById('__aitest_auth_helper__')) return;
       const btn = document.createElement('button');
       btn.id = '__aitest_auth_helper__';
@@ -145,6 +157,7 @@ async function ensureFloatingSaveButton(page, btnLabel) {
   }
 }
 
+/** @param {{ chromium: any, targetUrl: string, account: string, storageStatePath: string, sessionStoragePath: string, timeoutSec: number, lang: 'zh' | 'en' }} params */
 async function captureSessionViaHeadedBrowser({
   chromium,
   targetUrl,
@@ -202,6 +215,7 @@ async function captureSessionViaHeadedBrowser({
 
     const initialUrl = page.url();
     const initialWasLogin = LOGIN_ROUTE_RE.test(initialUrl);
+    /** @type {number | null} */
     let transitionedAt = null;
     const startedAt = Date.now();
 
@@ -250,6 +264,7 @@ async function captureSessionViaHeadedBrowser({
  * Never attempts to bypass CAPTCHAs or bot challenges: either reuses an already-logged-in local Chrome
  * session over `--cdp-url` (without closing the user's browser) or opens headed Chromium and waits
  * for the human operator to complete login.
+ * @param {Record<string, any>} [options]
  */
 export async function runAuthLoginCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';

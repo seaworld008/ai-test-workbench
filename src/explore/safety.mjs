@@ -19,6 +19,7 @@ const SENSITIVE_QUERY_KEY_RE =
 
 export { evaluateExploreRequestSafety };
 
+/** @param {string} label */
 export function classifyActionSafety(label) {
   const clean = String(label || '').replace(/\s+/g, ' ').trim();
   if (!clean) return 'unknown';
@@ -53,23 +54,26 @@ export function createStratifiedRouteQueue() {
   const bucketOrder = [];
   let cursor = 0;
 
-  const getDomainKey = (route) => {
+  const getDomainKey = (/** @type {string} */ route) => {
     const clean = String(route || '/').split('?')[0].replace(/^\/+/, '');
     if (!clean) return '/';
     return `/${clean.split('/')[0]}`;
   };
 
   return {
+    /** @param {string} route */
     enqueue(route) {
       const normalized = String(route || '/');
       if (seen.has(normalized)) return false;
       seen.add(normalized);
       const key = getDomainKey(normalized);
-      if (!buckets.has(key)) {
-        buckets.set(key, []);
+      let bucket = buckets.get(key);
+      if (!bucket) {
+        bucket = [];
+        buckets.set(key, bucket);
         bucketOrder.push(key);
       }
-      buckets.get(key).push(normalized);
+      bucket.push(normalized);
       return true;
     },
     dequeue() {
@@ -81,7 +85,7 @@ export function createStratifiedRouteQueue() {
         const list = buckets.get(key);
         if (list && list.length > 0) {
           cursor = (idx + 1) % totalBuckets;
-          return list.shift();
+          return list.shift() ?? null;
         }
       }
       return null;
@@ -97,6 +101,7 @@ export function createStratifiedRouteQueue() {
   };
 }
 
+/** @param {string} rawUrl */
 export function redactEndpointUrl(rawUrl) {
   const input = String(rawUrl || '').trim();
   if (!input) return '';
@@ -115,6 +120,7 @@ export function redactEndpointUrl(rawUrl) {
   }
 }
 
+/** @param {string} rawUrl */
 export function detectUrlQueryAnomalies(rawUrl) {
   const input = String(rawUrl || '');
   const anomalies = [];
@@ -156,7 +162,9 @@ export function detectEnvelopeBusinessError(httpStatus, body) {
  * @param {Array<any>} routeTrees
  */
 export function extractVueDynamicRoutes(routeTrees = []) {
+  /** @type {Set<string>} */
   const out = new Set();
+  /** @param {any[]} routes @param {string} [prefix] */
   const walk = (routes, prefix = '') => {
     for (const r of routes || []) {
       if (!r || r.hidden) continue;
@@ -181,6 +189,7 @@ export function extractVueDynamicRoutes(routeTrees = []) {
   return [...out];
 }
 
+/** @param {{ route?: string, actualPath?: string, tableHeaders?: string[], filterLabels?: string[], buttons?: string[], hasPasswordInput?: boolean, hasChart?: boolean, hasTable?: boolean }} [pageInfo] */
 export function detectPageArchetype(pageInfo = {}) {
   const route = String(pageInfo.route || pageInfo.actualPath || '');
   const tableHeaders = pageInfo.tableHeaders || [];
@@ -201,6 +210,7 @@ export function detectPageArchetype(pageInfo = {}) {
   return 'content-page';
 }
 
+/** @param {string} routePath */
 export function routeToSafeSlug(routePath) {
   const clean = String(routePath || '/')
     .split('?')[0]
