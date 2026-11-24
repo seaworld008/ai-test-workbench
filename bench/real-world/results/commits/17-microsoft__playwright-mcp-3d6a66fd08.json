@@ -1,0 +1,29 @@
+{
+  "id": "microsoft/playwright-mcp@3d6a66fd0874614b18b0305d1ad0966ebe3a2b77",
+  "repo": "microsoft/playwright-mcp",
+  "sha": "3d6a66fd0874614b18b0305d1ad0966ebe3a2b77",
+  "parentSha": "971489536e2c9137fcebc977ef973383270c6dc7",
+  "license": "Apache-2.0",
+  "testPaths": [
+    "tests/click.spec.ts"
+  ],
+  "commitUrl": "https://github.com/microsoft/playwright-mcp/commit/3d6a66fd0874614b18b0305d1ad0966ebe3a2b77",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "pass",
+  "flagged": false,
+  "ruleCodes": [],
+  "violations": [],
+  "files": [
+    {
+      "testPath": "tests/click.spec.ts",
+      "status": "pass",
+      "ruleCodes": [],
+      "violations": []
+    }
+  ],
+  "adjudication": {
+    "label": "PASS",
+    "reviewedAt": null,
+    "rationale": "Gate passed with zero violations."
+  }
+}

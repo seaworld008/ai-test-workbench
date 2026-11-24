@@ -4,6 +4,7 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -116,6 +117,60 @@ jobs:
       - name: Run Official @modelcontextprotocol/conformance & SDK 3-Transport Suite
         working-directory: conformance
         run: npm test
+
+  real-world-fpr-smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: templates/playwright-qa/package-lock.json
+
+      - name: Install TypeScript AST compiler dependency for offline gate kernel
+        working-directory: templates/playwright-qa
+        run: npm ci --no-audit --no-fund
+
+      - name: Run Smoke-Scale Real-World Playwright FPR Benchmark (<= 5 commits, offline static/AST only)
+        run: node scripts/bench-real-world.mjs --smoke
+
+  real-world-fpr-full:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: templates/playwright-qa/package-lock.json
+
+      - name: Install TypeScript AST compiler dependency for offline gate kernel
+        working-directory: templates/playwright-qa
+        run: npm ci --no-audit --no-fund
+
+      - name: Run Full Real-World Playwright FPR Pilot Benchmark (n=50, offline static/AST only)
+        run: node scripts/bench-real-world.mjs
+
+      - name: Upload Real-World FPR Benchmark Results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: real-world-fpr-results
+          path: bench/real-world/results/
+          retention-days: 30
 
   self-bootstrap-verify:
     uses: ./.github/workflows/aitest-verify.yml

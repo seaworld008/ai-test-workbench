@@ -13,6 +13,7 @@ Powered by **One-Call `verify_change` (in-toto v1 + `T0/T1/T2` Trust Tiers)** ·
 [![License: MIT](https://img.shields.io/badge/License-MIT-10b981.svg?style=flat-square)](./LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.12-339933?style=flat-square&logo=node.js&logoColor=white)](./VERSION.en.md)
 [![Gate Corpus](https://img.shields.io/badge/Gate%20Corpus-Internal%20%2B%20Red--Team%20Holdout-16a34a?style=flat-square)](./docs/review/v5-verification-scorecard.en.md)
+[![Gate FPR Pilot](https://img.shields.io/badge/Gate%20FPR%20(real--world%20pilot%2C%20n%3D50)-20.8%25%20%5B11.7%25--34.3%25%5D-d97706?style=flat-square)](./bench/real-world/results/SUMMARY.en.md)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05%20..%202025--11--25+-0284c7?style=flat-square)](./skills/ai-test-workbench/references/mcp-server-protocol.en.md)
 [![Playwright](https://img.shields.io/badge/Playwright-1.65.1-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev/)
 
@@ -33,7 +34,9 @@ When coding agents (`Claude Code`, `Codex CLI`, `Antigravity`, `Cursor`, `VS Cod
 | North-Star Metric | Measured Benchmark (`npm run bench`, Corpus-Qualified) | Enforcing Mechanism |
 |---|---|---|
 | **Fake-Green Escape Rate (`FGER-internal` / `FGER-holdout`)** | Internal Regression **`0.0%` (`26/26`)** · Red-Team Holdout **`0.0%` (`24/24`)** | Fail-closed 4-Layer AST Gate (`AITEST-G101..G115`) + T1 MAC Governance Lock |
-| **Benign Refactoring FPR (`Gate FPR`)** | Benign Refactor Corpus **`0.0%`** (Prettier wraps, locator renames, ARIA consolidation) | Full-file TypeScript Compiler API AST comparison |
+| **Benign Refactoring FPR (`Gate FPR`, Internal Corpus)** | Internal Benign Refactor Corpus **`0.0%`** (Prettier wraps, locator renames, ARIA consolidation) | Full-file TypeScript Compiler API AST comparison |
+| **Gate FPR (real-world pilot, n=50)** | Adjudicated FPR **`20.8%` (`10/48` normal commits, Wilson 95% CI `[11.7%, 34.3%]`)** · Raw alert rate `24.0%` (`12/50`, CI `[14.3%, 37.4%]`, `2` true positives) · **`>=200` formal evaluation: `pending` (no extrapolation)** | Offline static/AST pilot across 5 permissive OSS repos (`seed=20261124`); see [Pre-Registration](./bench/real-world/PREREGISTRATION.en.md) & [Pilot Summary](./bench/real-world/results/SUMMARY.en.md) |
+| **Agentic Red-Team Escape Rate (`FGER-agentic`)** | **`design only` (not yet implemented, no benchmark numbers)** | Threat model, 4 attack classes & T2 boundary in [Red-Team Design](./bench/agentic/DESIGN.en.md) |
 | **Seeded-Defect Detection Rate (`SDDR`)** | Single Demo Target **`100.0%` (`7/7`)** | Zero-dep JSON Schema validator + RBAC/concurrency + WCAG 2.1/2.2 scans |
 | **Triage Accuracy / C→A Misclassification / Mis-Heal** | Internal + Real Playwright Stack Corpus **`100%` · C→A `0.0%` · Mis-Heal `0.0%`** | Structured runtime guard telemetry + C-before-A precedence + tamper-evident healer |
 | **Secret Redaction Recall** | Internal Adversarial Corpus **`100.0%` (`35/35`)** | Redaction v2 (structured parse-before-redact preserving typed `heal_*`/`job_*` IDs) |

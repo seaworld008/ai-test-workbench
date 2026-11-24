@@ -1,0 +1,53 @@
+{
+  "id": "sveltejs/kit@3d5800fad6000ea836eb41c8da6f83281e4326cf",
+  "repo": "sveltejs/kit",
+  "sha": "3d5800fad6000ea836eb41c8da6f83281e4326cf",
+  "parentSha": "de9e64613601ed81c5ece89e1116d384a381834f",
+  "license": "MIT",
+  "testPaths": [
+    "packages/kit/test/apps/basics/test/playwright/client.test.js",
+    "packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js"
+  ],
+  "commitUrl": "https://github.com/sveltejs/kit/commit/3d5800fad6000ea836eb41c8da6f83281e4326cf",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "fail",
+  "flagged": true,
+  "ruleCodes": [
+    "AITEST-G107",
+    "AITEST-G110"
+  ],
+  "violations": [
+    "[Healer Diff Guard][AITEST-G110] packages/kit/test/apps/basics/test/playwright/client.test.js: wrapping expect() inside conditional if-block is forbidden.",
+    "[Healer Diff Guard][AITEST-G107] packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js: swallowed exception in try/catch block without rethrow.",
+    "[Healer Diff Guard][AITEST-G110] packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js: wrapping expect() inside conditional if-block is forbidden."
+  ],
+  "files": [
+    {
+      "testPath": "packages/kit/test/apps/basics/test/playwright/client.test.js",
+      "status": "fail",
+      "ruleCodes": [
+        "AITEST-G110"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G110] packages/kit/test/apps/basics/test/playwright/client.test.js: wrapping expect() inside conditional if-block is forbidden."
+      ]
+    },
+    {
+      "testPath": "packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js",
+      "status": "fail",
+      "ruleCodes": [
+        "AITEST-G107",
+        "AITEST-G110"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G107] packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js: swallowed exception in try/catch block without rethrow.",
+        "[Healer Diff Guard][AITEST-G110] packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js: wrapping expect() inside conditional if-block is forbidden."
+      ]
+    }
+  ],
+  "adjudication": {
+    "label": "FP",
+    "reviewedAt": "2026-11-24",
+    "rationale": "Normal diagnostic standardization refactoring (#17276). AITEST-G110 flagged env-guarded `if (process.env.DEV) { expect(...).toContainKitDiagnostic(...) }` paired with an unconditional length assertion; AITEST-G107 flagged an existing negative-test try/catch that asserts on expected error text."
+  }
+}

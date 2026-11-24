@@ -1,0 +1,37 @@
+{
+  "id": "actualbudget/actual@a81408595c437666c2efa9f449b200c10e2d11d0",
+  "repo": "actualbudget/actual",
+  "sha": "a81408595c437666c2efa9f449b200c10e2d11d0",
+  "parentSha": "ff1b6045a1b25a2e3a1cb26507eb97ccb567cde3",
+  "license": "MIT",
+  "testPaths": [
+    "packages/desktop-client/e2e/budget.mobile.test.ts"
+  ],
+  "commitUrl": "https://github.com/actualbudget/actual/commit/a81408595c437666c2efa9f449b200c10e2d11d0",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "fail",
+  "flagged": true,
+  "ruleCodes": [
+    "AITEST-G103"
+  ],
+  "violations": [
+    "[Healer Diff Guard][AITEST-G103] packages/desktop-client/e2e/budget.mobile.test.ts: assertion strength downgraded (max tier S5 -> S5, total strength 154 -> 153)."
+  ],
+  "files": [
+    {
+      "testPath": "packages/desktop-client/e2e/budget.mobile.test.ts",
+      "status": "fail",
+      "ruleCodes": [
+        "AITEST-G103"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G103] packages/desktop-client/e2e/budget.mobile.test.ts: assertion strength downgraded (max tier S5 -> S5, total strength 154 -> 153)."
+      ]
+    }
+  ],
+  "adjudication": {
+    "label": "FP",
+    "reviewedAt": "2026-11-24",
+    "rationale": "Normal UI migration (#8528): migrated test from legacy note-based template notification (`toContainText`, S3) to new automations modal (`toBeHidden`, S2) while keeping the core S5 outcome assertion (`toHaveText(amountToCurrency(amountToTemplate))`) and updated visual regression snapshots."
+  }
+}

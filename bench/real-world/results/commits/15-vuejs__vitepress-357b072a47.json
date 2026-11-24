@@ -1,0 +1,29 @@
+{
+  "id": "vuejs/vitepress@357b072a47e1255001f510cc5fc4c09040a46e02",
+  "repo": "vuejs/vitepress",
+  "sha": "357b072a47e1255001f510cc5fc4c09040a46e02",
+  "parentSha": "5a368d3198728ade447d4ea86a059e04e266f404",
+  "license": "MIT",
+  "testPaths": [
+    "__tests__/e2e/markdown-extensions/markdown-extensions.test.ts"
+  ],
+  "commitUrl": "https://github.com/vuejs/vitepress/commit/357b072a47e1255001f510cc5fc4c09040a46e02",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "pass",
+  "flagged": false,
+  "ruleCodes": [],
+  "violations": [],
+  "files": [
+    {
+      "testPath": "__tests__/e2e/markdown-extensions/markdown-extensions.test.ts",
+      "status": "pass",
+      "ruleCodes": [],
+      "violations": []
+    }
+  ],
+  "adjudication": {
+    "label": "PASS",
+    "reviewedAt": null,
+    "rationale": "Gate passed with zero violations."
+  }
+}

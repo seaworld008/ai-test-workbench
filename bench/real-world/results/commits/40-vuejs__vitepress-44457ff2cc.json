@@ -1,0 +1,39 @@
+{
+  "id": "vuejs/vitepress@44457ff2cca18439496b954a727fc2e337d52c3c",
+  "repo": "vuejs/vitepress",
+  "sha": "44457ff2cca18439496b954a727fc2e337d52c3c",
+  "parentSha": "633e48af9ec25a9cc28fc3ebf1e9063b359adb2e",
+  "license": "MIT",
+  "testPaths": [
+    "__tests__/e2e/rtl/index.test.ts"
+  ],
+  "commitUrl": "https://github.com/vuejs/vitepress/commit/44457ff2cca18439496b954a727fc2e337d52c3c",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "fail",
+  "flagged": true,
+  "ruleCodes": [
+    "AITEST-G105"
+  ],
+  "violations": [
+    "[Healer Diff Guard][AITEST-G105] __tests__/e2e/rtl/index.test.ts: added skip/fixme/only (\"test.skip('mirrors the external link icon', async () => {\").",
+    "[Healer Diff Guard][AITEST-G105] __tests__/e2e/rtl/index.test.ts: added skip/fixme/only (\"test.skip('slides the mobile sidebar in from the right', async () => {\")."
+  ],
+  "files": [
+    {
+      "testPath": "__tests__/e2e/rtl/index.test.ts",
+      "status": "fail",
+      "ruleCodes": [
+        "AITEST-G105"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G105] __tests__/e2e/rtl/index.test.ts: added skip/fixme/only (\"test.skip('mirrors the external link icon', async () => {\").",
+        "[Healer Diff Guard][AITEST-G105] __tests__/e2e/rtl/index.test.ts: added skip/fixme/only (\"test.skip('slides the mobile sidebar in from the right', async () => {\")."
+      ]
+    }
+  ],
+  "adjudication": {
+    "label": "TP",
+    "reviewedAt": "2026-11-24",
+    "rationale": "Icon update PR (#5506) directly disabled two existing passing E2E tests via unwaived `test.skip(...)` (`// FIXME: path data is updated...` and `// FIXME: flaky`) instead of fixing or waiving them — textbook True Positive for AITEST-G105."
+  }
+}

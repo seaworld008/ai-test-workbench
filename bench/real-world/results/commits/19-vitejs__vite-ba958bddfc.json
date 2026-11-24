@@ -1,0 +1,29 @@
+{
+  "id": "vitejs/vite@ba958bddfc9cabe302c6b34269dcf5c9634531e0",
+  "repo": "vitejs/vite",
+  "sha": "ba958bddfc9cabe302c6b34269dcf5c9634531e0",
+  "parentSha": "1cbf7d63e14845541dcbbc8e393cfd82a0cb25b6",
+  "license": "MIT",
+  "testPaths": [
+    "playground/css-sourcemap/__tests__/css-sourcemap.spec.ts"
+  ],
+  "commitUrl": "https://github.com/vitejs/vite/commit/ba958bddfc9cabe302c6b34269dcf5c9634531e0",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "pass",
+  "flagged": false,
+  "ruleCodes": [],
+  "violations": [],
+  "files": [
+    {
+      "testPath": "playground/css-sourcemap/__tests__/css-sourcemap.spec.ts",
+      "status": "pass",
+      "ruleCodes": [],
+      "violations": []
+    }
+  ],
+  "adjudication": {
+    "label": "PASS",
+    "reviewedAt": null,
+    "rationale": "Gate passed with zero violations."
+  }
+}

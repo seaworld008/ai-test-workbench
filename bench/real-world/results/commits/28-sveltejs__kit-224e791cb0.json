@@ -1,0 +1,37 @@
+{
+  "id": "sveltejs/kit@224e791cb05f95a5c2d881e5a7d5341352f3c052",
+  "repo": "sveltejs/kit",
+  "sha": "224e791cb05f95a5c2d881e5a7d5341352f3c052",
+  "parentSha": "755024a1af3ffcb80cdf939b2cf50ada3a2cb684",
+  "license": "MIT",
+  "testPaths": [
+    "packages/kit/test/apps/basics/test/playwright/client.test.js"
+  ],
+  "commitUrl": "https://github.com/sveltejs/kit/commit/224e791cb05f95a5c2d881e5a7d5341352f3c052",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "fail",
+  "flagged": true,
+  "ruleCodes": [
+    "STATIC-WAIT-FOR-TIMEOUT"
+  ],
+  "violations": [
+    "[Static Check][STATIC-WAIT-FOR-TIMEOUT] packages/kit/test/apps/basics/test/playwright/client.test.js: newly introduced waitForTimeout() (26 -> 27)."
+  ],
+  "files": [
+    {
+      "testPath": "packages/kit/test/apps/basics/test/playwright/client.test.js",
+      "status": "fail",
+      "ruleCodes": [
+        "STATIC-WAIT-FOR-TIMEOUT"
+      ],
+      "violations": [
+        "[Static Check][STATIC-WAIT-FOR-TIMEOUT] packages/kit/test/apps/basics/test/playwright/client.test.js: newly introduced waitForTimeout() (26 -> 27)."
+      ]
+    }
+  ],
+  "adjudication": {
+    "label": "TP",
+    "reviewedAt": "2026-11-24",
+    "rationale": "Commit genuinely introduced a new hardcoded `await page.waitForTimeout(100)` sleep inside a newly added test (`packages/kit/test/apps/basics/test/playwright/client.test.js`), matching the pre-registered TP criterion for hardcoded sleeps."
+  }
+}

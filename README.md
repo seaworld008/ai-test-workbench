@@ -13,6 +13,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-10b981.svg?style=flat-square)](./LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.12-339933?style=flat-square&logo=node.js&logoColor=white)](./VERSION.md)
 [![Internal Corpus](https://img.shields.io/badge/Gate%20Corpus-Internal%20%2B%20Red--Team%20Holdout-16a34a?style=flat-square)](./docs/review/v5-verification-scorecard.md)
+[![Gate FPR Pilot](https://img.shields.io/badge/Gate%20FPR%20(real--world%20pilot%2C%20n%3D50)-20.8%25%20%5B11.7%25--34.3%25%5D-d97706?style=flat-square)](./bench/real-world/results/SUMMARY.md)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05%20..%202025--11--25+-0284c7?style=flat-square)](./skills/ai-test-workbench/references/mcp-server-protocol.md)
 [![Playwright](https://img.shields.io/badge/Playwright-1.65.1-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev/)
 
@@ -33,7 +34,9 @@
 | 北极星可信度指标 | 本机可复现基准实测 (`npm run bench`，标明语料范围) | 核心保障机制 |
 |---|---|---|
 | **假绿逃逸率 (`FGER-internal` / `FGER-holdout`)** | 内部回归语料 **`0.0%` (`26/26`)** · 红队留出集 **`0.0%` (`24/24`)** | 四层 fail-closed AST 门禁 (`AITEST-G101..G115`) + T1 MAC 治理锁 |
-| **良性重构误报率 (`Gate FPR`)** | 良性重构语料 **`0.0%`**（零误拦 Prettier 换行 / 合法抽提 / ARIA 合并） | TypeScript Compiler API 全文件 AST 比对 |
+| **良性重构误报率 (`Gate FPR`, 内部良性语料)** | 内部良性重构语料 **`0.0%`**（零误拦 Prettier 换行 / 合法抽提 / ARIA 合并） | TypeScript Compiler API 全文件 AST 比对 |
+| **Gate FPR (real-world pilot, n=50)** | 审核后误报率 **`20.8%` (`10/48` 正常提交，Wilson 95% CI `[11.7%, 34.3%]`)** · 原始告警率 `24.0%` (`12/50`，CI `[14.3%, 37.4%]`，含 `2` 个真报) · **`>=200` 正式评测：`pending`（不外推）** | 5 个宽松许可开源仓离线静态/AST 试跑（`seed=20261124`），见 [预登记方案](./bench/real-world/PREREGISTRATION.md) 与 [试跑汇总](./bench/real-world/results/SUMMARY.md) |
+| **自治红队假绿逃逸率 (`FGER-agentic`)** | **`design only`（尚未实现，无评测数值）** | 威胁模型、4 类攻击与 T2 关系见 [红队设计文档](./bench/agentic/DESIGN.md) |
 | **种子缺陷检出率 (`SDDR`)** | 单应用靶场 **`100.0%` (`7/7`)** | 零依赖 JSON Schema 契约校验 + RBAC/并发竞态 + WCAG 2.1/2.2 |
 | **诊断分类准确率 / C→A 误判率 / 误修率** | 内部语料 + 真实 Playwright 堆栈 **`100%` · C→A `0.0%` · 误修率 `0.0%`** | 结构化运行时守卫 + C 优先于 A 值断言规则 + 防篡改自愈状态机 |
 | **凭据脱敏召回率** | 内部对抗语料 **`100.0%` (`35/35`)** | Redaction v2（结构化先解析后脱敏，保留内部 `heal_*`/`job_*` ID） |
@@ -238,7 +241,7 @@ npm run bench
 | 文档主题 | 简体中文（默认） | English |
 |---|---|---|
 | **四层防假绿门禁与治理指南 (v5.0)** | [docs/governance.md](./docs/governance.md) | [docs/governance.en.md](./docs/governance.en.md) |
-| **v5.0 验证评分卡与审查路线图** | [scorecard](./docs/review/v5-verification-scorecard.md) · [review](./docs/review/architecture-code-review-2026-11.md) · [roadmap](./docs/review/optimization-roadmap-2026-2027.md) | [scorecard.en](./docs/review/v5-verification-scorecard.en.md) · [review.en](./docs/review/architecture-code-review-2026-11.en.md) · [roadmap.en](./docs/review/optimization-roadmap-2026-2027.en.md) |
+| **v5.0 验证评分卡与公开基准** | [scorecard](./docs/review/v5-verification-scorecard.md) · [真实提交 FPR 预登记](./bench/real-world/PREREGISTRATION.md) · [试跑汇总 (n=50)](./bench/real-world/results/SUMMARY.md) · [FGER-agentic 设计](./bench/agentic/DESIGN.md) | [scorecard.en](./docs/review/v5-verification-scorecard.en.md) · [FPR Pre-Reg (EN)](./bench/real-world/PREREGISTRATION.en.md) · [Pilot Summary (EN)](./bench/real-world/results/SUMMARY.en.md) · [Agentic Design (EN)](./bench/agentic/DESIGN.en.md) |
 | **架构决策记录 (ADR)** | [MCP 协议层零依赖](./docs/adr/mcp-zero-dependency.md) · [ADR-0001 内核演进](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) | [MCP Zero-Dep ADR (EN)](./docs/adr/mcp-zero-dependency.en.md) · [ADR-0001 (EN)](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md) |
 | **AI Agent 快速上手与规范** | [quickstart](./docs/ai-agent-quickstart.md) · [AGENTS.md](./AGENTS.md) · [CLAUDE.md](./CLAUDE.md) · [llms.txt](./llms.txt) | [quickstart.en](./docs/ai-agent-quickstart.en.md) · [AGENTS.en.md](./AGENTS.en.md) |
 | **系统架构、版本矩阵与蓝图** | [ARCHITECTURE.md](./ARCHITECTURE.md) · [VERSION.md](./VERSION.md) · [架构蓝图](./Playwright%20Test%20Agents%20+%20Codex%20%E5%8F%AF%E5%A4%8D%E7%94%A8%E6%9C%AC%E6%9C%BA%20AI%20%E8%87%AA%E5%8A%A8%E5%8C%96%E6%B5%8B%E8%AF%95%E5%B7%A5%E4%BD%9C%E5%8F%B0%E2%80%94%E2%80%94%E6%9E%B6%E6%9E%84%E8%AE%BE%E8%AE%A1%E4%B8%8E%E5%AE%9E%E6%96%BD%E6%8F%90%E7%A4%BA%E8%AF%8D.md) | [ARCHITECTURE.en.md](./ARCHITECTURE.en.md) · [VERSION.en.md](./VERSION.en.md) · [Blueprint (EN)](./docs/architecture-and-prompts-blueprint.en.md) |
