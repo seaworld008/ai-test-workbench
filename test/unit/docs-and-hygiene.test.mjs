@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { DEFAULT_REPO_ROOT, checkDocsAndHygiene } from '../scripts/check-docs-and-hygiene.mjs';
+import { DEFAULT_REPO_ROOT, checkDocsAndHygiene } from '../../scripts/check-docs-and-hygiene.mjs';
 
 test('repository passes bilingual docs pairing, relative links, and desensitization hygiene', () => {
   const res = checkDocsAndHygiene(DEFAULT_REPO_ROOT);

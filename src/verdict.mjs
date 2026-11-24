@@ -32,7 +32,7 @@ import {
 /**
  * @param {Record<string, any>} verdictObj
  */
-function buildSarifReport(verdictObj) {
+export function buildSarifReport(verdictObj) {
   const results = [];
   for (const errMsg of verdictObj.gateErrors || []) {
     const codeMatch = /\[(AITEST-G\d+|Governance Tamper Blocked|Stale Results Blocked|Run Ledger Blocked|Heal Governance Blocked|Static Check)\]/.exec(
@@ -102,7 +102,7 @@ function buildSarifReport(verdictObj) {
  * @param {'zh' | 'en' | string} [lang]
  * @returns {string}
  */
-function buildPrVerdictMarkdown(verdict, lang = 'zh') {
+export function buildPrVerdictMarkdown(verdict, lang = 'zh') {
   const isZh = lang === 'zh';
   const badge =
     verdict.verdict === 'pass'
@@ -164,7 +164,7 @@ function buildPrVerdictMarkdown(verdict, lang = 'zh') {
  * @param {{ isGitRepo?: boolean, gitRoot?: string | null, resolved?: string | null }} baseResolution
  * @returns {{ ok: boolean, errors: string[] }}
  */
-function checkHealSessionConflicts(qaDir, baseResolution) {
+export function checkHealSessionConflicts(qaDir, baseResolution) {
   const healsDir = path.join(qaDir, '.aitest', 'heals');
   if (!fs.existsSync(healsDir)) return { ok: true, errors: [] };
 

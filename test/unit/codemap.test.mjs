@@ -9,9 +9,9 @@ import {
   mergeLivingCodeMap,
   syncImpactMapFromCodeMap,
   syncLivingCodeMap,
-} from '../src/codemap.mjs';
-import { runCli } from '../src/cli.mjs';
-import { generateDiagnosticsMarkdown } from '../src/diagnose.mjs';
+} from '../../src/codemap.mjs';
+import { runCli } from '../../src/cli.mjs';
+import { generateDiagnosticsMarkdown } from '../../src/diagnose.mjs';
 
 test('indexRepositorySource discovers frontend routes, broken imports, backend endpoints, and DB entities', () => {
   const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aitest-srcindex-'));

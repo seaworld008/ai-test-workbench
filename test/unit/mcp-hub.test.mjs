@@ -3,14 +3,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { runCli } from '../src/cli.mjs';
+import { runCli } from '../../src/cli.mjs';
 import {
   MCP_PILLARS,
   MCP_PRESETS,
   auditMcpSafety,
   mergeMcpServersIntoCodexToml,
   mergeMcpServersIntoJson,
-} from '../src/mcp-hub.mjs';
+} from '../../src/mcp-hub.mjs';
 
 test('MCP_PRESETS covers all 7 pillars including built-in ai-test-workbench orchestrator', () => {
   const pillarsFound = new Set(Object.values(MCP_PRESETS).map((p) => p.pillar));

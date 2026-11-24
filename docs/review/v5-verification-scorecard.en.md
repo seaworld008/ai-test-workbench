@@ -14,8 +14,8 @@ This scorecard records the measured **before-and-after North-Star metrics** and 
 | **Seeded-Defect Detection Rate (`SDDR`)** | Unmeasured | `>= 90%` | **`100.0%` (`7/7` real defects caught)** | `examples/demo-webapp/server.mjs` (`DEMO_DEFECT`) + `npm run bench` |
 | **Triage Classification Accuracy** | Misclassified 5xx, blocked origins, and text mismatches as Class D | `>= 95%` | **`100.0%` (`45/45` corpus cases exact)** | `test/adversarial/triage.cases.json` |
 | **Secret Redaction Recall** | Leaked JSON `"password"` and JWTs | `100%` | **`100.0%` (`35/35` secret patterns scrubbed)** | `test/adversarial/redaction.cases.json` |
-| **Mis-Heal Rate** | Prompt-only soft advice | `0%` | **`0.0%` (Class B/C/D hard-blocked by state machine)** | `src/heal.mjs` + `test/governance-and-ledger.test.mjs` |
-| **CDP Web Vitals (`LCP / CLS / INP`)** | `LCP` always `null`, `CLS` always `0` | Real non-null capture | **Live `LCP = 16–20ms`, real `CLS` & `INP`** | `src/perf.mjs` (`PerformanceObserver`) + `test/perf.test.mjs` |
+| **Mis-Heal Rate** | Prompt-only soft advice | `0%` | **`0.0%` (Class B/C/D hard-blocked by state machine)** | `src/heal.mjs` + `test/integration/governance-and-ledger.test.mjs` |
+| **CDP Web Vitals (`LCP / CLS / INP`)** | `LCP` always `null`, `CLS` always `0` | Real non-null capture | **Live `LCP = 16–20ms`, real `CLS` & `INP`** | `src/perf.mjs` (`PerformanceObserver`) + `test/integration/perf.test.mjs` |
 
 ---
 
@@ -23,16 +23,16 @@ This scorecard records the measured **before-and-after North-Star metrics** and 
 
 | ID | Review Finding | `v5.0.0` Engineering Remediation | Automated Test |
 |---|---|---|---|
-| **F-01** | Healer Diff Guard bypassed by 8 weakening patterns and ignored files outside `tests/` | Implemented `S0–S5` Assertion Strength Lattice + `AITEST-G101..G113` full-workspace semantic diff guard (including untracked files & configs) | `test/adversarial.test.mjs` (20) + `bench` (26) |
-| **F-02** | Protected configs & `waivers.json` editable by agents | Added `.aitest/governance.lock` (SHA-256 across 11 protected files), human-only CLI `governance approve`, and strict waiver caps/TTL | `test/governance-and-ledger.test.mjs` |
-| **F-03** | `aitest_audit` accepted unbound stale `results.json` | Added `src/ledger.mjs` (ULID `runId` + workspace input hash binding); code/spec edits invalidate stale runs | `test/governance-and-ledger.test.mjs` |
-| **F-04** | `LCP` always `null`, `CLS` always `0`; missing WCAG 2.1 tags | Switched to pre-injected buffered `PerformanceObserver` with median/P75 aggregation; added `wcag21a` & `wcag21aa` | `test/perf.test.mjs` + `base.ts` |
-| **F-05** | `explore` allowed POST by default and whitelisted `/graphql` | Default-denied all non-`GET/HEAD/OPTIONS` requests in `explore`, blocked `sendBeacon`, removed `/graphql` from safe writes, and blocked GraphQL `mutation` payloads | `test/origin-guard.test.mjs` + `src/explore.mjs` |
+| **F-01** | Healer Diff Guard bypassed by 8 weakening patterns and ignored files outside `tests/` | Implemented `S0–S5` Assertion Strength Lattice + `AITEST-G101..G113` full-workspace semantic diff guard (including untracked files & configs) | `test/adversarial/diff-and-redaction.test.mjs` (20) + `bench` (26) |
+| **F-02** | Protected configs & `waivers.json` editable by agents | Added `.aitest/governance.lock` (SHA-256 across 11 protected files), human-only CLI `governance approve`, and strict waiver caps/TTL | `test/integration/governance-and-ledger.test.mjs` |
+| **F-03** | `aitest_audit` accepted unbound stale `results.json` | Added `src/ledger.mjs` (ULID `runId` + workspace input hash binding); code/spec edits invalidate stale runs | `test/integration/governance-and-ledger.test.mjs` |
+| **F-04** | `LCP` always `null`, `CLS` always `0`; missing WCAG 2.1 tags | Switched to pre-injected buffered `PerformanceObserver` with median/P75 aggregation; added `wcag21a` & `wcag21aa` | `test/integration/perf.test.mjs` + `base.ts` |
+| **F-05** | `explore` allowed POST by default and whitelisted `/graphql` | Default-denied all non-`GET/HEAD/OPTIONS` requests in `explore`, blocked `sendBeacon`, removed `/graphql` from safe writes, and blocked GraphQL `mutation` payloads | `test/unit/origin-guard.test.mjs` + `src/explore.mjs` |
 | **F-06** | Blacklist-only egress and unguarded `page.request` / `context.request` | Added `TEST_EGRESS_MODE=allowlist`, wrapped `context.request`, `page.request`, and `context.route` in `base.ts`, and banned raw `request.newContext()` in ESLint | `templates/playwright-qa/tests/fixtures/base.ts` |
-| **F-07** | JSON `"password"` and JWTs escaped redaction; `@latest` MCP presets | Upgraded `redactSecrets` v2 (35/35 corpus); pinned all external MCP versions and replaced archived Postgres server with `@bytebase/dbhub@0.15.0 --readonly` | `test/adversarial.test.mjs` + `test/mcp-hub.test.mjs` |
-| **F-08** | Single global MCP lock + `globalThis.console` hijacking | Added `src/jobs.mjs` isolated child-process runner with zero console mutation, concurrent read tools, and per-workspace write locks | `test/mcp-jobs.test.mjs` + `test/mcp-server.test.mjs` |
-| **F-09** | Missing progress notifications, tree cancellation, and HTTP session strictness | Added `_meta.progressToken` heartbeats, `notifications/cancelled` process-tree kill, `syncBudgetMs` async jobs, and strict `initialize` / `404` / TTL / `timingSafeEqual` HTTP handling | `test/mcp-jobs.test.mjs` + `test/mcp-server.test.mjs` |
-| **F-10** | Triage misclassification; CodeMap route collapse, stale entries & defect inflation | Structured guard telemetry precedes regex triage (45/45); CodeMap v4 preserves `:id`/`[id]`, prunes deleted routes, and converges defects; Impact v2 adds static reverse `import` graph | `test/codemap.test.mjs` + `test/impact.test.mjs` |
+| **F-07** | JSON `"password"` and JWTs escaped redaction; `@latest` MCP presets | Upgraded `redactSecrets` v2 (35/35 corpus); pinned all external MCP versions and replaced archived Postgres server with `@bytebase/dbhub@0.15.0 --readonly` | `test/adversarial/diff-and-redaction.test.mjs` + `test/unit/mcp-hub.test.mjs` |
+| **F-08** | Single global MCP lock + `globalThis.console` hijacking | Added `src/jobs.mjs` isolated child-process runner with zero console mutation, concurrent read tools, and per-workspace write locks | `test/integration/mcp-jobs.test.mjs` + `test/integration/mcp-server.test.mjs` |
+| **F-09** | Missing progress notifications, tree cancellation, and HTTP session strictness | Added `_meta.progressToken` heartbeats, `notifications/cancelled` process-tree kill, `syncBudgetMs` async jobs, and strict `initialize` / `404` / TTL / `timingSafeEqual` HTTP handling | `test/integration/mcp-jobs.test.mjs` + `test/integration/mcp-server.test.mjs` |
+| **F-10** | Triage misclassification; CodeMap route collapse, stale entries & defect inflation | Structured guard telemetry precedes regex triage (45/45); CodeMap v4 preserves `:id`/`[id]`, prunes deleted routes, and converges defects; Impact v2 adds static reverse `import` graph | `test/unit/codemap.test.mjs` + `test/unit/impact.test.mjs` |
 
 ---
 

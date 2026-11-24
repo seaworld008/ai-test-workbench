@@ -8,7 +8,7 @@ import {
   auditResultsJson,
   loadAndValidateWaivers,
   scanSpecFilesFallback,
-} from '../src/audit.mjs';
+} from '../../src/audit.mjs';
 
 test('auditResultsJson separates passed, skipped, and policy-excluded @mutation tests', () => {
   const sample = {

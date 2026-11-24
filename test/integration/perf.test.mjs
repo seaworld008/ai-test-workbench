@@ -4,13 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { startDemoServer } from '../examples/demo-webapp/server.mjs';
-import { runCli } from '../src/cli.mjs';
-import { hasPlaywrightChromium } from './fixtures/playwright-env.mjs';
-import { computeLatencyPercentiles, evaluatePerfBudget, runPerfCommand } from '../src/perf.mjs';
+import { startDemoServer } from '../../examples/demo-webapp/server.mjs';
+import { runCli } from '../../src/cli.mjs';
+import { hasPlaywrightChromium } from '../fixtures/playwright-env.mjs';
+import { computeLatencyPercentiles, evaluatePerfBudget, runPerfCommand } from '../../src/perf.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const WORKBENCH_ROOT = path.resolve(__dirname, '..');
+const WORKBENCH_ROOT = path.resolve(__dirname, '..', '..');
 const TEMPLATE_MODULES = path.join(WORKBENCH_ROOT, 'templates', 'playwright-qa', 'node_modules');
 
 test('computeLatencyPercentiles computes accurate P50/P90/P95/P99/avg stats', () => {

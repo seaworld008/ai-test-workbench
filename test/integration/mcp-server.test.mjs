@@ -6,17 +6,17 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { WORKBENCH_VERSION } from '../src/version.mjs';
+import { WORKBENCH_VERSION } from '../../src/version.mjs';
 import {
   SUPPORTED_MCP_VERSIONS,
   createMcpHttpServer,
   getMcpPromptDefinitions,
   getMcpToolDefinitions,
   handleMcpJsonRpcMessage,
-} from '../src/mcp-server.mjs';
+} from '../../src/mcp-server.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const WORKBENCH_ROOT = path.resolve(__dirname, '..');
+const WORKBENCH_ROOT = path.resolve(__dirname, '..', '..');
 
 test('MCP server negotiates all supported protocol versions (2024-11-05 .. 2025-11-25) and exposes 17 canonical typed tools (zero governance_approve)', async () => {
   for (const ver of SUPPORTED_MCP_VERSIONS) {

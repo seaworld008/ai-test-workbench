@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { McpJobManager } from '../src/jobs.mjs';
-import { handleMcpJsonRpcMessage } from '../src/mcp-server.mjs';
+import { McpJobManager } from '../../src/jobs.mjs';
+import { handleMcpJsonRpcMessage } from '../../src/mcp-server.mjs';
 
 test('MCP Job Runner auto-backgrounds tasks exceeding syncBudgetMs, allows concurrent read-only calls, emits progress, and kills process tree on cancel', async () => {
   const jm = new McpJobManager();

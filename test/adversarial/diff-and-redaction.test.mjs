@@ -3,22 +3,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { analyzeHealerDiffText, classifyAssertionStatement } from '../src/audit.mjs';
-import { extractQueryableTraceId, suggestFailureCategory } from '../src/diagnose.mjs';
-import { evaluateExploreRequestSafety } from '../src/explore.mjs';
+import { analyzeHealerDiffText, classifyAssertionStatement } from '../../src/audit.mjs';
+import { extractQueryableTraceId, suggestFailureCategory } from '../../src/diagnose.mjs';
+import { evaluateExploreRequestSafety } from '../../src/explore.mjs';
 import {
   checkOutgoingRequestSafety,
   compileBlockedEndpointRules,
   inspectGraphqlPayload,
-} from '../src/origin-guard.mjs';
-import { redactSecrets } from '../src/proc.mjs';
+} from '../../src/origin-guard.mjs';
+import { redactSecrets } from '../../src/proc.mjs';
 import {
   extractOpenApiResponseSchema,
   validateJsonSchema,
-} from '../src/kernel/schema-validator.mjs';
+} from '../../src/kernel/schema-validator.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ADV_DIR = path.join(__dirname, 'adversarial');
+const ADV_DIR = __dirname;
 
 test('Adversarial Diff Guard Suite: blocks 100% of all 20 cheating healer/config diffs (FGER = 0%)', () => {
   const cases = JSON.parse(fs.readFileSync(path.join(ADV_DIR, 'diff-bypasses.cases.json'), 'utf8'));
@@ -145,7 +145,7 @@ test('Explore Firewall & Egress Allowlist: default-denies POSTs, GraphQL mutatio
 
 test('WCAG 2.0/2.1/2.2 tag lock & JSON Schema / OpenAPI contract validator work cleanly', () => {
   const baseTsText = fs.readFileSync(
-    path.resolve(__dirname, '..', 'templates', 'playwright-qa', 'tests', 'fixtures', 'base.ts'),
+    path.resolve(__dirname, '..', '..', 'templates', 'playwright-qa', 'tests', 'fixtures', 'base.ts'),
     'utf8'
   );
   for (const requiredTag of ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']) {

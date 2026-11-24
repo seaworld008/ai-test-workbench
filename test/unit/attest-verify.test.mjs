@@ -4,15 +4,15 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { runCli } from '../src/cli.mjs';
+import { runCli } from '../../src/cli.mjs';
 import {
   TRUST_LEVEL_DEFINITIONS,
   buildInTotoVerdictAttestation,
   verifyAttestationFile,
-} from '../src/trust.mjs';
+} from '../../src/trust.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const FIXTURES = path.join(__dirname, 'fixtures', 't2-attestation');
+const FIXTURES = path.join(__dirname, '..', 'fixtures', 't2-attestation');
 const ROOT_CA_PEM = path.join(FIXTURES, 'trusted-root-ca.pem');
 const VALID_ATT = path.join(FIXTURES, 'valid-attestation.json');
 const VALID_BUNDLE = path.join(FIXTURES, 'valid-t2.sigstore.json');

@@ -4,8 +4,8 @@ import {
   checkOutgoingRequestSafety,
   compileBlockedEndpointRules,
   evaluateTargetSafety,
-} from '../src/origin-guard.mjs';
-import { redactEnvEntries, redactSecrets } from '../src/proc.mjs';
+} from '../../src/origin-guard.mjs';
+import { redactEnvEntries, redactSecrets } from '../../src/proc.mjs';
 
 test('evaluateTargetSafety blocks production TEST_ENV', () => {
   const res = evaluateTargetSafety({

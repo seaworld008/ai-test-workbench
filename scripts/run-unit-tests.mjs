@@ -7,7 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testDir = path.resolve(__dirname, '..', 'test');
 
 /**
- * Recursively discovers all `*.test.mjs` files under `test/`.
+ * Recursively discovers all `*.test.mjs` files under `test/` (unit/, integration/, adversarial/).
  * @param {string} dir
  * @param {string[]} [acc]
  * @returns {string[]}
@@ -25,8 +25,20 @@ function collectTestFiles(dir, acc = []) {
 }
 
 const testFiles = collectTestFiles(testDir).sort();
+const skipCoverage = process.argv.includes('--no-coverage');
+const minLines = Number(process.env.AITEST_MIN_LINE_COVERAGE || 80);
 
-const res = spawnSync(process.execPath, ['--test', ...testFiles], {
+const nodeArgs = ['--test'];
+if (!skipCoverage) {
+  nodeArgs.push(
+    '--experimental-test-coverage',
+    '--test-coverage-include=src/**/*.mjs',
+    `--test-coverage-lines=${minLines}`
+  );
+}
+nodeArgs.push(...testFiles);
+
+const res = spawnSync(process.execPath, nodeArgs, {
   stdio: 'inherit',
   shell: false,
   windowsHide: true,

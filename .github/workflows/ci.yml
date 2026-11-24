@@ -89,10 +89,10 @@ jobs:
       - name: Run Fail-Closed Strict TypeScript checkJs across src/**/*.mjs & Gate Kernel
         run: npm run typecheck
 
-      - name: Run Full Unit & Live Browser LCP Regression Tests (Zero Skips Allowed)
+      - name: Run Full Unit, Integration & Adversarial Suites with Coverage Gate (Zero Skips Allowed)
         env:
           AITEST_REQUIRE_BROWSER: '1'
-        run: node --test --test-reporter=spec test/*.test.mjs
+        run: npm test
 
       - name: Run Offline Smoke + 4-Layer Quality Gate
         run: npm run smoke

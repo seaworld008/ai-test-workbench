@@ -3,13 +3,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { loadAndValidateWaivers, runAuditForQaDir } from '../src/audit.mjs';
-import { runCli } from '../src/cli.mjs';
-import { computeFlakyReport, syncQuarantineFromLedger } from '../src/flaky.mjs';
-import { getMcpToolDefinitions } from '../src/mcp-server.mjs';
-import { attemptHealRepair, beginHealSession, concludeHealSession } from '../src/heal.mjs';
-import { beginRunLedger, finalizeRunLedger } from '../src/ledger.mjs';
-import { buildRequirementTraceMatrix } from '../src/traceability.mjs';
+import { loadAndValidateWaivers, runAuditForQaDir } from '../../src/audit.mjs';
+import { runCli } from '../../src/cli.mjs';
+import { computeFlakyReport, syncQuarantineFromLedger } from '../../src/flaky.mjs';
+import { getMcpToolDefinitions } from '../../src/mcp-server.mjs';
+import { attemptHealRepair, beginHealSession, concludeHealSession } from '../../src/heal.mjs';
+import { beginRunLedger, finalizeRunLedger } from '../../src/ledger.mjs';
+import { buildRequirementTraceMatrix } from '../../src/traceability.mjs';
 
 test('Layer 0 Governance Lock intercepts all 5 config/waiver/fixture tampering vectors & blocks MCP self-approval', async () => {
   const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aitest-gov-'));

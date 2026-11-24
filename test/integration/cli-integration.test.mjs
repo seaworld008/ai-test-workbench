@@ -3,9 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { sanitizeStagedContent } from '../src/agents.mjs';
-import { runCli } from '../src/cli.mjs';
-import { detectProjectStack, inspectHostIsolation } from '../src/init.mjs';
+import { sanitizeStagedContent } from '../../src/agents.mjs';
+import { runCli } from '../../src/cli.mjs';
+import { detectProjectStack, inspectHostIsolation } from '../../src/init.mjs';
 
 test('sanitizeStagedContent replaces forward, backslash, and JSON-escaped temp paths and prevents leaks', () => {
   const tempDir = path.join(os.tmpdir(), 'aitest-agents-codex-12345');

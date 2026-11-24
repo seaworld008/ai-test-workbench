@@ -5,9 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { validateLoopbackCdpUrl } from '../src/auth-login.mjs';
-import { runCli } from '../src/cli.mjs';
-import { hasPlaywrightChromium } from './fixtures/playwright-env.mjs';
+import { validateLoopbackCdpUrl } from '../../src/auth-login.mjs';
+import { runCli } from '../../src/cli.mjs';
+import { hasPlaywrightChromium } from '../fixtures/playwright-env.mjs';
 import {
   MAX_EXPLORE_PAGES,
   createStratifiedRouteQueue,
@@ -16,10 +16,10 @@ import {
   extractVueDynamicRoutes,
   generateSystemOverviewMarkdown,
   isSafeReadonlyDialogTrigger,
-} from '../src/explore.mjs';
+} from '../../src/explore.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const WORKBENCH_ROOT = path.resolve(__dirname, '..');
+const WORKBENCH_ROOT = path.resolve(__dirname, '..', '..');
 const TEMPLATE_MODULES = path.join(WORKBENCH_ROOT, 'templates', 'playwright-qa', 'node_modules');
 
 test('detectUrlQueryAnomalies catches both raw and percent-encoded dayjs/object query leaks', () => {
