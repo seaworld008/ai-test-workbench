@@ -75,6 +75,8 @@ jobs:
         run: npm run typecheck
 
       - name: Run Full Unit & Live Browser LCP Regression Tests (Zero Skips Allowed)
+        env:
+          AITEST_REQUIRE_BROWSER: '1'
         run: node --test --test-reporter=spec test/*.test.mjs
 
       - name: Run Offline Smoke + 4-Layer Quality Gate

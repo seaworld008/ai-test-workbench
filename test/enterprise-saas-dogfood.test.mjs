@@ -7,6 +7,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { validateLoopbackCdpUrl } from '../src/auth-login.mjs';
 import { runCli } from '../src/cli.mjs';
+import { hasPlaywrightChromium } from './fixtures/playwright-env.mjs';
 import {
   MAX_EXPLORE_PAGES,
   createStratifiedRouteQueue,
@@ -132,8 +133,8 @@ test('generateSystemOverviewMarkdown surfaces broken routes, HTTP 200 envelope e
 });
 
 test('runExploreCommand deep-explores multi-portal switcher, tabs, read-only dialogs, broken routes, fixed-column rows & envelope errors', async (t) => {
-  if (!fs.existsSync(path.join(TEMPLATE_MODULES, '@playwright', 'test', 'cli.js'))) {
-    t.skip('Template node_modules not installed locally');
+  if (!hasPlaywrightChromium(TEMPLATE_MODULES)) {
+    t.skip('Playwright Chromium binary not installed in this environment');
     return;
   }
 
