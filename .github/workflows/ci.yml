@@ -4,12 +4,20 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
-  unit-and-typecheck-matrix:
+  unit-matrix:
     strategy:
       fail-fast: false
       matrix:
@@ -19,23 +27,29 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: templates/playwright-qa/package-lock.json
 
-      - name: Verify Bilingual Docs, Claims Mapping & Desensitization Hygiene
+      - name: Install QA Template Locked Dependencies (TypeScript AST Compiler)
+        working-directory: templates/playwright-qa
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify Bilingual Docs, MCP Registry Parity, Claims Mapping & Hygiene
         run: npm run lint:docs
 
-      - name: Run CLI, Adversarial & Governance Unit Tests
+      - name: Run CLI, Adversarial, AST, Attestation & Governance Unit Tests
         run: npm test
 
-      - name: Run Fast North-Star Gate Benchmark (FGER / Triage / Redaction / MisHeal)
+      - name: Run Fast North-Star & Holdout Benchmark (FGER / Holdout / FPR / Triage / Redaction / MisHeal)
         run: node scripts/run-bench.mjs --fast
 
-  verify-e2e-and-seeded-benchmark:
+  verify-e2e-typecheck-and-bench:
     strategy:
       fail-fast: false
       matrix:
@@ -44,10 +58,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node.js 24 LTS
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
 
@@ -57,11 +71,13 @@ jobs:
           npm ci --no-audit --no-fund
           npx playwright install chromium
 
-      - name: Run TypeScript checkJs across src/**/*.mjs & Gate Kernel
+      - name: Run Fail-Closed TypeScript checkJs across src/**/*.mjs & Gate Kernel
         run: npm run typecheck
 
-      - name: Run Unit & Live Browser LCP Regression Tests
-        run: npm test
+      - name: Run Full Unit & Live Browser LCP Regression Tests (Zero Skips Allowed)
+        env:
+          AITEST_REQUIRE_BROWSER: '1'
+        run: node --test --test-reporter=spec test/*.test.mjs
 
       - name: Run Offline Smoke + 4-Layer Quality Gate
         run: npm run smoke
@@ -69,7 +85,7 @@ jobs:
       - name: Run Full-Stack Local Demo E2E + One-Call Verify Change + Web Vitals
         run: npm run demo:verify
 
-      - name: Run Live Seeded-Defect & Anti-Fake-Green Benchmark (SDDR + FGER)
+      - name: Run Live Seeded-Defect & Red-Team Holdout Benchmark (SDDR + FGER + FPR)
         run: npm run bench
 
       - name: Verify npm Package Tarball Hygiene
@@ -77,7 +93,7 @@ jobs:
 
       - name: Upload Template QA Reports on Failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: qa-artifacts-${{ matrix.os }}
           path: |
@@ -85,3 +101,96 @@ jobs:
             templates/playwright-qa/reports/
             templates/playwright-qa/test-results/
           retention-days: 7
+
+  mcp-conformance:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: conformance/package-lock.json
+
+      - name: Install isolated MCP conformance & SDK reference dependencies
+        working-directory: conformance
+        run: npm ci --no-audit --no-fund
+
+      - name: Run Official @modelcontextprotocol/conformance & SDK 3-Transport Suite
+        working-directory: conformance
+        run: npm test
+
+  real-world-fpr-smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: templates/playwright-qa/package-lock.json
+
+      - name: Install TypeScript AST compiler dependency for offline gate kernel
+        working-directory: templates/playwright-qa
+        run: npm ci --no-audit --no-fund
+
+      - name: Run Smoke-Scale Real-World Playwright FPR Benchmark (<= 5 commits, offline static/AST only)
+        run: node scripts/bench-real-world.mjs --smoke
+
+  real-world-fpr-full:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: templates/playwright-qa/package-lock.json
+
+      - name: Install TypeScript AST compiler dependency for offline gate kernel
+        working-directory: templates/playwright-qa
+        run: npm ci --no-audit --no-fund
+
+      - name: Run Full Real-World Playwright FPR Pilot Benchmark (n=50, offline static/AST only)
+        run: node scripts/bench-real-world.mjs
+
+      - name: Upload Real-World FPR Benchmark Results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: real-world-fpr-results
+          path: bench/real-world/results/
+          retention-days: 30
+
+  self-bootstrap-verify:
+    uses: ./.github/workflows/aitest-verify.yml
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+      security-events: write
+    with:
+      qa-dir: templates/playwright-qa
+      suite: smoke
+      node-version: '22'
+      signer: github-attest
+      use-local-cli: true
+      bootstrap-from-template: true

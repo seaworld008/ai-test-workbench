@@ -1,0 +1,41 @@
+{
+  "id": "sveltejs/kit@dd63fd1a2e52221e2024e3c59d6d15f7f0afca64",
+  "repo": "sveltejs/kit",
+  "sha": "dd63fd1a2e52221e2024e3c59d6d15f7f0afca64",
+  "parentSha": "d955d1b604a051c0b21f59c6f9709b36756090b5",
+  "license": "MIT",
+  "testPaths": [
+    "packages/kit/test/apps/basics/test/playwright/client.test.js"
+  ],
+  "commitUrl": "https://github.com/sveltejs/kit/commit/dd63fd1a2e52221e2024e3c59d6d15f7f0afca64",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "fail",
+  "flagged": true,
+  "ruleCodes": [
+    "AITEST-G107",
+    "AITEST-G114"
+  ],
+  "violations": [
+    "[Healer Diff Guard][AITEST-G114] packages/kit/test/apps/basics/test/playwright/client.test.js: mocking backend response via route.fulfill() in spec can fabricate fake-green oracles (requires waiver).",
+    "[Healer Diff Guard][AITEST-G107] packages/kit/test/apps/basics/test/playwright/client.test.js: swallowed exception via non-rethrowing .catch() (\"app.goto('/routing/..//attacker.example/x').catch(() => {})\")."
+  ],
+  "files": [
+    {
+      "testPath": "packages/kit/test/apps/basics/test/playwright/client.test.js",
+      "status": "fail",
+      "ruleCodes": [
+        "AITEST-G107",
+        "AITEST-G114"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G114] packages/kit/test/apps/basics/test/playwright/client.test.js: mocking backend response via route.fulfill() in spec can fabricate fake-green oracles (requires waiver).",
+        "[Healer Diff Guard][AITEST-G107] packages/kit/test/apps/basics/test/playwright/client.test.js: swallowed exception via non-rethrowing .catch() (\"app.goto('/routing/..//attacker.example/x').catch(() => {})\")."
+      ]
+    }
+  ],
+  "adjudication": {
+    "label": "FP",
+    "reviewedAt": "2026-11-24",
+    "rationale": "Legitimate cross-origin security regression test: uses `page.route('**://attacker.example/**', ...route.fulfill(...))` as a honeypot trap to assert zero requests hit the external origin, and `.catch(() => {})` on an intentionally rejected navigation."
+  }
+}

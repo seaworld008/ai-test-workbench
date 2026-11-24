@@ -1,0 +1,368 @@
+{
+  "schemaVersion": "1.0.0",
+  "generatedAt": "2026-11-24T03:24:26.336Z",
+  "gateKernelVersion": "5.1.0",
+  "preregistrationDoc": "bench/real-world/PREREGISTRATION.md",
+  "samplingSeed": 20261124,
+  "mode": "pilot",
+  "evaluationScope": "offline-static-ast-only (Layer 3 AST Semantic Diff + Differential Layer 2 Static Checks; zero target code execution; zero target site network access)",
+  "formalEvaluation200Status": "pending",
+  "counts": {
+    "totalCommits": 50,
+    "passed": 38,
+    "flagged": 12,
+    "adjudicatedFP": 10,
+    "adjudicatedTP": 2,
+    "unreviewedFlagged": 0,
+    "normalCommits": 48
+  },
+  "metrics": {
+    "rawAlertRate": {
+      "k": 12,
+      "n": 50,
+      "rate": 0.24,
+      "lower": 0.142974,
+      "upper": 0.374127,
+      "percent": "24.0%",
+      "ci95Percent": "[14.3%, 37.4%]"
+    },
+    "adjudicatedFprOnNormal": {
+      "k": 10,
+      "n": 48,
+      "rate": 0.208333,
+      "lower": 0.117303,
+      "upper": 0.342589,
+      "percent": "20.8%",
+      "ci95Percent": "[11.7%, 34.3%]"
+    },
+    "adjudicatedFprOnAll": {
+      "k": 10,
+      "n": 50,
+      "rate": 0.2,
+      "lower": 0.112438,
+      "upper": 0.330371,
+      "percent": "20.0%",
+      "ci95Percent": "[11.2%, 33.0%]"
+    }
+  },
+  "violationsByRule": {
+    "AITEST-G107": 3,
+    "AITEST-G110": 3,
+    "AITEST-G102": 2,
+    "AITEST-G103": 4,
+    "AITEST-G105": 3,
+    "STATIC-WAIT-FOR-TIMEOUT": 1,
+    "AITEST-G114": 1
+  },
+  "byRepository": {
+    "actualbudget/actual": {
+      "license": "MIT",
+      "total": 10,
+      "passed": 9,
+      "flagged": 1,
+      "fp": 1,
+      "tp": 0,
+      "unreviewed": 0
+    },
+    "microsoft/playwright-mcp": {
+      "license": "Apache-2.0",
+      "total": 10,
+      "passed": 7,
+      "flagged": 3,
+      "fp": 3,
+      "tp": 0,
+      "unreviewed": 0
+    },
+    "sveltejs/kit": {
+      "license": "MIT",
+      "total": 10,
+      "passed": 5,
+      "flagged": 5,
+      "fp": 4,
+      "tp": 1,
+      "unreviewed": 0
+    },
+    "vitejs/vite": {
+      "license": "MIT",
+      "total": 10,
+      "passed": 9,
+      "flagged": 1,
+      "fp": 1,
+      "tp": 0,
+      "unreviewed": 0
+    },
+    "vuejs/vitepress": {
+      "license": "MIT",
+      "total": 10,
+      "passed": 8,
+      "flagged": 2,
+      "fp": 1,
+      "tp": 1,
+      "unreviewed": 0
+    }
+  },
+  "flaggedCommits": [
+    {
+      "id": "sveltejs/kit@3d5800fad6000ea836eb41c8da6f83281e4326cf",
+      "repo": "sveltejs/kit",
+      "sha": "3d5800fad6000ea836eb41c8da6f83281e4326cf",
+      "commitUrl": "https://github.com/sveltejs/kit/commit/3d5800fad6000ea836eb41c8da6f83281e4326cf",
+      "testPaths": [
+        "packages/kit/test/apps/basics/test/playwright/client.test.js",
+        "packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js"
+      ],
+      "ruleCodes": [
+        "AITEST-G107",
+        "AITEST-G110"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G110] packages/kit/test/apps/basics/test/playwright/client.test.js: wrapping expect() inside conditional if-block is forbidden.",
+        "[Healer Diff Guard][AITEST-G107] packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js: swallowed exception in try/catch block without rethrow.",
+        "[Healer Diff Guard][AITEST-G110] packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js: wrapping expect() inside conditional if-block is forbidden."
+      ],
+      "adjudication": {
+        "label": "FP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "Normal diagnostic standardization refactoring (#17276). AITEST-G110 flagged env-guarded `if (process.env.DEV) { expect(...).toContainKitDiagnostic(...) }` paired with an unconditional length assertion; AITEST-G107 flagged an existing negative-test try/catch that asserts on expected error text."
+      }
+    },
+    {
+      "id": "microsoft/playwright-mcp@2bf57e22c63929964bae47f8fa3f518524325c54",
+      "repo": "microsoft/playwright-mcp",
+      "sha": "2bf57e22c63929964bae47f8fa3f518524325c54",
+      "commitUrl": "https://github.com/microsoft/playwright-mcp/commit/2bf57e22c63929964bae47f8fa3f518524325c54",
+      "testPaths": [
+        "tests/core.spec.ts"
+      ],
+      "ruleCodes": [
+        "AITEST-G102",
+        "AITEST-G103"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G102] tests/core.spec.ts: net assertion reduction detected (base 13 -> head 8).",
+        "[Healer Diff Guard][AITEST-G103] tests/core.spec.ts: assertion strength downgraded (max tier S3 -> S3, total strength 39 -> 24)."
+      ],
+      "adjudication": {
+        "label": "FP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "Cross-file test split (#767): moved `browser_type` specs out of `tests/core.spec.ts` (-58 lines) into new file `tests/type.spec.ts` (+119 lines). Single-file diff saw assertion count drop 13 -> 8 without tracking cross-file relocation."
+      }
+    },
+    {
+      "id": "vuejs/vitepress@bead1384b2aca9101f3da76d504d7642a42befa0",
+      "repo": "vuejs/vitepress",
+      "sha": "bead1384b2aca9101f3da76d504d7642a42befa0",
+      "commitUrl": "https://github.com/vuejs/vitepress/commit/bead1384b2aca9101f3da76d504d7642a42befa0",
+      "testPaths": [
+        "__tests__/e2e/rtl/index.test.ts"
+      ],
+      "ruleCodes": [
+        "AITEST-G107"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G107] __tests__/e2e/rtl/index.test.ts: swallowed exception in try/catch block without rethrow."
+      ],
+      "adjudication": {
+        "label": "FP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "Commit actually un-skipped and strengthened two RTL E2E tests. AITEST-G107 triggered on `try { animation.finish() } catch {}` inside a `page.evaluate(...)` browser helper settling CSS transitions before strict geometry assertions."
+      }
+    },
+    {
+      "id": "microsoft/playwright-mcp@29711d07d3fd34158d518807952589c39257f29e",
+      "repo": "microsoft/playwright-mcp",
+      "sha": "29711d07d3fd34158d518807952589c39257f29e",
+      "commitUrl": "https://github.com/microsoft/playwright-mcp/commit/29711d07d3fd34158d518807952589c39257f29e",
+      "testPaths": [
+        "tests/sse.spec.ts"
+      ],
+      "ruleCodes": [
+        "AITEST-G102",
+        "AITEST-G103"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G102] tests/sse.spec.ts: net assertion reduction detected (base 30 -> head 29).",
+        "[Healer Diff Guard][AITEST-G103] tests/sse.spec.ts: assertion strength downgraded (max tier S5 -> S5, total strength 135 -> 134)."
+      ],
+      "adjudication": {
+        "label": "FP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "Cross-file test split (#716): moved Streamable HTTP test coverage from `tests/sse.spec.ts` (-1 sessionId assertion) into a new 259-line `tests/http.spec.ts`."
+      }
+    },
+    {
+      "id": "sveltejs/kit@9bc12d379fa1cb0a743d02a2855cf3ed26198e9f",
+      "repo": "sveltejs/kit",
+      "sha": "9bc12d379fa1cb0a743d02a2855cf3ed26198e9f",
+      "commitUrl": "https://github.com/sveltejs/kit/commit/9bc12d379fa1cb0a743d02a2855cf3ed26198e9f",
+      "testPaths": [
+        "packages/kit/test/apps/basics/test/playwright/client.test.js",
+        "packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js",
+        "packages/kit/test/apps/options-2/test/env.test.js",
+        "packages/kit/test/apps/options-2/test/service-worker.test.js",
+        "packages/kit/test/apps/options/test/paths.test.js"
+      ],
+      "ruleCodes": [
+        "AITEST-G105",
+        "AITEST-G110"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G110] packages/kit/test/apps/basics/test/playwright/client.test.js: early return inside conditional before assertion bypasses test checks (\"if (variant === 'async') return;\").",
+        "[Healer Diff Guard][AITEST-G105] packages/kit/test/apps/options-2/test/env.test.js: added skip/fixme/only (\"test.skip(variant !== 'dynamic-env')\").",
+        "[Healer Diff Guard][AITEST-G105] packages/kit/test/apps/options-2/test/env.test.js: added skip/fixme/only (\"test.skip(javaScriptEnabled || !!process.env.DEV || variant === 'dynamic-env')\").",
+        "[Healer Diff Guard][AITEST-G105] packages/kit/test/apps/options-2/test/env.test.js: added skip/fixme/only (\"test.skip(javaScriptEnabled || !!process.env.DEV || variant !== 'dynamic-env')\").",
+        "[Healer Diff Guard][AITEST-G105] packages/kit/test/apps/options-2/test/service-worker.test.js: added skip/fixme/only (\"test.skip(({ javaScriptEnabled }) => !javaScriptEnabled || variant !== 'service-worker')\").",
+        "[Healer Diff Guard][AITEST-G105] packages/kit/test/apps/options/test/paths.test.js: added skip/fixme/only (\"test.skip(variant !== 'paths-assets')\").",
+        "[Healer Diff Guard][AITEST-G105] packages/kit/test/apps/options/test/paths.test.js: added skip/fixme/only (\"test.skip(\")."
+      ],
+      "adjudication": {
+        "label": "FP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "Mechanical variant refactor (#16845): replaced pre-existing `test.skip(!process.env.DYNAMIC_PUBLIC_ENV)` and `if (process.env.SVELTE_ASYNC === 'true') return;` with equivalent `variant` checks. Because expression text changed, snippet-based diff deduplication treated pre-existing skips as newly added."
+      }
+    },
+    {
+      "id": "sveltejs/kit@224e791cb05f95a5c2d881e5a7d5341352f3c052",
+      "repo": "sveltejs/kit",
+      "sha": "224e791cb05f95a5c2d881e5a7d5341352f3c052",
+      "commitUrl": "https://github.com/sveltejs/kit/commit/224e791cb05f95a5c2d881e5a7d5341352f3c052",
+      "testPaths": [
+        "packages/kit/test/apps/basics/test/playwright/client.test.js"
+      ],
+      "ruleCodes": [
+        "STATIC-WAIT-FOR-TIMEOUT"
+      ],
+      "violations": [
+        "[Static Check][STATIC-WAIT-FOR-TIMEOUT] packages/kit/test/apps/basics/test/playwright/client.test.js: newly introduced waitForTimeout() (26 -> 27)."
+      ],
+      "adjudication": {
+        "label": "TP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "Commit genuinely introduced a new hardcoded `await page.waitForTimeout(100)` sleep inside a newly added test (`packages/kit/test/apps/basics/test/playwright/client.test.js`), matching the pre-registered TP criterion for hardcoded sleeps."
+      }
+    },
+    {
+      "id": "microsoft/playwright-mcp@b85dc6954a00008ff4c16783894d10f050ece885",
+      "repo": "microsoft/playwright-mcp",
+      "sha": "b85dc6954a00008ff4c16783894d10f050ece885",
+      "commitUrl": "https://github.com/microsoft/playwright-mcp/commit/b85dc6954a00008ff4c16783894d10f050ece885",
+      "testPaths": [
+        "tests/vscode.spec.ts"
+      ],
+      "ruleCodes": [
+        "AITEST-G105"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G105] tests/vscode.spec.ts: added skip/fixme/only (\"test.skip(!globalThis.WebSocket, 'WebSocket is not supported in this environment')\")."
+      ],
+      "adjudication": {
+        "label": "FP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "New feature test (#979) includes a runtime capability guard `test.skip(!globalThis.WebSocket, 'WebSocket is not supported in this environment')` for older Node runtimes rather than disabling a failing test."
+      }
+    },
+    {
+      "id": "sveltejs/kit@dd63fd1a2e52221e2024e3c59d6d15f7f0afca64",
+      "repo": "sveltejs/kit",
+      "sha": "dd63fd1a2e52221e2024e3c59d6d15f7f0afca64",
+      "commitUrl": "https://github.com/sveltejs/kit/commit/dd63fd1a2e52221e2024e3c59d6d15f7f0afca64",
+      "testPaths": [
+        "packages/kit/test/apps/basics/test/playwright/client.test.js"
+      ],
+      "ruleCodes": [
+        "AITEST-G107",
+        "AITEST-G114"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G114] packages/kit/test/apps/basics/test/playwright/client.test.js: mocking backend response via route.fulfill() in spec can fabricate fake-green oracles (requires waiver).",
+        "[Healer Diff Guard][AITEST-G107] packages/kit/test/apps/basics/test/playwright/client.test.js: swallowed exception via non-rethrowing .catch() (\"app.goto('/routing/..//attacker.example/x').catch(() => {})\")."
+      ],
+      "adjudication": {
+        "label": "FP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "Legitimate cross-origin security regression test: uses `page.route('**://attacker.example/**', ...route.fulfill(...))` as a honeypot trap to assert zero requests hit the external origin, and `.catch(() => {})` on an intentionally rejected navigation."
+      }
+    },
+    {
+      "id": "vuejs/vitepress@44457ff2cca18439496b954a727fc2e337d52c3c",
+      "repo": "vuejs/vitepress",
+      "sha": "44457ff2cca18439496b954a727fc2e337d52c3c",
+      "commitUrl": "https://github.com/vuejs/vitepress/commit/44457ff2cca18439496b954a727fc2e337d52c3c",
+      "testPaths": [
+        "__tests__/e2e/rtl/index.test.ts"
+      ],
+      "ruleCodes": [
+        "AITEST-G105"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G105] __tests__/e2e/rtl/index.test.ts: added skip/fixme/only (\"test.skip('mirrors the external link icon', async () => {\").",
+        "[Healer Diff Guard][AITEST-G105] __tests__/e2e/rtl/index.test.ts: added skip/fixme/only (\"test.skip('slides the mobile sidebar in from the right', async () => {\")."
+      ],
+      "adjudication": {
+        "label": "TP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "Icon update PR (#5506) directly disabled two existing passing E2E tests via unwaived `test.skip(...)` (`// FIXME: path data is updated...` and `// FIXME: flaky`) instead of fixing or waiving them — textbook True Positive for AITEST-G105."
+      }
+    },
+    {
+      "id": "actualbudget/actual@a81408595c437666c2efa9f449b200c10e2d11d0",
+      "repo": "actualbudget/actual",
+      "sha": "a81408595c437666c2efa9f449b200c10e2d11d0",
+      "commitUrl": "https://github.com/actualbudget/actual/commit/a81408595c437666c2efa9f449b200c10e2d11d0",
+      "testPaths": [
+        "packages/desktop-client/e2e/budget.mobile.test.ts"
+      ],
+      "ruleCodes": [
+        "AITEST-G103"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G103] packages/desktop-client/e2e/budget.mobile.test.ts: assertion strength downgraded (max tier S5 -> S5, total strength 154 -> 153)."
+      ],
+      "adjudication": {
+        "label": "FP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "Normal UI migration (#8528): migrated test from legacy note-based template notification (`toContainText`, S3) to new automations modal (`toBeHidden`, S2) while keeping the core S5 outcome assertion (`toHaveText(amountToCurrency(amountToTemplate))`) and updated visual regression snapshots."
+      }
+    },
+    {
+      "id": "sveltejs/kit@30d06f5698528cf540899900366fc0cfeb3dc7f6",
+      "repo": "sveltejs/kit",
+      "sha": "30d06f5698528cf540899900366fc0cfeb3dc7f6",
+      "commitUrl": "https://github.com/sveltejs/kit/commit/30d06f5698528cf540899900366fc0cfeb3dc7f6",
+      "testPaths": [
+        "packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js"
+      ],
+      "ruleCodes": [
+        "AITEST-G103"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G103] packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js: assertion strength downgraded (max tier S5 -> S5, total strength 941 -> 938)."
+      ],
+      "adjudication": {
+        "label": "FP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "Idiomatic Playwright improvement (#16992): replaced `expect(await page.evaluate(() => (document.activeElement || {}).nodeName)).toBe('BODY')` (scored S5 for `toBe`) with `await expect(page.locator('body')).toBeFocused()` (scored S2 for `toBeFocused`)."
+      }
+    },
+    {
+      "id": "vitejs/vite@616296895bd135386d35069a479a5f188c7de298",
+      "repo": "vitejs/vite",
+      "sha": "616296895bd135386d35069a479a5f188c7de298",
+      "commitUrl": "https://github.com/vitejs/vite/commit/616296895bd135386d35069a479a5f188c7de298",
+      "testPaths": [
+        "playground/hmr/__tests__/hmr.spec.ts"
+      ],
+      "ruleCodes": [
+        "AITEST-G110"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G110] playground/hmr/__tests__/hmr.spec.ts: wrapping expect() inside conditional if-block is forbidden."
+      ],
+      "adjudication": {
+        "label": "FP",
+        "reviewedAt": "2026-11-24",
+        "rationale": "Normal new HMR regression test (#23171) added inside an existing file-level `if (!isBuild) { ... }` block. AITEST-G110 propagated conditional-block tracking across the `test()` callback boundary."
+      }
+    }
+  ]
+}

@@ -35,6 +35,8 @@ blob-report/
 **/.aitest/jobs/
 templates/playwright-qa/.aitest/
 bench/.work/
+bench/real-world/.cache/
+conformance/results/
 
 # OS / IDE clutter
 .DS_Store

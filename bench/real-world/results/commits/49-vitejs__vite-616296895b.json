@@ -1,0 +1,37 @@
+{
+  "id": "vitejs/vite@616296895bd135386d35069a479a5f188c7de298",
+  "repo": "vitejs/vite",
+  "sha": "616296895bd135386d35069a479a5f188c7de298",
+  "parentSha": "8cb872e7fb65b03f6068923c6aa7fcf3e71baf21",
+  "license": "MIT",
+  "testPaths": [
+    "playground/hmr/__tests__/hmr.spec.ts"
+  ],
+  "commitUrl": "https://github.com/vitejs/vite/commit/616296895bd135386d35069a479a5f188c7de298",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "fail",
+  "flagged": true,
+  "ruleCodes": [
+    "AITEST-G110"
+  ],
+  "violations": [
+    "[Healer Diff Guard][AITEST-G110] playground/hmr/__tests__/hmr.spec.ts: wrapping expect() inside conditional if-block is forbidden."
+  ],
+  "files": [
+    {
+      "testPath": "playground/hmr/__tests__/hmr.spec.ts",
+      "status": "fail",
+      "ruleCodes": [
+        "AITEST-G110"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G110] playground/hmr/__tests__/hmr.spec.ts: wrapping expect() inside conditional if-block is forbidden."
+      ]
+    }
+  ],
+  "adjudication": {
+    "label": "FP",
+    "reviewedAt": "2026-11-24",
+    "rationale": "Normal new HMR regression test (#23171) added inside an existing file-level `if (!isBuild) { ... }` block. AITEST-G110 propagated conditional-block tracking across the `test()` callback boundary."
+  }
+}

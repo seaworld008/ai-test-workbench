@@ -7,14 +7,35 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 
 const SECRET_KEYS =
-  /(password|passwd|pwd|secret|client[_-]?secret|token|access[_-]?token|refresh[_-]?token|id[_-]?token|auth[_-]?token|cookie|authorization|api[_-]?key|private[_-]?key|session[_-]?id|bearer|jwt|otp|pin)/i;
+  /(password|passwd|pwd|secret|client[_-]?secret|token|access[_-]?token|refresh[_-]?token|id[_-]?token|auth[_-]?token|cookie|authorization|api[_-]?key|private[_-]?key|session[_-]?id|bearer|jwt|otp|pin|hmac[_-]?key)/i;
 
 const JSON_SECRET_KEY_PATTERN =
-  'password|passwd|pwd|secret|client_secret|clientSecret|token|access_token|accessToken|refresh_token|refreshToken|id_token|idToken|auth_token|authToken|api_key|apiKey|private_key|privateKey|session_id|sessionId|cookie|authorization|bearer|jwt|otp|pin|secretKey|secret_key';
+  'password|passwd|pwd|secret|client_secret|clientSecret|token|access_token|accessToken|refresh_token|refreshToken|id_token|idToken|auth_token|authToken|api_key|apiKey|private_key|privateKey|session_id|sessionId|cookie|authorization|bearer|jwt|otp|pin|secretKey|secret_key|hmac_key|hmacKey';
+
+/**
+ * Internal AI Test Workbench correlation/session IDs that are NEVER credentials (`M-01`).
+ * Preserving these avoids breaking MCP heal/job/ledger workflows while still redacting
+ * external application session cookies/tokens such as `{"sessionId":"sid_cookie_val_888"}`.
+ */
+const WORKBENCH_INTERNAL_ID_KEYS = new Set([
+  'sessionId',
+  'jobId',
+  'runId',
+  'traceId',
+  'spanId',
+  'testId',
+  'snapshotId',
+  'requestId',
+  'correlationId',
+]);
+
+const WORKBENCH_SAFE_ID_VALUE_RE =
+  /^(?:heal_[0-9a-f]{8,32}|job_[0-9a-f]{8,32}|exp_[0-9a-f]{8,32}|snap_[0-9a-f]{8,32}|[0-9A-HJKMNP-TV-Z]{26}|[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 /**
  * Redacts credentials, JSON secret fields, JWTs, API tokens, private keys, cookies,
  * query-string tokens, and Basic auth URLs from arbitrary text output (`S-05` Redaction v2).
+ * Preserves internal workbench `heal_*` / `job_*` / ULID identifiers (`M-01`).
  * @param {string} input
  */
 export function redactSecrets(input) {
@@ -33,18 +54,30 @@ export function redactSecrets(input) {
     '$1[REDACTED]'
   );
 
-  // 3. Redact JSON string/primitive key-value pairs while keeping JSON valid: `"password": "abc"` -> `"password": "[REDACTED]"`
+  // 3. Redact JSON string/primitive key-value pairs while keeping JSON valid AND preserving internal workbench IDs (`M-01`)
   const jsonDoubleRe = new RegExp(
-    `("(?:[A-Za-z0-9_.-]*?(?:${JSON_SECRET_KEY_PATTERN}))"\\s*:\\s*)(?:"(?:\\\\.|[^"\\\\])*"|'[^']*'|\\d[\\d.]*)`,
+    `("([A-Za-z0-9_.-]*?(?:${JSON_SECRET_KEY_PATTERN}))"\\s*:\\s*)("(?:\\\\.|[^"\\\\])*"|'[^']*'|\\d[\\d.]*)`,
     'gi'
   );
-  out = out.replace(jsonDoubleRe, '$1"[REDACTED]"');
+  out = out.replace(jsonDoubleRe, (full, prefix, keyName, rawVal) => {
+    const bareVal = String(rawVal || '').replace(/^["']|["']$/g, '');
+    if (WORKBENCH_INTERNAL_ID_KEYS.has(keyName) && WORKBENCH_SAFE_ID_VALUE_RE.test(bareVal)) {
+      return full;
+    }
+    return `${prefix}"[REDACTED]"`;
+  });
 
   const jsonSingleRe = new RegExp(
-    `('(?:[A-Za-z0-9_.-]*?(?:${JSON_SECRET_KEY_PATTERN}))'\\s*:\\s*)(?:'(?:\\\\.|[^'\\\\])*'|"[^"]*"|\\d[\\d.]*)`,
+    `('([A-Za-z0-9_.-]*?(?:${JSON_SECRET_KEY_PATTERN}))'\\s*:\\s*)('(?:\\\\.|[^'\\\\])*'|"[^"]*"|\\d[\\d.]*)`,
     'gi'
   );
-  out = out.replace(jsonSingleRe, "$1'[REDACTED]'");
+  out = out.replace(jsonSingleRe, (full, prefix, keyName, rawVal) => {
+    const bareVal = String(rawVal || '').replace(/^["']|["']$/g, '');
+    if (WORKBENCH_INTERNAL_ID_KEYS.has(keyName) && WORKBENCH_SAFE_ID_VALUE_RE.test(bareVal)) {
+      return full;
+    }
+    return `${prefix}'[REDACTED]'`;
+  });
 
   // 4. Redact standalone JWT tokens (eyJ...header.eyJ...payload.signature) anywhere in text/JSON/URLs
   out = out.replace(/\beyJ[A-Za-z0-9_-]{6,}\.eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{4,}\b/g, '[REDACTED_JWT]');
@@ -81,6 +114,53 @@ export function redactSecrets(input) {
   );
 
   return out;
+}
+
+/**
+ * Recursively redacts secrets inside a parsed JSON object/array AFTER parsing (`M-01`),
+ * preserving allowlisted workbench correlation IDs (`sessionId`, `jobId`, `runId`, `traceId`, `testId`)
+ * while strictly redacting credentials, tokens, passwords, and embedded secrets inside strings.
+ * @template T
+ * @param {T} value
+ * @param {string} [parentKey]
+ * @returns {T}
+ */
+export function redactStructuredValue(value, parentKey = '') {
+  if (value === null || value === undefined) return value;
+  if (typeof value === 'string') {
+    if (WORKBENCH_INTERNAL_ID_KEYS.has(parentKey)) {
+      // Preserve genuine workbench IDs; still scrub if value looks like a JWT/token/external cookie
+      if (WORKBENCH_SAFE_ID_VALUE_RE.test(value) || parentKey === 'testId') {
+        return /** @type {any} */ (value);
+      }
+      if (/^sessionId$/i.test(parentKey) && !WORKBENCH_SAFE_ID_VALUE_RE.test(value)) {
+        return /** @type {any} */ ('[REDACTED]');
+      }
+      return /** @type {any} */ (redactSecrets(value));
+    }
+    if (parentKey && SECRET_KEYS.test(parentKey)) {
+      return /** @type {any} */ ('[REDACTED]');
+    }
+    return /** @type {any} */ (redactSecrets(value));
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    if (parentKey && !WORKBENCH_INTERNAL_ID_KEYS.has(parentKey) && SECRET_KEYS.test(parentKey)) {
+      return /** @type {any} */ ('[REDACTED]');
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return /** @type {any} */ (value.map((item) => redactStructuredValue(item, '')));
+  }
+  if (typeof value === 'object') {
+    /** @type {Record<string, any>} */
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = redactStructuredValue(v, k);
+    }
+    return /** @type {any} */ (out);
+  }
+  return value;
 }
 
 /**

@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "1.0.0",
+  "preregistrationDoc": "bench/real-world/PREREGISTRATION.md",
+  "reviewedAt": "2026-11-24",
+  "adjudications": {
+    "sveltejs/kit@3d5800fad6000ea836eb41c8da6f83281e4326cf": {
+      "label": "FP",
+      "reviewedAt": "2026-11-24",
+      "rationale": "Normal diagnostic standardization refactoring (#17276). AITEST-G110 flagged env-guarded `if (process.env.DEV) { expect(...).toContainKitDiagnostic(...) }` paired with an unconditional length assertion; AITEST-G107 flagged an existing negative-test try/catch that asserts on expected error text."
+    },
+    "microsoft/playwright-mcp@2bf57e22c63929964bae47f8fa3f518524325c54": {
+      "label": "FP",
+      "reviewedAt": "2026-11-24",
+      "rationale": "Cross-file test split (#767): moved `browser_type` specs out of `tests/core.spec.ts` (-58 lines) into new file `tests/type.spec.ts` (+119 lines). Single-file diff saw assertion count drop 13 -> 8 without tracking cross-file relocation."
+    },
+    "vuejs/vitepress@bead1384b2aca9101f3da76d504d7642a42befa0": {
+      "label": "FP",
+      "reviewedAt": "2026-11-24",
+      "rationale": "Commit actually un-skipped and strengthened two RTL E2E tests. AITEST-G107 triggered on `try { animation.finish() } catch {}` inside a `page.evaluate(...)` browser helper settling CSS transitions before strict geometry assertions."
+    },
+    "microsoft/playwright-mcp@29711d07d3fd34158d518807952589c39257f29e": {
+      "label": "FP",
+      "reviewedAt": "2026-11-24",
+      "rationale": "Cross-file test split (#716): moved Streamable HTTP test coverage from `tests/sse.spec.ts` (-1 sessionId assertion) into a new 259-line `tests/http.spec.ts`."
+    },
+    "sveltejs/kit@9bc12d379fa1cb0a743d02a2855cf3ed26198e9f": {
+      "label": "FP",
+      "reviewedAt": "2026-11-24",
+      "rationale": "Mechanical variant refactor (#16845): replaced pre-existing `test.skip(!process.env.DYNAMIC_PUBLIC_ENV)` and `if (process.env.SVELTE_ASYNC === 'true') return;` with equivalent `variant` checks. Because expression text changed, snippet-based diff deduplication treated pre-existing skips as newly added."
+    },
+    "sveltejs/kit@224e791cb05f95a5c2d881e5a7d5341352f3c052": {
+      "label": "TP",
+      "reviewedAt": "2026-11-24",
+      "rationale": "Commit genuinely introduced a new hardcoded `await page.waitForTimeout(100)` sleep inside a newly added test (`packages/kit/test/apps/basics/test/playwright/client.test.js`), matching the pre-registered TP criterion for hardcoded sleeps."
+    },
+    "microsoft/playwright-mcp@b85dc6954a00008ff4c16783894d10f050ece885": {
+      "label": "FP",
+      "reviewedAt": "2026-11-24",
+      "rationale": "New feature test (#979) includes a runtime capability guard `test.skip(!globalThis.WebSocket, 'WebSocket is not supported in this environment')` for older Node runtimes rather than disabling a failing test."
+    },
+    "sveltejs/kit@dd63fd1a2e52221e2024e3c59d6d15f7f0afca64": {
+      "label": "FP",
+      "reviewedAt": "2026-11-24",
+      "rationale": "Legitimate cross-origin security regression test: uses `page.route('**://attacker.example/**', ...route.fulfill(...))` as a honeypot trap to assert zero requests hit the external origin, and `.catch(() => {})` on an intentionally rejected navigation."
+    },
+    "vuejs/vitepress@44457ff2cca18439496b954a727fc2e337d52c3c": {
+      "label": "TP",
+      "reviewedAt": "2026-11-24",
+      "rationale": "Icon update PR (#5506) directly disabled two existing passing E2E tests via unwaived `test.skip(...)` (`// FIXME: path data is updated...` and `// FIXME: flaky`) instead of fixing or waiving them — textbook True Positive for AITEST-G105."
+    },
+    "actualbudget/actual@a81408595c437666c2efa9f449b200c10e2d11d0": {
+      "label": "FP",
+      "reviewedAt": "2026-11-24",
+      "rationale": "Normal UI migration (#8528): migrated test from legacy note-based template notification (`toContainText`, S3) to new automations modal (`toBeHidden`, S2) while keeping the core S5 outcome assertion (`toHaveText(amountToCurrency(amountToTemplate))`) and updated visual regression snapshots."
+    },
+    "sveltejs/kit@30d06f5698528cf540899900366fc0cfeb3dc7f6": {
+      "label": "FP",
+      "reviewedAt": "2026-11-24",
+      "rationale": "Idiomatic Playwright improvement (#16992): replaced `expect(await page.evaluate(() => (document.activeElement || {}).nodeName)).toBe('BODY')` (scored S5 for `toBe`) with `await expect(page.locator('body')).toBeFocused()` (scored S2 for `toBeFocused`)."
+    },
+    "vitejs/vite@616296895bd135386d35069a479a5f188c7de298": {
+      "label": "FP",
+      "reviewedAt": "2026-11-24",
+      "rationale": "Normal new HMR regression test (#23171) added inside an existing file-level `if (!isBuild) { ... }` block. AITEST-G110 propagated conditional-block tracking across the `test()` callback boundary."
+    }
+  }
+}

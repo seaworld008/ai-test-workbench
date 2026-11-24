@@ -1,0 +1,62 @@
+[
+  {
+    "id": "BENIGN-01-prettier-multiline-wrap",
+    "description": "Prettier wrapping a single-line S5 assertion across multiple lines with identical semantics",
+    "diff": "diff --git a/tests/e2e/campus.spec.ts b/tests/e2e/campus.spec.ts\n--- a/tests/e2e/campus.spec.ts\n+++ b/tests/e2e/campus.spec.ts\n@@ -10,1 +10,3 @@\n-  await expect(page.getByTestId('seats-left')).toHaveText('49/50');\n+  await expect(\n+    page.getByTestId('seats-left')\n+  ).toHaveText('49/50');"
+  },
+  {
+    "id": "BENIGN-02-semantic-locator-rename",
+    "description": "Updating a drifted semantic locator (Class A repair) while preserving exact S5 assertion",
+    "diff": "diff --git a/tests/e2e/campus.spec.ts b/tests/e2e/campus.spec.ts\n--- a/tests/e2e/campus.spec.ts\n+++ b/tests/e2e/campus.spec.ts\n@@ -10,1 +10,1 @@\n-  await expect(page.getByRole('button', { name: 'Enroll Old' })).toHaveText('Enroll Old');\n+  await expect(page.getByRole('button', { name: 'Enroll Now' })).toHaveText('Enroll Now');"
+  },
+  {
+    "id": "BENIGN-03-variable-rename",
+    "description": "Renaming a local locator variable cleanly with identical assertion",
+    "diff": "diff --git a/tests/e2e/campus.spec.ts b/tests/e2e/campus.spec.ts\n--- a/tests/e2e/campus.spec.ts\n+++ b/tests/e2e/campus.spec.ts\n@@ -9,2 +9,2 @@\n-  const btn = page.getByRole('button', { name: 'Enroll' });\n-  await expect(btn).toBeEnabled();\n+  const enrollButton = page.getByRole('button', { name: 'Enroll' });\n+  await expect(enrollButton).toBeEnabled();"
+  },
+  {
+    "id": "BENIGN-04-strengthen-s2-to-s5",
+    "description": "Strengthening S2 toBeVisible() into exact S5 toHaveText('Enrolled')",
+    "diff": "diff --git a/tests/e2e/campus.spec.ts b/tests/e2e/campus.spec.ts\n--- a/tests/e2e/campus.spec.ts\n+++ b/tests/e2e/campus.spec.ts\n@@ -10,1 +10,1 @@\n-  await expect(page.getByRole('status')).toBeVisible();\n+  await expect(page.getByRole('status')).toHaveText('Enrolled');"
+  },
+  {
+    "id": "BENIGN-05-add-extra-assertion",
+    "description": "Adding a second strict S5 assertion alongside existing assertion",
+    "diff": "diff --git a/tests/api/courses.spec.ts b/tests/api/courses.spec.ts\n--- a/tests/api/courses.spec.ts\n+++ b/tests/api/courses.spec.ts\n@@ -20,1 +20,2 @@\n   expect(res.status()).toBe(200);\n+  expect(body.courses.length).toBe(3);"
+  },
+  {
+    "id": "BENIGN-06-consolidate-into-aria-snapshot",
+    "description": "Consolidating two text checks into a structural S5 toMatchAriaSnapshot",
+    "diff": "diff --git a/tests/e2e/campus.spec.ts b/tests/e2e/campus.spec.ts\n--- a/tests/e2e/campus.spec.ts\n+++ b/tests/e2e/campus.spec.ts\n@@ -10,2 +10,1 @@\n-  await expect(page.getByRole('heading')).toHaveText('Smart Campus');\n-  await expect(page.getByRole('status')).toHaveText('Ready');\n+  await expect(page.getByRole('main')).toMatchAriaSnapshot('- heading \"Smart Campus\"\\n- status: Ready');"
+  },
+  {
+    "id": "BENIGN-07-real-assertion-helper",
+    "description": "Adding a reusable assertion helper that performs genuine expect() assertions",
+    "diff": "diff --git a/tests/helpers/campus-assert.ts b/tests/helpers/campus-assert.ts\n--- a/tests/helpers/campus-assert.ts\n+++ b/tests/helpers/campus-assert.ts\n@@ -1,0 +2,4 @@\n+export async function verifySeatsBadge(page: Page, expected: string) {\n+  await expect(page.getByTestId('seats-left')).toHaveText(expected);\n+}"
+  },
+  {
+    "id": "BENIGN-08-wrap-in-test-step",
+    "description": "Wrapping unchanged S5 assertion inside test.step() for readability",
+    "diff": "diff --git a/tests/e2e/campus.spec.ts b/tests/e2e/campus.spec.ts\n--- a/tests/e2e/campus.spec.ts\n+++ b/tests/e2e/campus.spec.ts\n@@ -10,1 +10,3 @@\n+  await test.step('Verify remaining seats', async () => {\n     await expect(page.getByTestId('seats-left')).toHaveText('49/50');\n+  });"
+  },
+  {
+    "id": "BENIGN-09-comments-and-whitespace",
+    "description": "Adding explanatory comments without altering assertions",
+    "diff": "diff --git a/tests/e2e/campus.spec.ts b/tests/e2e/campus.spec.ts\n--- a/tests/e2e/campus.spec.ts\n+++ b/tests/e2e/campus.spec.ts\n@@ -9,1 +9,2 @@\n+  // REQ-CATALOG-001: verify updated capacity after enrollment\n   await expect(page.getByTestId('seats-left')).toHaveText('49/50');"
+  },
+  {
+    "id": "BENIGN-10-try-catch-with-rethrow",
+    "description": "Logging diagnostics inside try/catch while properly rethrowing the error",
+    "diff": "diff --git a/tests/e2e/campus.spec.ts b/tests/e2e/campus.spec.ts\n--- a/tests/e2e/campus.spec.ts\n+++ b/tests/e2e/campus.spec.ts\n@@ -10,1 +10,6 @@\n+  try {\n     await expect(page.getByTestId('seats-left')).toHaveText('49/50');\n+  } catch (err) {\n+    console.error('Seat badge mismatch', err);\n+    throw err;\n+  }"
+  },
+  {
+    "id": "BENIGN-11-upgrade-generic-to-semantic-locator",
+    "description": "Replacing generic locator('div') with semantic getByRole('status')",
+    "diff": "diff --git a/tests/e2e/campus.spec.ts b/tests/e2e/campus.spec.ts\n--- a/tests/e2e/campus.spec.ts\n+++ b/tests/e2e/campus.spec.ts\n@@ -10,1 +10,1 @@\n-  await expect(page.locator('div')).toHaveText('Saved');\n+  await expect(page.getByRole('status')).toHaveText('Saved');"
+  },
+  {
+    "id": "BENIGN-12-update-specs-markdown",
+    "description": "Updating requirement specification markdown under specs/",
+    "diff": "diff --git a/specs/campus.md b/specs/campus.md\n--- a/specs/campus.md\n+++ b/specs/campus.md\n@@ -3,1 +3,2 @@\n - [REQ-CATALOG-001] Show remaining seats\n+- [REQ-CATALOG-002] Disable sold-out enrollment button"
+  }
+]

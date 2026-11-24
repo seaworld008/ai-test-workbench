@@ -1,6 +1,6 @@
 # Version & Compatibility Matrix (v5.0)
 
-> [简体中文 (默认)](./VERSION.md) · [English README](./README.en.md) · **Workbench & Gate Kernel Version**: `5.0.0` (single source: `src/version.mjs`) · **Verified Date**: `2026-11-24`
+> [简体中文 (默认)](./VERSION.md) · [English README](./README.en.md) · **Workbench & Gate Kernel Version**: `5.1.0` (single source: `src/version.mjs`) · **Verified Date**: `2026-11-24`
 
 ## 1. Runtime & Engine Requirements
 
@@ -17,7 +17,7 @@
 
 | Artifact | Schema Version | Module |
 |---|---|---|
-| **Gate Kernel** | `5.0.0` | `templates/playwright-qa/support/gate-kernel.mjs` (drift-checked by `doctor`) |
+| **Gate Kernel** | `5.1.0` | `templates/playwright-qa/support/gate-kernel.mjs` (drift-checked by `doctor`) |
 | **Governance Lock** | `v1` | `src/governance.mjs` (`.aitest/governance.lock`) |
 | **Run Ledger & Attestation** | `v1` | `src/ledger.mjs` / `src/verdict.mjs` (`.aitest/runs/<runId>/manifest.json` & `attestation.json`) |
 | **Living Code Map** | `v4` | `src/codemap.mjs` (`knowledge/code-map.json`) |

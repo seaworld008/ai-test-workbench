@@ -1,0 +1,29 @@
+{
+  "id": "actualbudget/actual@d9d15c12fa41a0bb8380fab09519e0180333e146",
+  "repo": "actualbudget/actual",
+  "sha": "d9d15c12fa41a0bb8380fab09519e0180333e146",
+  "parentSha": "6ad4b3c9a5b046bc44e351492104e1d89941007a",
+  "license": "MIT",
+  "testPaths": [
+    "packages/desktop-client/e2e/accounts.test.ts"
+  ],
+  "commitUrl": "https://github.com/actualbudget/actual/commit/d9d15c12fa41a0bb8380fab09519e0180333e146",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "pass",
+  "flagged": false,
+  "ruleCodes": [],
+  "violations": [],
+  "files": [
+    {
+      "testPath": "packages/desktop-client/e2e/accounts.test.ts",
+      "status": "pass",
+      "ruleCodes": [],
+      "violations": []
+    }
+  ],
+  "adjudication": {
+    "label": "PASS",
+    "reviewedAt": null,
+    "rationale": "Gate passed with zero violations."
+  }
+}

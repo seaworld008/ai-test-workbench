@@ -5,14 +5,19 @@ import {
   GATE_KERNEL_VERSION,
   PROTECTED_GOVERNANCE_REL_FILES,
   analyzeHealerDiffText,
+  analyzeSourceAst,
   auditResultsJson,
   classifyAssertionStatement,
+  compareSpecSourcesAst,
   computeProtectedFileHashes,
   computeWorkspaceInputHash,
   countMutationSpecsInFiles,
   isCoveredByWaiver,
+  isProtectedDiffPath,
   loadAitestConfig,
   loadAndValidateWaivers,
+  resolveDefaultDiffBase,
+  resolveGitRoot,
   resolveTypeScriptCompiler,
   runAuditForQaDir,
   runGitDiffGuard,
@@ -26,14 +31,19 @@ export {
   GATE_KERNEL_VERSION,
   PROTECTED_GOVERNANCE_REL_FILES,
   analyzeHealerDiffText,
+  analyzeSourceAst,
   auditResultsJson,
   classifyAssertionStatement,
+  compareSpecSourcesAst,
   computeProtectedFileHashes,
   computeWorkspaceInputHash,
   countMutationSpecsInFiles,
   isCoveredByWaiver,
+  isProtectedDiffPath,
   loadAitestConfig,
   loadAndValidateWaivers,
+  resolveDefaultDiffBase,
+  resolveGitRoot,
   resolveTypeScriptCompiler,
   runAuditForQaDir,
   runGitDiffGuard,
@@ -83,7 +93,7 @@ if (isDirectMain) {
 
   if (out.stats) {
     console.log(
-      `[Audit Stats] runId=${out.runId || 'unbound'} passed=${out.stats.passed} failed=${out.stats.failed} flaky=${out.stats.flaky} skipped=${out.stats.skipped} policyExcludedMutation=${out.stats.policyExcludedMutations}`
+      `[Audit Stats] outcome=${out.outcome} trustTier=${out.trustTier} runId=${out.runId || 'unbound'} passed=${out.stats.passed} failed=${out.stats.failed} flaky=${out.stats.flaky} skipped=${out.stats.skipped} policyExcludedMutation=${out.stats.policyExcludedMutations}`
     );
   }
   for (const p of out.policyExcludedTitles) {
@@ -96,7 +106,7 @@ if (isDirectMain) {
     for (const e of out.errors) {
       console.error(`[FAIL] ${e}`);
     }
-    process.exit(1);
+    process.exit(out.outcome === 'blocked' ? 2 : 1);
   }
   console.log('[OK] 4-layer anti-fake-green quality gate passed.');
 }

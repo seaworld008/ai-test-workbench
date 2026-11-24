@@ -16,7 +16,8 @@ test('MCP_PRESETS covers all 7 pillars including built-in ai-test-workbench orch
   const pillarsFound = new Set(Object.values(MCP_PRESETS).map((p) => p.pillar));
   assert.ok(MCP_PILLARS.includes('orchestrator'));
   assert.ok(MCP_PRESETS['ai-test-workbench']);
-  assert.deepEqual(MCP_PRESETS['ai-test-workbench'].args, ['-y', 'ai-test-workbench', 'mcp-serve']);
+  assert.ok(MCP_PRESETS['ai-test-workbench'].args[0].startsWith('--package=ai-test-workbench@'));
+  assert.deepEqual(MCP_PRESETS['ai-test-workbench'].args.slice(1), ['ai-test-workbench', 'mcp-serve']);
   for (const pillar of MCP_PILLARS) {
     assert.equal(pillarsFound.has(pillar), true, `Missing MCP pillar: ${pillar}`);
   }

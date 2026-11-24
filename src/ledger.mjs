@@ -1,13 +1,19 @@
 // @ts-check
-import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { redactEnvEntries } from './proc.mjs';
 import { SCHEMA_VERSIONS, WORKBENCH_VERSION } from './version.mjs';
-import { computeWorkspaceInputHash, sha256Hex } from '../templates/playwright-qa/support/gate-kernel.mjs';
+import {
+  computeWorkspaceInputHash,
+  resolveGitHeadSha,
+  sha256Hex,
+  signPayloadT1,
+} from '../templates/playwright-qa/support/gate-kernel.mjs';
 
 const CROCKFORD_BASE32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+export { resolveGitHeadSha };
 
 /**
  * Generates a lexicographically sortable 26-char Crockford Base32 ULID (`01...`).
@@ -26,23 +32,6 @@ export function generateRunId(nowMs = Date.now()) {
     randChars += CROCKFORD_BASE32[randBytes[i] & 31];
   }
   return `${timeChars}${randChars}`;
-}
-
-export function resolveGitHeadSha(repoDir) {
-  try {
-    const res = spawnSync('git', ['rev-parse', 'HEAD'], {
-      cwd: repoDir,
-      shell: false,
-      encoding: 'utf8',
-      windowsHide: true,
-    });
-    if (res.status === 0 && res.stdout.trim()) {
-      return res.stdout.trim();
-    }
-  } catch {
-    // non-git workspace
-  }
-  return 'nogit';
 }
 
 function summarizeResultsForLedger(resultsObj) {
@@ -69,7 +58,8 @@ function summarizeResultsForLedger(resultsObj) {
         else if (effectiveStatus === 'flaky') flaky += 1;
         else if (effectiveStatus === 'skipped') skipped += 1;
 
-        const lastErr = results[results.length - 1]?.error?.message || null;
+        const firstFailure = results.find((r) => r.status && r.status !== 'passed' && r.status !== 'skipped') || results[results.length - 1];
+        const errMsg = firstFailure?.error?.message || null;
         tests.push({
           testId: `${file}::${fullTitle}`,
           file,
@@ -79,7 +69,7 @@ function summarizeResultsForLedger(resultsObj) {
           status: effectiveStatus,
           retryPassed,
           durationMs,
-          errorSnippet: lastErr ? String(lastErr).split('\n')[0].slice(0, 240) : null,
+          errorSnippet: errMsg ? String(errMsg).split('\n')[0].slice(0, 240) : null,
         });
       }
     }
@@ -101,7 +91,7 @@ function summarizeResultsForLedger(resultsObj) {
 }
 
 /**
- * Starts a Run Ledger record before Playwright executes.
+ * Starts a Run Ledger record before Playwright executes (signed with T1 HMAC).
  * @param {string} qaDir
  * @param {{ suite: string, command: string, env?: Record<string, any>, repoDir?: string }} meta
  */
@@ -120,7 +110,7 @@ export function beginRunLedger(qaDir, meta) {
     if (meta.env && meta.env[k] !== undefined) pickedEnv[k] = meta.env[k];
   }
 
-  const manifest = {
+  const coreManifest = {
     schemaVersion: SCHEMA_VERSIONS.ledgerManifest,
     runId,
     toolVersion: WORKBENCH_VERSION,
@@ -138,12 +128,16 @@ export function beginRunLedger(qaDir, meta) {
     counts: null,
   };
 
+  const sig = signPayloadT1('ledger.manifest', coreManifest, { qaDir, repoDir, createIfMissing: true });
+  const manifest = { ...coreManifest, ...(sig.signed ? { mac: sig.mac } : {}) };
+
   fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8');
   return { runId, runDir, manifest };
 }
 
 /**
- * Finalizes a Run Ledger record after Playwright completes, binding `reports/results.json` SHA-256 and workspace hash.
+ * Finalizes a Run Ledger record after Playwright completes, binding `reports/results.json` SHA-256,
+ * workspace hash, and T1 out-of-workspace HMAC tamper-evidence (`T-03`).
  * @param {string} qaDir
  * @param {string} runId
  * @param {{ exitCode: number, resultsPath?: string }} outcome
@@ -154,31 +148,38 @@ export function finalizeRunLedger(qaDir, runId, outcome) {
   const manifestPath = path.join(runDir, 'manifest.json');
   if (!fs.existsSync(manifestPath)) return null;
 
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  const prev = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   const finishedAt = new Date().toISOString();
-  const durationMs = Math.max(0, Date.parse(finishedAt) - Date.parse(manifest.startedAt));
+  const durationMs = Math.max(0, Date.parse(finishedAt) - Date.parse(prev.startedAt));
   const resultsPath = outcome.resultsPath || path.join(qaDir, 'reports', 'results.json');
+  const repoDir = prev.repoDir || path.dirname(qaDir);
 
-  // Re-compute worktreeHash at completion using the same repoDir recorded at begin
-  manifest.worktreeHash = computeWorkspaceInputHash(qaDir, manifest.repoDir || path.dirname(qaDir));
-  manifest.finishedAt = finishedAt;
-  manifest.durationMs = durationMs;
-  manifest.exitCode = outcome.exitCode;
+  const coreManifest = {
+    ...prev,
+    worktreeHash: computeWorkspaceInputHash(qaDir, repoDir),
+    finishedAt,
+    durationMs,
+    exitCode: outcome.exitCode,
+  };
+  delete coreManifest.mac;
 
   /** @type {ReturnType<typeof summarizeResultsForLedger> | null} */
   let summary = null;
   if (fs.existsSync(resultsPath)) {
     const rawText = fs.readFileSync(resultsPath, 'utf8');
-    manifest.resultsSha256 = `sha256:${sha256Hex(rawText)}`;
+    coreManifest.resultsSha256 = `sha256:${sha256Hex(rawText)}`;
     try {
       const parsed = JSON.parse(rawText);
       summary = summarizeResultsForLedger(parsed);
-      manifest.counts = summary.counts;
+      coreManifest.counts = summary.counts;
       fs.writeFileSync(path.join(runDir, 'tests-summary.json'), JSON.stringify(summary.tests, null, 2) + '\n', 'utf8');
     } catch {
       // invalid results json will be caught by audit
     }
   }
+
+  const sig = signPayloadT1('ledger.manifest', coreManifest, { qaDir, repoDir, createIfMissing: true });
+  const manifest = { ...coreManifest, ...(sig.signed ? { mac: sig.mac } : {}) };
 
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
   fs.writeFileSync(
@@ -192,6 +193,7 @@ export function finalizeRunLedger(qaDir, runId, outcome) {
         resultsSha256: manifest.resultsSha256,
         finishedAt,
         exitCode: outcome.exitCode,
+        ...(sig.signed ? { mac: sig.mac } : {}),
       },
       null,
       2

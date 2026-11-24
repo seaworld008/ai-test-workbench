@@ -1,0 +1,29 @@
+{
+  "id": "sveltejs/kit@3ae5f226e0a7b2599c46a7ffebc0653bc5d99458",
+  "repo": "sveltejs/kit",
+  "sha": "3ae5f226e0a7b2599c46a7ffebc0653bc5d99458",
+  "parentSha": "a1481f358cbf082034af90940b3dd032584e8695",
+  "license": "MIT",
+  "testPaths": [
+    "packages/kit/test/apps/async/test/client.test.js"
+  ],
+  "commitUrl": "https://github.com/sveltejs/kit/commit/3ae5f226e0a7b2599c46a7ffebc0653bc5d99458",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "pass",
+  "flagged": false,
+  "ruleCodes": [],
+  "violations": [],
+  "files": [
+    {
+      "testPath": "packages/kit/test/apps/async/test/client.test.js",
+      "status": "pass",
+      "ruleCodes": [],
+      "violations": []
+    }
+  ],
+  "adjudication": {
+    "label": "PASS",
+    "reviewedAt": null,
+    "rationale": "Gate passed with zero violations."
+  }
+}

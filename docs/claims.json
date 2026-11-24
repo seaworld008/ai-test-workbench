@@ -71,8 +71,44 @@
     {
       "id": "CLAIM-12-requirement-traceability",
       "claim": "Requirement Traceability Matrix maps specs/REQ-xxx IDs to Playwright test specs and runtime outcomes",
+      "corpusType": "internal",
       "testFile": "test/governance-and-ledger.test.mjs",
       "testTitleSubstring": "Requirement Traceability Matrix"
+    },
+    {
+      "id": "CLAIM-13-redteam-holdout-ast-diff-guard",
+      "claim": "AST Semantic Diff Guard v3 blocks 24/24 Appendix A red-team holdout cheats and 7/7 S0 constant-folding/vacuous classifier probes",
+      "corpusType": "holdout",
+      "testFile": "test/red-team-and-hardening.test.mjs",
+      "testTitleSubstring": "Red-Team Holdout Suite (Appendix A)"
+    },
+    {
+      "id": "CLAIM-14-benign-refactor-zero-fpr",
+      "claim": "AST Semantic Diff Guard achieves 0.0% FPR across 12 benign Playwright refactorings (Prettier wraps, locator updates, ARIA consolidation)",
+      "corpusType": "benign",
+      "testFile": "test/red-team-and-hardening.test.mjs",
+      "testTitleSubstring": "Benign Refactoring Corpus"
+    },
+    {
+      "id": "CLAIM-15-real-playwright-stack-triage",
+      "claim": "Evidence-first diagnostics achieves 100% accuracy and 0.0% C->A misclassification across 12 real Playwright stack traces",
+      "corpusType": "real-stack",
+      "testFile": "test/red-team-and-hardening.test.mjs",
+      "testTitleSubstring": "Real Playwright Stack Triage"
+    },
+    {
+      "id": "CLAIM-16-fail-closed-forgery-and-intoto-attestation",
+      "claim": "Fail-closed 3-state Gate Kernel + T1 HMAC + in-toto Statement v1 attestations resist E1-E6 forgery and commit-before-verify bypasses",
+      "corpusType": "red-team",
+      "testFile": "test/red-team-and-hardening.test.mjs",
+      "testTitleSubstring": "End-to-End Forgery Resistance (E1-E6"
+    },
+    {
+      "id": "CLAIM-17-mcp-heal-and-boundary-hardening",
+      "claim": "MCP server preserves typed heal sessionId, enforces cross-session 3-attempt cap, client root intersection, path traversal & schema guards",
+      "corpusType": "security",
+      "testFile": "test/red-team-and-hardening.test.mjs",
+      "testTitleSubstring": "MCP Security, Heal E2E"
     }
   ]
 }

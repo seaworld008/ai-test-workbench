@@ -10,6 +10,6 @@ Use inside `<repo>/qa/` when investigating failures with `knowledge/SYSTEM_MAP.m
 3. Query System MCPs strictly in **read-only mode**:
    - **Loki / Grafana**: Search `{env=~"staging|test"} |= "<traceId>"` across the failure window.
    - **Sentry**: Inspect matching unresolved exceptions / breadcrumbs in the time window.
-   - **Prometheus / Perf**: Run `aitest perf --target . --routes <route> --concurrency 4 --iterations 12 --enforce-budget` and check P95 latency, DB pool saturation, and JS Heap / DOM size.
+   - **Prometheus / Perf**: Run `npx ai-test-workbench@5.1.0 perf --target . --routes <route> --concurrency 4 --iterations 12 --enforce-budget` and check P95 latency, DB pool saturation, and JS Heap / DOM size.
    - **PostgreSQL / MySQL / Redis MCP**: Run read-only `SELECT` / `GET` checks confirming backend or cache state (NEVER execute `INSERT`, `UPDATE`, `DELETE`, `FLUSH`).
-4. Classify definitively into **A / B / C / D**, apply minimal fix (up to 3 attempts for Class A only), and run `aitest run --suite all --audit` + `aitest map` so the Living Code Map records the resolved state.
+4. Classify definitively into **A / B / C / D**, apply minimal fix (up to 3 attempts for Class A only), and run `npx ai-test-workbench@5.1.0 run --suite all --audit` + `npx ai-test-workbench@5.1.0 map` so the Living Code Map records the resolved state.

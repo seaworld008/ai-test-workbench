@@ -9,9 +9,9 @@
 1. **创作与受控治理层（MCP 执行模型 v2：`src/mcp-server.mjs` + `src/jobs.mjs`）**：
    - 原生支持 `stdio`、`Streamable HTTP (/mcp)` 与 `Legacy HTTP+SSE (/sse)`，兼容 MCP `2024-11-05` 至 `2025-11-25+`，根包保持**零外部运行时依赖**（详见 [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md)）。
    - 暴露 **21 个强类型 MCP 工具**。只读工具全并发无锁；写操作与长任务在独立子进程（`AITEST_MCP_CHILD=1`）中按工作区互斥锁运行，支持 `_meta.progressToken` 进度通知、`notifications/cancelled` 进程树级强杀与 `syncBudgetMs` 异步后台作业切换。
-   - **特权物理隔离**：重签治理锁的 `aitest governance approve` 仅限人类在本地终端调用，永不注册为 MCP 工具且拒绝 MCP 子进程调用。
+   - **特权物理隔离**：重签治理锁的 `npx ai-test-workbench@5.1.0 governance approve` 仅限人类在本地终端调用，永不注册为 MCP 工具且拒绝 MCP 子进程调用。
 2. **确定性回归与一键终审层（Deterministic Runner + `verifyChangeCore`）**：
-   - 本地提交前、PR 与 CI 直接运行静态 TypeScript 测试与 `aitest verify-change`，**零大模型调用、零模型 API 密钥依赖**，产出绑定 ULID `runId` 的 `attestation.json` 与 `verdict.sarif.json`。
+   - 本地提交前、PR 与 CI 直接运行静态 TypeScript 测试与 `npx ai-test-workbench@5.1.0 verify-change`，**零大模型调用、零模型 API 密钥依赖**，产出绑定 ULID `runId` 的 `attestation.json` 与 `verdict.sarif.json`。
 
 ## 2. 跨项目物理隔离 (`<repo>/qa/`)
 
@@ -23,7 +23,7 @@
 2. **全通道请求拦截**：在 `tests/fixtures/base.ts` 同时包装 `context.route`、`APIRequestContext`、`context.request` 与 `page.request`，设置 `serviceWorkers: 'block'`，并通过 ESLint 禁止裸调 `request.newContext()`；拦截 GraphQL `mutation` 载荷。
 3. **默认禁写探索器（`src/explore.mjs`）**：`explore` 默认拒绝一切非 `GET/HEAD/OPTIONS` 请求并禁用 `navigator.sendBeacon`，移除 `/graphql` 默认写豁免。
 4. **凭据脱敏 v2 与供应链锁（`src/proc.mjs` + `src/mcp-hub.mjs`）**：自动擦除 JSON 密码/令牌、JWT、云厂商密钥、PEM 私钥与连接串（35/35 对抗语料召回率 `100%`）；7 大支柱外部 MCP 预设全量精确锁版本并支持 `.aitest/mcp.lock` 漂移与投毒审计。
-5. **MCP HTTP 安全边界**：默认监听 `127.0.0.1`、严格校验 `Origin`（`403`）、仅允许 `initialize` 创建会话、未知会话返回 `404`、采用 `crypto.timingSafeEqual` 校验 Bearer Token 并限制 `--allowed-root` 工作区根目录。
+5. **MCP HTTP 安全边界**：默认监听 `127.0.0.1`、严格校验 `Origin`（`403`）、仅允许 `initialize` 创建会话、未知会话返回 `404`、采用 `crypto.timingSafeEqual` 校验 Bearer Token，并基于服务端 `--workspace-root` 与客户端 `roots` 的交集强制拦截越界路径访问。
 
 ## 4. 四层防假绿质量门禁内核 (`support/gate-kernel.mjs`)
 

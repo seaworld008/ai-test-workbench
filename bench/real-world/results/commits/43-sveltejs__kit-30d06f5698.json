@@ -1,0 +1,37 @@
+{
+  "id": "sveltejs/kit@30d06f5698528cf540899900366fc0cfeb3dc7f6",
+  "repo": "sveltejs/kit",
+  "sha": "30d06f5698528cf540899900366fc0cfeb3dc7f6",
+  "parentSha": "47417bcf0f644947eb16758b2f3179dc0a250124",
+  "license": "MIT",
+  "testPaths": [
+    "packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js"
+  ],
+  "commitUrl": "https://github.com/sveltejs/kit/commit/30d06f5698528cf540899900366fc0cfeb3dc7f6",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "fail",
+  "flagged": true,
+  "ruleCodes": [
+    "AITEST-G103"
+  ],
+  "violations": [
+    "[Healer Diff Guard][AITEST-G103] packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js: assertion strength downgraded (max tier S5 -> S5, total strength 941 -> 938)."
+  ],
+  "files": [
+    {
+      "testPath": "packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js",
+      "status": "fail",
+      "ruleCodes": [
+        "AITEST-G103"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G103] packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js: assertion strength downgraded (max tier S5 -> S5, total strength 941 -> 938)."
+      ]
+    }
+  ],
+  "adjudication": {
+    "label": "FP",
+    "reviewedAt": "2026-11-24",
+    "rationale": "Idiomatic Playwright improvement (#16992): replaced `expect(await page.evaluate(() => (document.activeElement || {}).nodeName)).toBe('BODY')` (scored S5 for `toBe`) with `await expect(page.locator('body')).toBeFocused()` (scored S2 for `toBeFocused`)."
+  }
+}

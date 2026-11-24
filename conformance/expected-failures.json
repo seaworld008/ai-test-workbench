@@ -1,0 +1,140 @@
+{
+  "$schema_note": "Known expected failures for @modelcontextprotocol/conformance@0.1.16 active server suite against the production ai-test-workbench MCP server. Every entry MUST include scenario, category, reason, and a verifiable issue/reference URL. Any unlisted failure or stale entry fails CI.",
+  "conformancePackage": "@modelcontextprotocol/conformance",
+  "conformanceVersion": "0.1.16",
+  "suite": "active",
+  "server": [
+    {
+      "scenario": "completion-complete",
+      "category": "optional-capability-not-implemented",
+      "reason": "Server intentionally does not declare or implement the optional MCP completion/complete capability; see ADR-001 (docs/adr/mcp-zero-dependency.md).",
+      "issue": "https://github.com/seaworld008/ai-test-workbench/issues"
+    },
+    {
+      "scenario": "resources-subscribe",
+      "category": "optional-capability-not-implemented",
+      "reason": "Server explicitly advertises capabilities.resources.subscribe=false and does not implement resources/subscribe; see ADR-001.",
+      "issue": "https://github.com/seaworld008/ai-test-workbench/issues"
+    },
+    {
+      "scenario": "resources-unsubscribe",
+      "category": "optional-capability-not-implemented",
+      "reason": "Server explicitly advertises capabilities.resources.subscribe=false and does not implement resources/unsubscribe; see ADR-001.",
+      "issue": "https://github.com/seaworld008/ai-test-workbench/issues"
+    },
+    {
+      "scenario": "tools-call-sampling",
+      "category": "deferred-capability-per-adr-001",
+      "reason": "Requires MCP Sampling capability and upstream fixture tool test_sampling; deferred per ADR-001 re-evaluation trigger.",
+      "issue": "https://github.com/seaworld008/ai-test-workbench/issues"
+    },
+    {
+      "scenario": "tools-call-elicitation",
+      "category": "deferred-capability-per-adr-001",
+      "reason": "Requires MCP Elicitation capability and upstream fixture tool test_elicitation; deferred per ADR-001 re-evaluation trigger.",
+      "issue": "https://github.com/seaworld008/ai-test-workbench/issues"
+    },
+    {
+      "scenario": "elicitation-sep1034-defaults",
+      "category": "deferred-capability-per-adr-001",
+      "reason": "Requires MCP Elicitation SEP-1034 and upstream fixture tool test_elicitation_sep1034_defaults; deferred per ADR-001.",
+      "issue": "https://github.com/seaworld008/ai-test-workbench/issues"
+    },
+    {
+      "scenario": "elicitation-sep1330-enums",
+      "category": "deferred-capability-per-adr-001",
+      "reason": "Requires MCP Elicitation SEP-1330 and upstream fixture tool test_elicitation_sep1330_enums; deferred per ADR-001.",
+      "issue": "https://github.com/seaworld008/ai-test-workbench/issues"
+    },
+    {
+      "scenario": "tools-call-simple-text",
+      "category": "conformance-fixture-not-applicable",
+      "reason": "Upstream conformance scenario invokes hardcoded Everything Server fixture tool 'test_simple_text'; production server exposes 21 aitest_* tools (verified directly via @modelcontextprotocol/sdk Client tests).",
+      "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
+    },
+    {
+      "scenario": "tools-call-image",
+      "category": "conformance-fixture-not-applicable",
+      "reason": "Upstream conformance scenario invokes hardcoded fixture tool 'test_image_content'; production server exposes 21 aitest_* tools and does not register dummy fixture tools.",
+      "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
+    },
+    {
+      "scenario": "tools-call-audio",
+      "category": "conformance-fixture-not-applicable",
+      "reason": "Upstream conformance scenario invokes hardcoded fixture tool 'test_audio_content'; production server exposes 21 aitest_* tools.",
+      "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
+    },
+    {
+      "scenario": "tools-call-embedded-resource",
+      "category": "conformance-fixture-not-applicable",
+      "reason": "Upstream conformance scenario invokes hardcoded fixture tool 'test_embedded_resource'; production server exposes 21 aitest_* tools.",
+      "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
+    },
+    {
+      "scenario": "tools-call-mixed-content",
+      "category": "conformance-fixture-not-applicable",
+      "reason": "Upstream conformance scenario invokes hardcoded fixture tool 'test_multiple_content_types'; production server exposes 21 aitest_* tools.",
+      "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
+    },
+    {
+      "scenario": "tools-call-with-logging",
+      "category": "conformance-fixture-not-applicable",
+      "reason": "Upstream conformance scenario invokes hardcoded fixture tool 'test_tool_with_logging'; production server exposes 21 aitest_* tools.",
+      "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
+    },
+    {
+      "scenario": "tools-call-error",
+      "category": "conformance-fixture-not-applicable",
+      "reason": "Upstream conformance scenario invokes hardcoded fixture tool 'test_error_handling'; tool error envelopes are verified directly via SDK Client tests.",
+      "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
+    },
+    {
+      "scenario": "tools-call-with-progress",
+      "category": "conformance-fixture-not-applicable",
+      "reason": "Upstream conformance scenario invokes hardcoded fixture tool 'test_tool_with_progress'; real progress notifications on aitest_doctor are verified via @modelcontextprotocol/sdk Client across all 3 transports.",
+      "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
+    },
+    {
+      "scenario": "resources-read-text",
+      "category": "conformance-fixture-not-applicable",
+      "reason": "Upstream conformance scenario reads hardcoded URI 'test://static-text'; production aitest:// resources are verified directly via SDK Client tests.",
+      "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
+    },
+    {
+      "scenario": "resources-read-binary",
+      "category": "conformance-fixture-not-applicable",
+      "reason": "Upstream conformance scenario reads hardcoded URI 'test://static-binary'; production server exposes text/markdown and application/json aitest:// resources.",
+      "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
+    },
+    {
+      "scenario": "resources-templates-read",
+      "category": "conformance-fixture-not-applicable",
+      "reason": "Upstream conformance scenario reads hardcoded URI 'test://template/123/data'; production aitest://project/{target}/* templates are verified directly via SDK Client tests.",
+      "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
+    },
+    {
+      "scenario": "prompts-get-simple",
+      "category": "conformance-fixture-not-applicable",
+      "reason": "Upstream conformance scenario requests hardcoded prompt 'test_simple_prompt'; production prompts are verified directly via SDK Client tests.",
+      "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
+    },
+    {
+      "scenario": "prompts-get-with-args",
+      "category": "conformance-fixture-not-applicable",
+      "reason": "Upstream conformance scenario requests hardcoded prompt 'test_prompt_with_arguments'; production parameterized prompts are verified via SDK Client tests.",
+      "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
+    },
+    {
+      "scenario": "prompts-get-embedded-resource",
+      "category": "conformance-fixture-not-applicable",
+      "reason": "Upstream conformance scenario requests hardcoded prompt 'test_prompt_with_embedded_resource'; production prompts return text guidance messages.",
+      "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
+    },
+    {
+      "scenario": "prompts-get-with-image",
+      "category": "conformance-fixture-not-applicable",
+      "reason": "Upstream conformance scenario requests hardcoded prompt 'test_prompt_with_image'; production prompts return text guidance messages.",
+      "issue": "https://github.com/modelcontextprotocol/conformance#server-scenarios"
+    }
+  ]
+}

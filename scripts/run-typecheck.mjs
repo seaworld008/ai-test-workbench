@@ -14,7 +14,14 @@ const tscCandidates = [
 
 const tscBin = tscCandidates.find((p) => fs.existsSync(p));
 if (!tscBin) {
-  console.log('[TypeCheck SKIP] typescript compiler not installed in templates/playwright-qa/node_modules yet.');
+  const isCi = process.env.CI === 'true' || process.env.CI === '1' || process.argv.includes('--strict');
+  if (isCi) {
+    console.error(
+      '[TypeCheck BLOCKED] typescript compiler not installed in templates/playwright-qa/node_modules (fail-closed in CI/--strict mode).'
+    );
+    process.exit(2);
+  }
+  console.warn('[TypeCheck SKIP] typescript compiler not installed locally yet (run npm ci in templates/playwright-qa).');
   process.exit(0);
 }
 

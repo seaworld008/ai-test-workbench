@@ -1,0 +1,29 @@
+{
+  "id": "vitejs/vite@a2bd6fa897c35c8a691671a7d70061c1cdd5c688",
+  "repo": "vitejs/vite",
+  "sha": "a2bd6fa897c35c8a691671a7d70061c1cdd5c688",
+  "parentSha": "eb7aa9a8816a1e926d5d9b4cbe7e796b61314ce2",
+  "license": "MIT",
+  "testPaths": [
+    "playground/optimize-deps/__tests__/optimize-deps.spec.ts"
+  ],
+  "commitUrl": "https://github.com/vitejs/vite/commit/a2bd6fa897c35c8a691671a7d70061c1cdd5c688",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "pass",
+  "flagged": false,
+  "ruleCodes": [],
+  "violations": [],
+  "files": [
+    {
+      "testPath": "playground/optimize-deps/__tests__/optimize-deps.spec.ts",
+      "status": "pass",
+      "ruleCodes": [],
+      "violations": []
+    }
+  ],
+  "adjudication": {
+    "label": "PASS",
+    "reviewedAt": null,
+    "rationale": "Gate passed with zero violations."
+  }
+}

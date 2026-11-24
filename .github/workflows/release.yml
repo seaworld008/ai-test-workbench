@@ -1,0 +1,72 @@
+name: Release npm Package
+
+# Triggered ONLY when a human pushes a semver release tag (e.g., v5.1.0).
+# Publishing instructions (human-operated):
+#   1. First publish: create a short-lived granular npm access token and add it as repo secret `NPM_TOKEN`.
+#   2. Push tag `v5.1.0` -> this workflow runs all 7 verification gates and runs `npm publish --provenance --access public`.
+#   3. After initial package creation on npmjs.com, configure npm Trusted Publisher:
+#        - Repository: seaworld008/ai-test-workbench
+#        - Workflow filename: release.yml
+#        - Environment: (leave empty or match if you add a GitHub Environment)
+#   4. Delete the temporary `NPM_TOKEN` secret immediately once Trusted Publishing is active.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup Node.js 22 LTS with npm registry
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify tag matches package.json version
+        run: |
+          PKG_VER=$(node -p "require('./package.json').version")
+          TAG_VER="${GITHUB_REF_NAME#v}"
+          if [ "$PKG_VER" != "$TAG_VER" ]; then
+            echo "Tag v${TAG_VER} does not match package.json version ${PKG_VER}."
+            exit 1
+          fi
+
+      - name: Install QA Template Locked Dependencies & Chromium
+        working-directory: templates/playwright-qa
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Run Full 7-Command Verification Gate
+        run: |
+          npm run lint:docs
+          npm run typecheck
+          npm test
+          npm run smoke
+          npm run demo:verify
+          npm run bench
+          npm pack --dry-run
+
+      - name: Publish to npm with Sigstore Provenance
+        env:
+          # Used ONLY for first-time publish before Trusted Publisher is configured on npmjs.com.
+          # Once Trusted Publisher (seaworld008/ai-test-workbench -> release.yml) is active, delete NPM_TOKEN.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public

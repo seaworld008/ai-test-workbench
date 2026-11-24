@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { WORKBENCH_VERSION } from '../src/version.mjs';
 import {
   SUPPORTED_MCP_VERSIONS,
   createMcpHttpServer,
@@ -26,7 +27,7 @@ test('MCP server negotiates all supported protocol versions (2024-11-05 .. 2025-
       params: { protocolVersion: ver, clientInfo: { name: 'unit-test', version: '1.0' } },
     });
     assert.equal(res.result.protocolVersion, ver);
-    assert.equal(res.result.serverInfo.version, '5.0.0');
+    assert.equal(res.result.serverInfo.version, WORKBENCH_VERSION);
     assert.ok(res.result.capabilities.tools);
     assert.ok(res.result.capabilities.resources);
     assert.ok(res.result.capabilities.prompts);
@@ -81,13 +82,18 @@ test('MCP server negotiates all supported protocol versions (2024-11-05 .. 2025-
 
 test('MCP stdio transport emits pure NDJSON JSON-RPC frames across initialize, tools/call, progress & resources/read', async () => {
   const tmpRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'aitest-mcp-stdio-'));
+  let child = null;
   try {
-    const child = spawn(process.execPath, [path.join(WORKBENCH_ROOT, 'tools', 'aitest.mjs'), 'mcp-serve'], {
-      cwd: WORKBENCH_ROOT,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      shell: false,
-      windowsHide: true,
-    });
+    child = spawn(
+      process.execPath,
+      [path.join(WORKBENCH_ROOT, 'tools', 'aitest.mjs'), 'mcp-serve', '--workspace-root', tmpRepo],
+      {
+        cwd: WORKBENCH_ROOT,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        shell: false,
+        windowsHide: true,
+      }
+    );
 
     const lines = [];
     let buffer = '';
@@ -169,6 +175,9 @@ test('MCP stdio transport emits pure NDJSON JSON-RPC frames across initialize, t
     await new Promise((resolve) => child.once('close', resolve));
     assert.equal(buffer.trim(), '');
   } finally {
+    if (child && child.exitCode === null) {
+      child.kill();
+    }
     fs.rmSync(tmpRepo, { recursive: true, force: true });
   }
 });

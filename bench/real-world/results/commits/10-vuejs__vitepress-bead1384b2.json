@@ -1,0 +1,37 @@
+{
+  "id": "vuejs/vitepress@bead1384b2aca9101f3da76d504d7642a42befa0",
+  "repo": "vuejs/vitepress",
+  "sha": "bead1384b2aca9101f3da76d504d7642a42befa0",
+  "parentSha": "44457ff2cca18439496b954a727fc2e337d52c3c",
+  "license": "MIT",
+  "testPaths": [
+    "__tests__/e2e/rtl/index.test.ts"
+  ],
+  "commitUrl": "https://github.com/vuejs/vitepress/commit/bead1384b2aca9101f3da76d504d7642a42befa0",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "fail",
+  "flagged": true,
+  "ruleCodes": [
+    "AITEST-G107"
+  ],
+  "violations": [
+    "[Healer Diff Guard][AITEST-G107] __tests__/e2e/rtl/index.test.ts: swallowed exception in try/catch block without rethrow."
+  ],
+  "files": [
+    {
+      "testPath": "__tests__/e2e/rtl/index.test.ts",
+      "status": "fail",
+      "ruleCodes": [
+        "AITEST-G107"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G107] __tests__/e2e/rtl/index.test.ts: swallowed exception in try/catch block without rethrow."
+      ]
+    }
+  ],
+  "adjudication": {
+    "label": "FP",
+    "reviewedAt": "2026-11-24",
+    "rationale": "Commit actually un-skipped and strengthened two RTL E2E tests. AITEST-G107 triggered on `try { animation.finish() } catch {}` inside a `page.evaluate(...)` browser helper settling CSS transitions before strict geometry assertions."
+  }
+}

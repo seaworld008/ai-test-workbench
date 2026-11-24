@@ -1,0 +1,29 @@
+{
+  "id": "vitejs/vite@726aca5a5390776b563741003a46ac8ea5706f16",
+  "repo": "vitejs/vite",
+  "sha": "726aca5a5390776b563741003a46ac8ea5706f16",
+  "parentSha": "6019aa79975465516da7c6f532d568422b019a25",
+  "license": "MIT",
+  "testPaths": [
+    "playground/environment-react-ssr/__tests__/environment-react-ssr.spec.ts"
+  ],
+  "commitUrl": "https://github.com/vitejs/vite/commit/726aca5a5390776b563741003a46ac8ea5706f16",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "pass",
+  "flagged": false,
+  "ruleCodes": [],
+  "violations": [],
+  "files": [
+    {
+      "testPath": "playground/environment-react-ssr/__tests__/environment-react-ssr.spec.ts",
+      "status": "pass",
+      "ruleCodes": [],
+      "violations": []
+    }
+  ],
+  "adjudication": {
+    "label": "PASS",
+    "reviewedAt": null,
+    "rationale": "Gate passed with zero violations."
+  }
+}

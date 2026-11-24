@@ -1,0 +1,50 @@
+{
+  "id": "vitejs/vite@afaf48b7327e09564048821b2e7eb772d59e7f80",
+  "repo": "vitejs/vite",
+  "sha": "afaf48b7327e09564048821b2e7eb772d59e7f80",
+  "parentSha": "e57f4da9c6fde10034106cb6a43b40dc4a38c211",
+  "license": "MIT",
+  "testPaths": [
+    "playground/worker/__tests__/es/worker-es.spec.ts",
+    "playground/worker/__tests__/iife/worker-iife.spec.ts",
+    "playground/worker/__tests__/relative-base-iife/worker-relative-base-iife.spec.ts",
+    "playground/worker/__tests__/relative-base/worker-relative-base.spec.ts"
+  ],
+  "commitUrl": "https://github.com/vitejs/vite/commit/afaf48b7327e09564048821b2e7eb772d59e7f80",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "pass",
+  "flagged": false,
+  "ruleCodes": [],
+  "violations": [],
+  "files": [
+    {
+      "testPath": "playground/worker/__tests__/es/worker-es.spec.ts",
+      "status": "pass",
+      "ruleCodes": [],
+      "violations": []
+    },
+    {
+      "testPath": "playground/worker/__tests__/iife/worker-iife.spec.ts",
+      "status": "pass",
+      "ruleCodes": [],
+      "violations": []
+    },
+    {
+      "testPath": "playground/worker/__tests__/relative-base-iife/worker-relative-base-iife.spec.ts",
+      "status": "pass",
+      "ruleCodes": [],
+      "violations": []
+    },
+    {
+      "testPath": "playground/worker/__tests__/relative-base/worker-relative-base.spec.ts",
+      "status": "pass",
+      "ruleCodes": [],
+      "violations": []
+    }
+  ],
+  "adjudication": {
+    "label": "PASS",
+    "reviewedAt": null,
+    "rationale": "Gate passed with zero violations."
+  }
+}

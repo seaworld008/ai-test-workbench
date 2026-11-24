@@ -1,4 +1,6 @@
 // @ts-check
+import { WORKBENCH_VERSION } from './version.mjs';
+
 export function detectLang(flagLang) {
   if (flagLang) {
     return String(flagLang).toLowerCase().startsWith('zh') ? 'zh' : 'en';
@@ -17,12 +19,12 @@ export function detectLang(flagLang) {
 
 const DICT = {
   zh: {
-    appTitle:
-      'AI Test Workbench (ai-test-workbench / aitest) v5.0 — AI 编码 Agent 的独立可信验证内核与多协议 MCP 服务端',
+    appTitle: `AI Test Workbench (ai-test-workbench / aitw) v${WORKBENCH_VERSION} — AI 编码 Agent 的独立可信验证内核与多协议 MCP 服务端`,
     usageHeader: '用法',
     commandsHeader: '可用命令',
     optionsHeader: '常用选项',
-    unknownCmd: (cmd) => `未知命令: ${cmd}。请运行 "npx ai-test-workbench --help" 查看用法。`,
+    unknownCmd: (cmd) =>
+      `未知命令: ${cmd}。请运行 "npx ai-test-workbench@${WORKBENCH_VERSION} --help" 或 "aitw --help" 查看用法。`,
     helpSummary: {
       doctor: '检测本机 OS、Node/npm、Git、Codex/Claude、Playwright 缓存与门禁内核版本漂移',
       init: '幂等初始化隔离 Playwright QA 子工程 (<repo>/qa) 并生成 .aitest/governance.lock',
@@ -41,6 +43,7 @@ const DICT = {
       flaky: '基于 Run Ledger 统计历史 Flaky 率并管理带期限的自动隔离区 (quarantine.json)',
       'trace-matrix': '生成 specs/REQ-xxx 需求 <-> 测试用例 <-> 运行结果的双向可追溯矩阵',
       governance: '人类专属治理审批 CLI (verify | status | approve)，严禁暴露给 MCP Agent',
+      attest: '离线校验 in-toto Statement v1 判决证书、T1 MAC 与 T2 Sigstore 签发身份 (verify)',
       report: '展示本地 HTML/JUnit/JSON/SARIF 报告、知识地图、性能报告及 Trace 路径',
       'update-agents': '按 SHA-256 清单安全更新官方 playwright init-agents，冲突自动写入 .aitest-new',
       'skill-install': '将标准 ai-test-workbench Skill 安装到 .codex/.claude/.gemini/.github/qa 目录',
@@ -49,12 +52,12 @@ const DICT = {
     qaNotFound: (p) => `未找到 QA 测试目录（期望 ${p} 或包含 playwright.config.ts 的目录）。请先执行 init。`,
   },
   en: {
-    appTitle:
-      'AI Test Workbench (ai-test-workbench / aitest) v5.0 — Trustworthy Verification Kernel & Multi-Protocol MCP Server for AI Coding Agents',
+    appTitle: `AI Test Workbench (ai-test-workbench / aitw) v${WORKBENCH_VERSION} — Trustworthy Verification Kernel & Multi-Protocol MCP Server for AI Coding Agents`,
     usageHeader: 'Usage',
     commandsHeader: 'Commands',
     optionsHeader: 'Global Options',
-    unknownCmd: (cmd) => `Unknown command: ${cmd}. Run "npx ai-test-workbench --help" for usage.`,
+    unknownCmd: (cmd) =>
+      `Unknown command: ${cmd}. Run "npx ai-test-workbench@${WORKBENCH_VERSION} --help" or "aitw --help" for usage.`,
     helpSummary: {
       doctor: 'Inspect OS, Node/npm, Git, Codex/Claude, browser cache, and Gate Kernel version drift',
       init: 'Idempotently initialize isolated <repo>/qa subproject with .aitest/governance.lock',
@@ -73,6 +76,7 @@ const DICT = {
       flaky: 'Compute historical flaky rates from Run Ledger and manage time-bounded quarantine.json',
       'trace-matrix': 'Generate REQ-xxx Requirement <-> Spec <-> Outcome traceability matrix',
       governance: 'Human-only governance CLI (verify | status | approve) — never exposed via MCP',
+      attest: 'Offline verify in-toto Statement v1 verdict attestations, T1 MAC & T2 Sigstore identity (verify)',
       report: 'Display local HTML/JUnit/JSON/SARIF reports, Living Code Map, Perf & Trace paths',
       'update-agents': 'Safely update official playwright init-agents with SHA-256 manifest',
       'skill-install': 'Install portable ai-test-workbench Skill into .codex, .claude, .agents, .gemini, .github, or qa/',

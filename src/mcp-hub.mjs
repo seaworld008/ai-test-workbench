@@ -24,7 +24,7 @@ export const MCP_PRESETS = {
     pillar: 'orchestrator',
     description: 'AI Test Workbench native MCP Server (stdio/Streamable HTTP/SSE tools, Living Code Map & QA gates)',
     command: 'npx',
-    args: ['-y', 'ai-test-workbench', 'mcp-serve'],
+    args: [`--package=ai-test-workbench@${WORKBENCH_VERSION}`, 'ai-test-workbench', 'mcp-serve'],
     pinnedVersion: WORKBENCH_VERSION,
     riskLevel: 'local-write',
     readonly: true,

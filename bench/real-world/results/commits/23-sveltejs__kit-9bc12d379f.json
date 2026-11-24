@@ -1,0 +1,87 @@
+{
+  "id": "sveltejs/kit@9bc12d379fa1cb0a743d02a2855cf3ed26198e9f",
+  "repo": "sveltejs/kit",
+  "sha": "9bc12d379fa1cb0a743d02a2855cf3ed26198e9f",
+  "parentSha": "decaf66ff3198b70a4fafa0242f60c6a07481ee3",
+  "license": "MIT",
+  "testPaths": [
+    "packages/kit/test/apps/basics/test/playwright/client.test.js",
+    "packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js",
+    "packages/kit/test/apps/options-2/test/env.test.js",
+    "packages/kit/test/apps/options-2/test/service-worker.test.js",
+    "packages/kit/test/apps/options/test/paths.test.js"
+  ],
+  "commitUrl": "https://github.com/sveltejs/kit/commit/9bc12d379fa1cb0a743d02a2855cf3ed26198e9f",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "fail",
+  "flagged": true,
+  "ruleCodes": [
+    "AITEST-G105",
+    "AITEST-G110"
+  ],
+  "violations": [
+    "[Healer Diff Guard][AITEST-G110] packages/kit/test/apps/basics/test/playwright/client.test.js: early return inside conditional before assertion bypasses test checks (\"if (variant === 'async') return;\").",
+    "[Healer Diff Guard][AITEST-G105] packages/kit/test/apps/options-2/test/env.test.js: added skip/fixme/only (\"test.skip(variant !== 'dynamic-env')\").",
+    "[Healer Diff Guard][AITEST-G105] packages/kit/test/apps/options-2/test/env.test.js: added skip/fixme/only (\"test.skip(javaScriptEnabled || !!process.env.DEV || variant === 'dynamic-env')\").",
+    "[Healer Diff Guard][AITEST-G105] packages/kit/test/apps/options-2/test/env.test.js: added skip/fixme/only (\"test.skip(javaScriptEnabled || !!process.env.DEV || variant !== 'dynamic-env')\").",
+    "[Healer Diff Guard][AITEST-G105] packages/kit/test/apps/options-2/test/service-worker.test.js: added skip/fixme/only (\"test.skip(({ javaScriptEnabled }) => !javaScriptEnabled || variant !== 'service-worker')\").",
+    "[Healer Diff Guard][AITEST-G105] packages/kit/test/apps/options/test/paths.test.js: added skip/fixme/only (\"test.skip(variant !== 'paths-assets')\").",
+    "[Healer Diff Guard][AITEST-G105] packages/kit/test/apps/options/test/paths.test.js: added skip/fixme/only (\"test.skip(\")."
+  ],
+  "files": [
+    {
+      "testPath": "packages/kit/test/apps/basics/test/playwright/client.test.js",
+      "status": "fail",
+      "ruleCodes": [
+        "AITEST-G110"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G110] packages/kit/test/apps/basics/test/playwright/client.test.js: early return inside conditional before assertion bypasses test checks (\"if (variant === 'async') return;\")."
+      ]
+    },
+    {
+      "testPath": "packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js",
+      "status": "pass",
+      "ruleCodes": [],
+      "violations": []
+    },
+    {
+      "testPath": "packages/kit/test/apps/options-2/test/env.test.js",
+      "status": "fail",
+      "ruleCodes": [
+        "AITEST-G105"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G105] packages/kit/test/apps/options-2/test/env.test.js: added skip/fixme/only (\"test.skip(variant !== 'dynamic-env')\").",
+        "[Healer Diff Guard][AITEST-G105] packages/kit/test/apps/options-2/test/env.test.js: added skip/fixme/only (\"test.skip(javaScriptEnabled || !!process.env.DEV || variant === 'dynamic-env')\").",
+        "[Healer Diff Guard][AITEST-G105] packages/kit/test/apps/options-2/test/env.test.js: added skip/fixme/only (\"test.skip(javaScriptEnabled || !!process.env.DEV || variant !== 'dynamic-env')\")."
+      ]
+    },
+    {
+      "testPath": "packages/kit/test/apps/options-2/test/service-worker.test.js",
+      "status": "fail",
+      "ruleCodes": [
+        "AITEST-G105"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G105] packages/kit/test/apps/options-2/test/service-worker.test.js: added skip/fixme/only (\"test.skip(({ javaScriptEnabled }) => !javaScriptEnabled || variant !== 'service-worker')\")."
+      ]
+    },
+    {
+      "testPath": "packages/kit/test/apps/options/test/paths.test.js",
+      "status": "fail",
+      "ruleCodes": [
+        "AITEST-G105"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G105] packages/kit/test/apps/options/test/paths.test.js: added skip/fixme/only (\"test.skip(variant !== 'paths-assets')\").",
+        "[Healer Diff Guard][AITEST-G105] packages/kit/test/apps/options/test/paths.test.js: added skip/fixme/only (\"test.skip(\")."
+      ]
+    }
+  ],
+  "adjudication": {
+    "label": "FP",
+    "reviewedAt": "2026-11-24",
+    "rationale": "Mechanical variant refactor (#16845): replaced pre-existing `test.skip(!process.env.DYNAMIC_PUBLIC_ENV)` and `if (process.env.SVELTE_ASYNC === 'true') return;` with equivalent `variant` checks. Because expression text changed, snippet-based diff deduplication treated pre-existing skips as newly added."
+  }
+}

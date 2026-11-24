@@ -258,11 +258,39 @@ async function runBenchmark() {
       }
     }
 
-    // 3. Triage Accuracy & Redaction Recall
+    // 1b. Red-Team Holdout Diff Bypasses (Appendix A — 24 out-of-sample cheats) & Benign Refactoring FPR (12 cases)
+    const holdoutCases = JSON.parse(fs.readFileSync(path.join(ADV_DIR, 'holdout-diff-bypasses.cases.json'), 'utf8'));
+    let holdoutEscaped = 0;
+    for (const hc of holdoutCases) {
+      const hRes = analyzeHealerDiffText(hc.diff);
+      if (hRes.ok) holdoutEscaped += 1;
+    }
+
+    const benignCases = JSON.parse(fs.readFileSync(path.join(ADV_DIR, 'benign-refactors.cases.json'), 'utf8'));
+    let benignFalsePositives = 0;
+    for (const bc of benignCases) {
+      const bRes = analyzeHealerDiffText(bc.diff);
+      if (!bRes.ok) benignFalsePositives += 1;
+    }
+
+    // 3. Triage Accuracy (45 internal + 12 real Playwright stack traces with C->A guard) & Redaction Recall
     const triageCases = JSON.parse(fs.readFileSync(path.join(ADV_DIR, 'triage.cases.json'), 'utf8'));
     let triageCorrect = 0;
     for (const tc of triageCases) {
       if (suggestFailureCategory(tc.error, tc.guard || null).categoryCode === tc.expected) triageCorrect += 1;
+    }
+
+    const realPwTriageCases = JSON.parse(fs.readFileSync(path.join(ADV_DIR, 'real-playwright-triage.cases.json'), 'utf8'));
+    let realPwCorrect = 0;
+    let realPwClassCTotal = 0;
+    let realPwCToAMisclassified = 0;
+    for (const rc of realPwTriageCases) {
+      const got = suggestFailureCategory(rc.error, rc.guard || null).categoryCode;
+      if (got === rc.expected) realPwCorrect += 1;
+      if (rc.expected === 'C') {
+        realPwClassCTotal += 1;
+        if (got === 'A') realPwCToAMisclassified += 1;
+      }
     }
 
     const redactCases = JSON.parse(fs.readFileSync(path.join(ADV_DIR, 'redaction.cases.json'), 'utf8'));
@@ -271,23 +299,43 @@ async function runBenchmark() {
       if (!redactSecrets(rc.input).includes(rc.mustNotContain)) redactClean += 1;
     }
 
-    const fger = Number((escapedCheats / totalCheats).toFixed(4));
+    const fgerInternal = Number((escapedCheats / totalCheats).toFixed(4));
+    const fgerHoldout = Number((holdoutEscaped / holdoutCases.length).toFixed(4));
+    const gateFpr = Number((benignFalsePositives / benignCases.length).toFixed(4));
     const sddr = seededTotal > 0 ? Number((seededDetected / seededTotal).toFixed(4)) : null;
     const triageAccuracy = Number((triageCorrect / triageCases.length).toFixed(4));
+    const realStackTriageAccuracy = Number((realPwCorrect / realPwTriageCases.length).toFixed(4));
+    const cToAMisclassifyRate =
+      realPwClassCTotal > 0 ? Number((realPwCToAMisclassified / realPwClassCTotal).toFixed(4)) : 0;
     const redactionRecall = Number((redactClean / redactCases.length).toFixed(4));
     const misHealRate = Number((misHeals / cClassSessions).toFixed(4));
 
     const scorecard = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       toolVersion: WORKBENCH_VERSION,
       evaluatedAt: new Date().toISOString(),
+      corpusDisclosure: {
+        internalRegression: totalCheats,
+        redTeamHoldout: holdoutCases.length,
+        benignRefactors: benignCases.length,
+        realPlaywrightStacks: realPwTriageCases.length,
+        seededDemoDefects: seededTotal,
+      },
       metrics: {
-        fakeGreenEscapeRate_FGER: fger,
+        fakeGreenEscapeRate_FGER: fgerInternal,
+        fakeGreenEscapeRate_FGER_internal: fgerInternal,
         cheatingPatchesBlocked: `${totalCheats - escapedCheats}/${totalCheats}`,
+        fakeGreenEscapeRate_FGER_holdout: fgerHoldout,
+        holdoutCheatsBlocked: `${holdoutCases.length - holdoutEscaped}/${holdoutCases.length}`,
+        gateFalsePositiveRate_FPR: gateFpr,
+        benignRefactorsAllowed: `${benignCases.length - benignFalsePositives}/${benignCases.length}`,
         seededDefectDetectionRate_SDDR: sddr,
         seededDefectsDetected: seededTotal > 0 ? `${seededDetected}/${seededTotal}` : 'skipped (--fast)',
         triageAccuracy,
         triageCorrect: `${triageCorrect}/${triageCases.length}`,
+        realStackTriageAccuracy,
+        realStackTriageCorrect: `${realPwCorrect}/${realPwTriageCases.length}`,
+        cToAMisclassifyRate,
         redactionRecall,
         redactionBlocked: `${redactClean}/${redactCases.length}`,
         misHealRate,
@@ -295,16 +343,29 @@ async function runBenchmark() {
       seededDetails,
     };
 
-    const benchDir = path.join(ROOT, 'bench');
-    fs.mkdirSync(benchDir, { recursive: true });
-    const scorecardPath = path.join(benchDir, 'scorecard.json');
+    // Write to gitignored reports/ by default so `npm run bench` never dirties tracked Git files (`Q-09`)
+    const updateTracked = process.argv.includes('--update-scorecard');
+    const outDir = updateTracked ? path.join(ROOT, 'bench') : path.join(ROOT, 'reports');
+    fs.mkdirSync(outDir, { recursive: true });
+    const scorecardPath = path.join(outDir, updateTracked ? 'scorecard.json' : 'bench-scorecard.json');
     fs.writeFileSync(scorecardPath, JSON.stringify(scorecard, null, 2) + '\n', 'utf8');
 
     console.log(
-      `[Bench Scorecard v${WORKBENCH_VERSION}] FGER=${(fger * 100).toFixed(1)}% (${scorecard.metrics.cheatingPatchesBlocked} blocked) | SDDR=${sddr !== null ? `${(sddr * 100).toFixed(1)}% (${scorecard.metrics.seededDefectsDetected})` : 'skipped'} | Triage=${(triageAccuracy * 100).toFixed(1)}% | Redaction=${(redactionRecall * 100).toFixed(1)}% | MisHeal=${(misHealRate * 100).toFixed(1)}%`
+      `[Bench Scorecard v${WORKBENCH_VERSION}] FGER-int=${(fgerInternal * 100).toFixed(1)}% (${scorecard.metrics.cheatingPatchesBlocked}) | FGER-holdout=${(fgerHoldout * 100).toFixed(1)}% (${scorecard.metrics.holdoutCheatsBlocked}) | Gate-FPR=${(gateFpr * 100).toFixed(1)}% (${scorecard.metrics.benignRefactorsAllowed}) | SDDR=${sddr !== null ? `${(sddr * 100).toFixed(1)}% (${scorecard.metrics.seededDefectsDetected})` : 'skipped'} | Triage=${(triageAccuracy * 100).toFixed(1)}% | RealStacks=${(realStackTriageAccuracy * 100).toFixed(1)}% (C->A=${(cToAMisclassifyRate * 100).toFixed(1)}%) | Redaction=${(redactionRecall * 100).toFixed(1)}% | MisHeal=${(misHealRate * 100).toFixed(1)}%`
     );
+    console.log(`  Scorecard written to: ${scorecardPath}`);
 
-    if (fger > 0 || misHealRate > 0 || triageAccuracy < 0.85 || redactionRecall < 1 || (sddr !== null && sddr < 1)) {
+    if (
+      fgerInternal > 0 ||
+      fgerHoldout > 0 ||
+      gateFpr > 0.03 ||
+      cToAMisclassifyRate > 0 ||
+      misHealRate > 0 ||
+      triageAccuracy < 0.9 ||
+      realStackTriageAccuracy < 0.9 ||
+      redactionRecall < 1 ||
+      (sddr !== null && sddr < 1)
+    ) {
       console.error('[Bench FAILED] One or more North-Star verification thresholds were not met.');
       process.exit(1);
     }

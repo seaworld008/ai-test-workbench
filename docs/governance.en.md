@@ -8,7 +8,7 @@
 
 ## 1. 4-Layer Anti-Fake-Green Gate Kernel (`support/gate-kernel.mjs`)
 
-Every `aitest audit`, `aitest run --audit`, and one-call `aitest verify-change` invocation enforces four sequential gates:
+Every `npx ai-test-workbench@5.1.0 audit`, `npx ai-test-workbench@5.1.0 run --audit`, and one-call `npx ai-test-workbench@5.1.0 verify-change` invocation enforces four sequential gates:
 
 | Layer | Gate | What It Verifies | Cheating Patterns Blocked |
 |---|---|---|---|
@@ -19,16 +19,16 @@ Every `aitest audit`, `aitest run --audit`, and one-call `aitest verify-change` 
 
 ---
 
-## 2. Human-Only Governance Approval (`aitest governance`)
+## 2. Human-Only Governance Approval (`npx ai-test-workbench@5.1.0 governance`)
 
 Protected governance files are sealed in `<repo>/qa/.aitest/governance.lock` alongside an append-only audit log `.aitest/governance-audit.jsonl`:
 
 ```bash
 # Check governance lock integrity (read-only)
-npx ai-test-workbench governance status --target "/path/to/repo"
+npx ai-test-workbench@5.1.0 governance status --target "/path/to/repo"
 
 # Re-seal protected governance files from a human terminal after intentional updates
-npx ai-test-workbench governance approve --target "/path/to/repo" --approver "alice@team" --reason "Update staging LCP budget"
+npx ai-test-workbench@5.1.0 governance approve --target "/path/to/repo" --approver "alice@team" --reason "Update staging LCP budget"
 ```
 
 > [!IMPORTANT]
@@ -36,7 +36,7 @@ npx ai-test-workbench governance approve --target "/path/to/repo" --approver "al
 
 ---
 
-## 3. Stateful Heal Session State Machine (`aitest heal` / `aitest_heal_*`)
+## 3. Stateful Heal Session State Machine (`npx ai-test-workbench@5.1.0 heal` / `aitest_heal_*`)
 
 Instead of letting agents freely edit specs in an unmonitored loop, repairs follow a persisted state machine:
 
@@ -57,9 +57,23 @@ Instead of letting agents freely edit specs in an unmonitored loop, repairs foll
 
 ---
 
-## 5. One-Call Change Verdict (`aitest verify-change` / `aitest_verify_change`)
+## 5. One-Call Change Verdict (`npx ai-test-workbench@5.1.0 verify-change` / `aitest_verify_change`)
 
 Before opening or merging a PR, one call orchestrates `governance verify` → `Import-Graph Impact v2` → `Playwright Run (Run Ledger)` → `4-Layer Gate Audit` → `Diagnose & Trace Matrix`, producing:
 - Machine-verifiable attestation: `<repo>/qa/.aitest/runs/<runId>/attestation.json`
 - Human-readable summary: `<repo>/qa/reports/verdict-summary.md` (explicitly labeling `local-workbench` vs `business-e2e` scope)
 - GitHub Code Scanning report: `<repo>/qa/reports/verdict.sarif.json`
+
+---
+
+## 6. Trust Levels (`T0 / T1 / T2`) & Reusable CI Attestation Workflow
+
+| Trust Level | Canonical Definition | Merge-Grade Green? |
+|---|---|---|
+| **T0** | Unverified local run | No |
+| **T1** | Local Run Ledger + MAC (proves integrity, not provenance) | No |
+| **T2** | Re-run from a clean checkout on a GitHub-hosted runner, keylessly signed with Sigstore, and verified for issuer identity | **Yes (only merge-grade green)** |
+
+- Adopt `.github/workflows/aitest-verify.yml` in one job using [examples/workflows/use-aitest-verify.yml](../examples/workflows/use-aitest-verify.yml).
+- Verify bundles offline with `npx ai-test-workbench@5.1.0 attest verify --file <attestation.json> --bundle <attestation.sigstore.json> --expect-repo <owner/repo> --expect-workflow <workflow-path> --expect-ref <ref>`. Any missing signature, T1-only MAC, byte-level tamper, or OIDC issuer / workflow SAN mismatch fails closed (non-zero exit code, `trustLevel <= T1`).
+- **Private Repository Note**: `signer: github-attest` (default) uses GitHub Artifact Attestations, which requires **GitHub Enterprise Cloud** for private repositories. `signer: cosign` with public Sigstore records repository identity in the public Rekor transparency log; private projects must evaluate that disclosure before opting in.

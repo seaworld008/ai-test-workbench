@@ -8,10 +8,38 @@ import { evaluateTargetSafety, loadMergedQaEnv } from './origin-guard.mjs';
 import { runProcess } from './proc.mjs';
 
 /**
- * Interactive headed Chromium session capture (`aitest auth-login`).
+ * Validates that an optional `--cdp-url` points strictly to a local loopback CDP endpoint
+ * (`127.0.0.1`, `localhost`, or `::1`) so remote debug ports can never be targeted.
+ * @param {string} rawUrl
+ */
+export function validateLoopbackCdpUrl(rawUrl) {
+  const trimmed = String(rawUrl || '').trim();
+  if (!trimmed) return { ok: false, error: 'Empty --cdp-url value.' };
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return { ok: false, error: `Invalid --cdp-url "${trimmed}". Expected e.g. http://127.0.0.1:9222` };
+  }
+  if (!['http:', 'https:', 'ws:', 'wss:'].includes(parsed.protocol)) {
+    return { ok: false, error: `Unsupported --cdp-url protocol "${parsed.protocol}".` };
+  }
+  const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (host !== '127.0.0.1' && host !== 'localhost' && host !== '::1') {
+    return {
+      ok: false,
+      error: `Refusing non-loopback --cdp-url host "${host}". Only localhost / 127.0.0.1 / ::1 are permitted.`,
+    };
+  }
+  return { ok: true, url: parsed.toString() };
+}
+
+/**
+ * Interactive headed Chromium session capture (`auth-login`) OR loopback CDP attach (`--cdp-url`).
  * Designed for staging/test environments protected by SMS OTP, SSO, QR login, or human-solved CAPTCHAs.
- * Never attempts to bypass CAPTCHAs or bot challenges: pre-fills optional `--account` and waits
- * for the human operator to complete login and click the on-page Save button (or complete login redirect).
+ * Never attempts to bypass CAPTCHAs or bot challenges: either reuses an already-logged-in local Chrome
+ * session over `--cdp-url` (without closing the user's browser) or opens headed Chromium and waits
+ * for the human operator to complete login.
  */
 export async function runAuthLoginCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
@@ -58,6 +86,84 @@ export async function runAuthLoginCommand(options = {}) {
   const account = options.account ? String(options.account).trim() : '';
 
   fs.mkdirSync(authDir, { recursive: true });
+
+  if (options.cdpUrl) {
+    const cdpCheck = validateLoopbackCdpUrl(options.cdpUrl);
+    if (!cdpCheck.ok) {
+      console.error(`[Target Guard Blocked] ${cdpCheck.error}`);
+      return 2;
+    }
+    const expectedOrigin = new URL(safety.baseURL).origin;
+    const cdpScript = `
+// @ts-check
+import fs from 'node:fs';
+import { chromium } from ${JSON.stringify(pathToFileURL(pwPkg).href)};
+
+const cdpUrl = ${JSON.stringify(cdpCheck.url)};
+const expectedOrigin = ${JSON.stringify(expectedOrigin)};
+const storageStatePath = ${JSON.stringify(storageStatePath)};
+const sessionStoragePath = ${JSON.stringify(sessionStoragePath)};
+
+const browser = await chromium.connectOverCDP(cdpUrl);
+try {
+  const contexts = browser.contexts();
+  let matchedContext = null;
+  let matchedPage = null;
+  const openOrigins = [];
+  for (const ctx of contexts) {
+    for (const p of ctx.pages()) {
+      try {
+        const u = new URL(p.url());
+        openOrigins.push(u.origin);
+        if (u.origin === expectedOrigin && !matchedPage) {
+          matchedContext = ctx;
+          matchedPage = p;
+        }
+      } catch {}
+    }
+  }
+  if (!matchedContext || !matchedPage) {
+    console.error('[auth-login --cdp-url] No open tab matching origin ' + expectedOrigin + '. Open origins: ' + [...new Set(openOrigins)].join(', '));
+    process.exit(2);
+  }
+  await matchedContext.storageState({ path: storageStatePath });
+  try { fs.chmodSync(storageStatePath, 0o600); } catch {}
+  const sessionDump = await matchedPage.evaluate(() => ({
+    origin: window.location.origin,
+    url: window.location.href,
+    entries: Object.entries(window.sessionStorage),
+    localStorageKeys: Object.keys(window.localStorage),
+  })).catch(() => ({ origin: expectedOrigin, url: matchedPage.url(), entries: [], localStorageKeys: [] }));
+  fs.writeFileSync(sessionStoragePath, JSON.stringify(sessionDump, null, 2) + '\\n', { encoding: 'utf8', mode: 0o600 });
+  console.log(JSON.stringify({
+    saved: true,
+    mode: 'cdp-attach',
+    finalUrl: sessionDump.url,
+    storageStatePath,
+    sessionStoragePath,
+    sessionStorageKeys: sessionDump.entries.map(([k]) => k),
+    localStorageKeys: sessionDump.localStorageKeys,
+  }, null, 2));
+} finally {
+  // Disconnect CDP client cleanly without closing the user's browser
+  await browser.close().catch(() => {});
+}
+`;
+    const tmpDirCdp = fs.mkdtempSync(path.join(os.tmpdir(), 'aitest-auth-cdp-'));
+    const cdpScriptPath = path.join(tmpDirCdp, 'capture-cdp.mjs');
+    fs.writeFileSync(cdpScriptPath, cdpScript, 'utf8');
+    try {
+      const res = await runProcess(process.execPath, [cdpScriptPath], {
+        cwd: qaDir,
+        inheritStdio: true,
+        windowsHide: true,
+        timeoutMs: 30_000,
+      });
+      return res.code;
+    } finally {
+      fs.rmSync(tmpDirCdp, { recursive: true, force: true });
+    }
+  }
 
   const helperScript = `
 // @ts-check
@@ -183,6 +289,7 @@ await page.evaluate(() => {
 }).catch(() => {});
 
 await context.storageState({ path: storageStatePath });
+try { fs.chmodSync(storageStatePath, 0o600); } catch {}
 const sessionDump = await page.evaluate(() => ({
   origin: window.location.origin,
   url: window.location.href,
@@ -190,7 +297,7 @@ const sessionDump = await page.evaluate(() => ({
   localStorageKeys: Object.keys(window.localStorage),
 })).catch(() => ({ origin: '', url: page.url(), entries: [], localStorageKeys: [] }));
 
-fs.writeFileSync(sessionStoragePath, JSON.stringify(sessionDump, null, 2) + '\\n', 'utf8');
+fs.writeFileSync(sessionStoragePath, JSON.stringify(sessionDump, null, 2) + '\\n', { encoding: 'utf8', mode: 0o600 });
 console.log(JSON.stringify({
   saved: true,
   finalUrl: sessionDump.url,

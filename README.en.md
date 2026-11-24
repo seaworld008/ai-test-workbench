@@ -4,7 +4,7 @@
 
 **Trustworthy Verification Kernel, Multi-Protocol MCP Server & Living Code Map for AI Coding Agents**
 
-Powered by **One-Call `verify_change` Attestation** · **4-Layer Anti-Fake-Green Gate + `S0–S5` Assertion Lattice + Governance Lock (`FGER=0%`)** · **Native MCP v2 (`stdio` / `/mcp` / `/sse` · 21 Tools · Async Jobs)** · **Stateful Healer** · **Import-Graph Impact v2** · **Buffered `PerformanceObserver` Web Vitals**
+Powered by **One-Call `verify_change` (in-toto v1 + `T0/T1/T2` Trust Tiers)** · **4-Layer Fail-Closed AST Gate (`S0–S5` + `AITEST-G101..G115`)** · **Native MCP v2 (`stdio` / `/mcp` / `/sse` · 21 Tools · Async Jobs)** · **Tamper-Evident Healer** · **Import-Graph Impact v2** · **Buffered `PerformanceObserver` Web Vitals**
 
 [简体中文文档 (默认)](./README.md) · [Governance & 4-Layer Gate](./docs/governance.en.md) · [v5.0 Scorecard](./docs/review/v5-verification-scorecard.en.md) · [AI Agent Quickstart](./docs/ai-agent-quickstart.en.md) · [AGENTS.en.md](./AGENTS.en.md) · [Architecture](./ARCHITECTURE.en.md) · [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md) · [Changelog](./CHANGELOG.en.md)
 
@@ -12,7 +12,8 @@ Powered by **One-Call `verify_change` Attestation** · **4-Layer Anti-Fake-Green
 [![Release](https://img.shields.io/github/v/release/seaworld008/ai-test-workbench?style=flat-square&color=0ea5e9&label=Release)](https://github.com/seaworld008/ai-test-workbench/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-10b981.svg?style=flat-square)](./LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.12-339933?style=flat-square&logo=node.js&logoColor=white)](./VERSION.en.md)
-[![FGER](https://img.shields.io/badge/Fake--Green%20Escape-0.0%25%20(26%2F26)-16a34a?style=flat-square)](./docs/review/v5-verification-scorecard.en.md)
+[![Gate Corpus](https://img.shields.io/badge/Gate%20Corpus-Internal%20%2B%20Red--Team%20Holdout-16a34a?style=flat-square)](./docs/review/v5-verification-scorecard.en.md)
+[![Gate FPR Pilot](https://img.shields.io/badge/Gate%20FPR%20(real--world%20pilot%2C%20n%3D50)-20.8%25%20%5B11.7%25--34.3%25%5D-d97706?style=flat-square)](./bench/real-world/results/SUMMARY.en.md)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05%20..%202025--11--25+-0284c7?style=flat-square)](./skills/ai-test-workbench/references/mcp-server-protocol.en.md)
 [![Playwright](https://img.shields.io/badge/Playwright-1.65.1-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev/)
 
@@ -30,12 +31,53 @@ When coding agents (`Claude Code`, `Codex CLI`, `Antigravity`, `Cursor`, `VS Cod
 
 **AI Test Workbench v5.0** serves as an **independent Trustworthy Verification Kernel** with tool-enforced governance:
 
-| North-Star Metric | `v5.0.0` Measured Benchmark (`npm run bench`) | Enforcing Mechanism |
+| North-Star Metric | Measured Benchmark (`npm run bench`, Corpus-Qualified) | Enforcing Mechanism |
 |---|---|---|
-| **Fake-Green Escape Rate (`FGER`)** | **`0.0%` (`26/26` cheating patches blocked)** | 4-Layer Gate Kernel + `S0–S5` Assertion Lattice + `.aitest/governance.lock` |
-| **Seeded-Defect Detection Rate (`SDDR`)** | **`100.0%` (`7/7` full-stack defects caught)** | Zero-dep JSON Schema validator + RBAC/concurrency + WCAG 2.1/2.2 scans |
-| **Triage Accuracy / Mis-Heal Rate** | **`100.0%` (`45/45`) / `0.0%` Mis-Heal** | Structured runtime guard telemetry + `aitest_heal_*` state machine |
-| **Secret Redaction Recall** | **`100.0%` (`35/35` secret patterns scrubbed)** | Redaction v2 across JSON keys, JWTs, cloud tokens, PEM keys, DB URLs |
+| **Fake-Green Escape Rate (`FGER-internal` / `FGER-holdout`)** | Internal Regression **`0.0%` (`26/26`)** · Red-Team Holdout **`0.0%` (`24/24`)** | Fail-closed 4-Layer AST Gate (`AITEST-G101..G115`) + T1 MAC Governance Lock |
+| **Benign Refactoring FPR (`Gate FPR`, Internal Corpus)** | Internal Benign Refactor Corpus **`0.0%`** (Prettier wraps, locator renames, ARIA consolidation) | Full-file TypeScript Compiler API AST comparison |
+| **Gate FPR (real-world pilot, n=50)** | Adjudicated FPR **`20.8%` (`10/48` normal commits, Wilson 95% CI `[11.7%, 34.3%]`)** · Raw alert rate `24.0%` (`12/50`, CI `[14.3%, 37.4%]`, `2` true positives) · **`>=200` formal evaluation: `pending` (no extrapolation)** | Offline static/AST pilot across 5 permissive OSS repos (`seed=20261124`); see [Pre-Registration](./bench/real-world/PREREGISTRATION.en.md) & [Pilot Summary](./bench/real-world/results/SUMMARY.en.md) |
+| **Agentic Red-Team Escape Rate (`FGER-agentic`)** | **`design only` (not yet implemented, no benchmark numbers)** | Threat model, 4 attack classes & T2 boundary in [Red-Team Design](./bench/agentic/DESIGN.en.md) |
+| **Seeded-Defect Detection Rate (`SDDR`)** | Single Demo Target **`100.0%` (`7/7`)** | Zero-dep JSON Schema validator + RBAC/concurrency + WCAG 2.1/2.2 scans |
+| **Triage Accuracy / C→A Misclassification / Mis-Heal** | Internal + Real Playwright Stack Corpus **`100%` · C→A `0.0%` · Mis-Heal `0.0%`** | Structured runtime guard telemetry + C-before-A precedence + tamper-evident healer |
+| **Secret Redaction Recall** | Internal Adversarial Corpus **`100.0%` (`35/35`)** | Redaction v2 (structured parse-before-redact preserving typed `heal_*`/`job_*` IDs) |
+| **Verdict Trust Levels (`T0 / T1 / T2`)** | **T0** = Unverified local run · **T1** = Local Run Ledger + MAC (proves integrity, not provenance) · **T2** = Re-run from a clean checkout on a GitHub-hosted runner, keylessly signed with Sigstore, and verified for issuer identity | **Only T2 is a merge-grade green**; see [reusable workflow example](./examples/workflows/use-aitest-verify.yml) & `attest verify` |
+
+### 🔒 Trust Levels & Reusable CI Workflow (Only T2 Is a Merge-Grade Green)
+
+- **T0**: Unverified local run (not a merge-grade green).
+- **T1**: Local Run Ledger + MAC (proves integrity, not provenance; not a merge-grade green).
+- **T2**: Re-run from a clean checkout on a GitHub-hosted runner, keylessly signed with Sigstore, and verified for issuer identity. **Only T2 is a merge-grade green**.
+
+Adopt T2 verification in one job via [examples/workflows/use-aitest-verify.yml](./examples/workflows/use-aitest-verify.yml):
+
+```yaml
+jobs:
+  aitest-t2-verdict:
+    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v5.1.0
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+      security-events: write
+    with:
+      qa-dir: qa
+      suite: impact
+      node-version: '22'
+      signer: github-attest # default; optional: cosign
+```
+
+Verify a T2 bundle offline (fail-closed by default: missing signature, T1-only MAC, digest tamper, or workflow identity mismatch always returns non-zero with `trustLevel <= T1`):
+
+```bash
+npx ai-test-workbench@5.1.0 attest verify \
+  --file attestation.json \
+  --bundle attestation.sigstore.json \
+  --expect-repo owner/repo \
+  --expect-workflow .github/workflows/aitest-verify.yml \
+  --expect-ref refs/heads/main
+```
+
+> **Private Repository Signing Tradeoffs**: The default `signer: github-attest` uses GitHub Artifact Attestations (`actions/attest`), which requires **GitHub Enterprise Cloud** for private repositories. The optional `signer: cosign` path uses public Sigstore keyless signing, which publishes the repository and workflow identity into the **public Rekor transparency log**; private repositories should evaluate that disclosure risk before opting in.
 
 ---
 
@@ -54,18 +96,18 @@ flowchart TB
         K1 --> K2
     end
 
-    subgraph KERNEL["4-Layer Anti-Fake-Green Gate Kernel (gate-kernel.mjs)"]
-        G0["Layer 0: .aitest/governance.lock (SHA-256 over 11 Protected Files · Human CLI approve)"]
-        G1["Layer 1: tsc --noEmit + eslint-plugin-playwright (Bans Raw request / test.fail)"]
-        G2["Layer 2: ULID Run Ledger Workspace Hash Binding + Human waivers.json"]
-        G3["Layer 3: S0–S5 Assertion Lattice & Full-Workspace Diff Guard (AITEST-G101..G113)"]
+    subgraph KERNEL["4-Layer Fail-Closed AST Gate Kernel (support/gate/*)"]
+        G0["Layer 0: Fail-Closed .aitest/governance.lock (T1 MAC · Human CLI approve)"]
+        G1["Layer 1: tsc --noEmit + eslint-plugin-playwright (Bans Raw request / fetch / test.fail)"]
+        G2["Layer 2: T1-Signed ULID Run Ledger Hash Binding + Strict Waivers/Quarantine"]
+        G3["Layer 3: TypeScript AST S0–S5 Full-File Semantic Diff Guard (AITEST-G101..G115)"]
         G0 --> G1 --> G2 --> G3
     end
 
-    subgraph VERDICT["Stateful Healer · Buffered Web Vitals · Verifiable Attestation"]
-        V1["aitest_heal_begin/attempt/conclude: Hard-Blocks Class B/C/D · Auto Defect Tickets"]
-        V2["aitest_perf: PerformanceObserver LCP/CLS/INP (Median+P75) + GET API SLOs"]
-        V3["aitest_verify_change: attestation.json + verdict-summary.md + verdict.sarif.json"]
+    subgraph VERDICT["Tamper-Evident Healer · Buffered Web Vitals · in-toto v1 Attestation"]
+        V1["aitest_heal_begin/attempt/conclude: Hard-Blocks B/C/D · Cross-Session 3-Cap · Defect Tickets"]
+        V2["aitest_perf: PerformanceObserver LCP/CLS/INP (Median+P75) + Guarded GET API SLOs"]
+        V3["aitest_verify_change: T0/T1/T2 3-State Verdict + in-toto attestation.json + SARIF"]
     end
 
     AGENT --> BRAIN --> KERNEL --> VERDICT
@@ -75,15 +117,17 @@ flowchart TB
 
 ## 30-Second AI Agent Setup (Zero Runtime Dependencies)
 
+> **CLI & Supply-Chain Security**: Run pinned `npx ai-test-workbench@5.1.0 <cmd>`, global short alias `aitw <cmd>` (after `npm i -g ai-test-workbench@5.1.0`), or local source `node tools/aitest.mjs <cmd>`. Always pin an exact version rather than unpinned `npx -y`.
+
 - **Claude Code**:
   ```bash
-  claude mcp add ai-test-workbench -- npx -y ai-test-workbench mcp-serve
+  claude mcp add ai-test-workbench -- node /path/to/ai-test-workbench/tools/aitest.mjs mcp-serve --workspace-root /path/to/your-repo
   ```
 - **Codex CLI** (`.codex/config.toml`):
   ```toml
   [mcp_servers.ai-test-workbench]
   command = "npx"
-  args = ["-y", "ai-test-workbench", "mcp-serve"]
+  args = ["--package=ai-test-workbench@5.1.0", "ai-test-workbench", "mcp-serve"]
   ```
 - **Cursor / Windsurf / Antigravity / Gemini CLI** (`.mcp.json`):
   ```json
@@ -91,15 +135,23 @@ flowchart TB
     "mcpServers": {
       "ai-test-workbench": {
         "command": "npx",
-        "args": ["-y", "ai-test-workbench", "mcp-serve"]
+        "args": ["--package=ai-test-workbench@5.1.0", "ai-test-workbench", "mcp-serve"]
       }
     }
   }
   ```
 - **Streamable HTTP (`/mcp`) & Legacy SSE (`/sse`)**:
   ```bash
-  npx ai-test-workbench mcp-serve --transport http --port 3847 --target /path/to/your-repo
+  node tools/aitest.mjs mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
   ```
+
+### Official MCP Conformance & 3-Transport Interoperability
+
+- **Zero-Dependency Decision**: Root `package.json` keeps zero runtime `dependencies` with no separate SDK wrapper package; see [ADR: Zero-Dependency MCP Layer](./docs/adr/mcp-zero-dependency.en.md) for rationale and re-evaluation triggers (conformance gaps, OAuth, Elicitation, Tasks).
+- **Verified with Official Conformance Suite (`@modelcontextprotocol/conformance@0.1.16`) & Official SDK Client (`@modelcontextprotocol/sdk@1.32.2`)** (isolated under `conformance/`, excluded from the npm tarball, enforced by CI `mcp-conformance`):
+  - **Official `conformance server` (Streamable HTTP `/mcp`, `active` suite — 30 scenarios)**: **8/8 protocol-level scenarios passed** (`server-initialize`, `logging-set-level`, `ping`, `tools-list`, `server-sse-multiple-streams`, `resources-list`, `prompts-list`, `dns-rebinding-protection`; 9/9 checks passed), **22 expected failures** documented with rationale & reference links in [`conformance/expected-failures.json`](./conformance/expected-failures.json) (3 undeclared optional capabilities, 4 deferred Sampling/Elicitation scenarios per ADR-001, 15 upstream Everything-Server hardcoded `test_*` fixture scenarios), **0 unexpected failures, 0 stale baselines** (note: official `conformance server` tests HTTP only).
+  - **Official `@modelcontextprotocol/sdk@1.32.2` Reference `Client` (5/5 suites passed)**: verified across **`stdio`**, **Streamable HTTP (`/mcp`)**, and **Legacy SSE (`/sse` + `/messages`)** for `2024-11-05`..`2025-11-25` version negotiation, exact 21 tools with valid JSON schemas, read-only `tools/call` (`aitest_doctor` / `aitest_mcp_hub`) returning `structuredContent`, `notifications/progress`, and `AbortController` cancellation (`notifications/cancelled`).
+  - Reproduce locally: `cd conformance && npm ci && npm test`.
 
 ---
 
@@ -109,9 +161,9 @@ Requires **Node.js `>= 22.12.0`** (`24 LTS` or `26 LTS` recommended).
 
 ```bash
 # Project onboarding & one-call change verdict
-npx ai-test-workbench doctor
-npx ai-test-workbench init --name my-app --target "/path/to/your-repo" --loop codex
-npx ai-test-workbench verify-change --target "/path/to/your-repo" --base origin/main
+npx ai-test-workbench@5.1.0 doctor
+npx ai-test-workbench@5.1.0 init --name my-app --target "/path/to/your-repo" --loop codex
+npx ai-test-workbench@5.1.0 verify-change --target "/path/to/your-repo" --base origin/main
 
 # Clone & reproduce all v5.0 unit tests, live demo, and seeded-defect benchmark locally
 git clone https://github.com/seaworld008/ai-test-workbench.git
@@ -129,18 +181,19 @@ npm run lint:docs && npm run typecheck && npm test && npm run smoke && npm run d
 | `verify-change` | `aitest_verify_change` | **One-call verdict**: governance check → transitive impact → ledger run → 4-layer gate → `attestation.json` & `verdict.sarif.json` |
 | `doctor` | `aitest_doctor` | Inspect Node/npm, Git, Codex/Claude, Chromium cache & Gate Kernel drift |
 | `init` | `aitest_init` | Idempotently scaffold `<repo>/qa` and seal `.aitest/governance.lock` |
-| `governance` | `aitest_governance_status` *(RO)* | `verify \| status \| approve` (`approve` is **human-CLI-only**, never exposed on MCP) |
-| `auth-login` | *(Interactive CLI)* | Headed login capture for SMS OTP / SSO / QR flows |
-| `explore` | `aitest_explore` | Default-deny read-only crawler (`GET/HEAD/OPTIONS` only) emitting `specs/pages/*.md` |
+| `governance` | *(Human CLI Only)* | `verify \| status \| approve` — **all governance lock operations stay CLI-only, never exposed on MCP** |
+| `attest` | *(CLI Verifier)* | `attest verify --file <attestation.json>` offline verification of in-toto Statement v1 & SHA-256 bindings |
+| `auth-login` | *(Interactive CLI)* | Headed login capture for SMS OTP / SSO / QR flows saved with `0o600` permissions |
+| `explore` | `aitest_explore` | Default-deny read-only crawler (`GET/HEAD/OPTIONS` only, WS blocked) emitting `<untrusted-data>` `specs/pages/*.md` |
 | `map` | `aitest_map_sync` | Living Code Map v4 preserving `:id`/`[id]` routes and converging defects |
-| `impact` | `aitest_impact` | Transitive reverse `import` graph spec selection with `why` provenance |
-| `run` | `aitest_run` | Execute Playwright suites bound to ULID `Run Ledger` + W3C `Trace-ID` |
-| `audit` | `aitest_audit` | 4-layer gate (`governance.lock` + `tsc/eslint` + `Run Ledger/waivers` + `S0–S5` Diff Guard) |
-| `heal` | `aitest_heal_begin` / `attempt` / `conclude` | Stateful Healer blocking Class B/C/D test edits (`0%` mis-heal) & writing Class C defect tickets |
-| `diagnose` | `aitest_diagnose` | Structured runtime-first `A/B/C/D` triage (`45/45`), Redaction v2, and observability queries |
-| `perf` | `aitest_perf` | Buffered `PerformanceObserver` Web Vitals (`LCP/CLS/INP` median & P75) + GET API SLOs |
+| `impact` | `aitest_impact` | Transitive reverse `import` graph spec selection with `why` provenance (falls back to full suite on unmapped dependents) |
+| `run` | `aitest_run` | Execute Playwright suites bound to T1-signed ULID `Run Ledger` + W3C `Trace-ID` |
+| `audit` | `aitest_audit` | Fail-closed 4-layer AST gate (`governance.lock` + `tsc/eslint` + `Run Ledger/waivers` + `S0–S5` AST Diff Guard `AITEST-G101..G115`) |
+| `heal` | `aitest_heal_begin` / `attempt` / `conclude` | Tamper-evident Healer blocking Class B/C/D test edits (`0%` mis-heal), 3-attempt cross-session cap, Class C defect tickets |
+| `diagnose` | `aitest_diagnose` | Structured runtime-first & C-before-A `A/B/C/D` triage, Redaction v2, and observability queries |
+| `perf` | `aitest_perf` | Buffered `PerformanceObserver` Web Vitals (`LCP/CLS/INP` median & P75) + guarded GET API SLOs |
 | `trace-matrix` | `aitest_trace_matrix` | Map `REQ-xxx` IDs across `specs/*.md`, `tests/**/*.spec.ts`, and run results |
-| `flaky` | `aitest_flaky_status` | Rolling flaky telemetry & `.aitest/quarantine.json` (`<= 7d` TTL) status |
+| `flaky` | `aitest_flaky_report` | Rolling flaky telemetry & `.aitest/quarantine.json` (`<= 7d` TTL + ledger flaky evidence) status |
 | `mcp` | `aitest_mcp_hub` | Exact-pinned 7-pillar MCP presets + `.aitest/mcp.lock` hash & poisoning audit |
 | `mcp-serve` | `aitest_job_status` / `result` / `cancel` | Multi-protocol MCP v2 server with background child-process job controls |
 | `report` | `aitest_report` | Index HTML, JUnit, JSON, Attestation, SARIF, System Map, Perf & Traces |

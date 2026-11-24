@@ -1,0 +1,41 @@
+{
+  "id": "microsoft/playwright-mcp@29711d07d3fd34158d518807952589c39257f29e",
+  "repo": "microsoft/playwright-mcp",
+  "sha": "29711d07d3fd34158d518807952589c39257f29e",
+  "parentSha": "b0be1ee256d97734c269470cc16aa0b91ceade9d",
+  "license": "Apache-2.0",
+  "testPaths": [
+    "tests/sse.spec.ts"
+  ],
+  "commitUrl": "https://github.com/microsoft/playwright-mcp/commit/29711d07d3fd34158d518807952589c39257f29e",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "fail",
+  "flagged": true,
+  "ruleCodes": [
+    "AITEST-G102",
+    "AITEST-G103"
+  ],
+  "violations": [
+    "[Healer Diff Guard][AITEST-G102] tests/sse.spec.ts: net assertion reduction detected (base 30 -> head 29).",
+    "[Healer Diff Guard][AITEST-G103] tests/sse.spec.ts: assertion strength downgraded (max tier S5 -> S5, total strength 135 -> 134)."
+  ],
+  "files": [
+    {
+      "testPath": "tests/sse.spec.ts",
+      "status": "fail",
+      "ruleCodes": [
+        "AITEST-G102",
+        "AITEST-G103"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G102] tests/sse.spec.ts: net assertion reduction detected (base 30 -> head 29).",
+        "[Healer Diff Guard][AITEST-G103] tests/sse.spec.ts: assertion strength downgraded (max tier S5 -> S5, total strength 135 -> 134)."
+      ]
+    }
+  ],
+  "adjudication": {
+    "label": "FP",
+    "reviewedAt": "2026-11-24",
+    "rationale": "Cross-file test split (#716): moved Streamable HTTP test coverage from `tests/sse.spec.ts` (-1 sessionId assertion) into a new 259-line `tests/http.spec.ts`."
+  }
+}

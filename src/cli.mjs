@@ -20,7 +20,9 @@ import { runReportCommand } from './report.mjs';
 import { runSuiteCommand } from './runner.mjs';
 import { runSkillInstallCommand } from './skill-install.mjs';
 import { runTraceMatrixCommand } from './traceability.mjs';
+import { runAttestCommand } from './trust.mjs';
 import { runVerifyChangeCommand } from './verdict.mjs';
+import { WORKBENCH_VERSION } from './version.mjs';
 
 const CLI_OPTION_DEFS = {
   help: { type: /** @type {'boolean'} */ ('boolean'), short: 'h' },
@@ -80,6 +82,21 @@ const CLI_OPTION_DEFS = {
   'sync-quarantine': { type: /** @type {'boolean'} */ ('boolean') },
   'skip-run': { type: /** @type {'boolean'} */ ('boolean') },
   'allow-unbound-results': { type: /** @type {'boolean'} */ ('boolean') },
+  'allow-non-git': { type: /** @type {'boolean'} */ ('boolean') },
+  'require-mac': { type: /** @type {'boolean'} */ ('boolean') },
+  file: { type: /** @type {'string'} */ ('string') },
+  bundle: { type: /** @type {'string'} */ ('string') },
+  'expect-repo': { type: /** @type {'string'} */ ('string') },
+  'expect-workflow': { type: /** @type {'string'} */ ('string') },
+  'expect-ref': { type: /** @type {'string'} */ ('string') },
+  'trusted-root-cert': { type: /** @type {'string'} */ ('string') },
+  'cdp-url': { type: /** @type {'string'} */ ('string') },
+  'max-portals': { type: /** @type {'string'} */ ('string') },
+  'max-tabs': { type: /** @type {'string'} */ ('string') },
+  'max-dialogs': { type: /** @type {'string'} */ ('string') },
+  'no-explore-tabs': { type: /** @type {'boolean'} */ ('boolean') },
+  'no-explore-dialogs': { type: /** @type {'boolean'} */ ('boolean') },
+  'no-explore-portals': { type: /** @type {'boolean'} */ ('boolean') },
   'allow-mutation': { type: /** @type {'boolean'} */ ('boolean') },
   'dry-run': { type: /** @type {'boolean'} */ ('boolean') },
   'skip-install': { type: /** @type {'boolean'} */ ('boolean') },
@@ -144,6 +161,7 @@ function printHelp(lang) {
     'flaky',
     'trace-matrix',
     'governance',
+    'attest',
     'report',
     'update-agents',
     'skill-install',
@@ -151,8 +169,9 @@ function printHelp(lang) {
 
   console.log(`\n${t(lang, 'appTitle')}\n`);
   console.log(`${t(lang, 'usageHeader')}:`);
-  console.log('  npx ai-test-workbench <command> [options]');
-  console.log('  node tools/aitest.mjs <command> [options]\n');
+  console.log(`  npx ai-test-workbench@${WORKBENCH_VERSION} <command> [options]`);
+  console.log('  aitw <command> [options]                  # after global install');
+  console.log('  node tools/aitest.mjs <command> [options] # local repository checkout\n');
   console.log(`${t(lang, 'commandsHeader')}:`);
   for (const cmd of commands) {
     console.log(`  ${cmd.padEnd(16)} ${t(lang, 'helpSummary')[cmd] || ''}`);
@@ -229,6 +248,7 @@ export async function runCli(argv = process.argv.slice(2)) {
           baseUrl: v['base-url'],
           account: v.account,
           loginPath: v['login-path'],
+          cdpUrl: v['cdp-url'],
           timeout: v.timeout ? Number(v.timeout) : undefined,
         });
       case 'explore':
@@ -237,6 +257,12 @@ export async function runCli(argv = process.argv.slice(2)) {
           baseUrl: v['base-url'],
           entryPath: v['entry-path'],
           maxPages: v['max-pages'] ? Number(v['max-pages']) : undefined,
+          maxPortals: v['max-portals'] ? Number(v['max-portals']) : undefined,
+          maxTabsPerPage: v['max-tabs'] !== undefined ? Number(v['max-tabs']) : undefined,
+          maxDialogsPerPage: v['max-dialogs'] !== undefined ? Number(v['max-dialogs']) : undefined,
+          exploreTabs: !v['no-explore-tabs'],
+          exploreDialogs: !v['no-explore-dialogs'],
+          explorePortals: !v['no-explore-portals'],
           noSyncImpact: Boolean(v['no-sync-impact']),
         });
       case 'map':
@@ -329,8 +355,22 @@ export async function runCli(argv = process.argv.slice(2)) {
           ...common,
           baseUrl: v['base-url'],
           base: v.base,
-          mode: v.mode,
+          mode: v.mode || v.suite,
+          suite: v.suite,
           budgetMs: v['budget-ms'] ? Number(v['budget-ms']) : undefined,
+          allowNonGit: Boolean(v['allow-non-git']),
+        });
+      case 'attest':
+        return await runAttestCommand({
+          ...common,
+          action: v.action || parsed.positionals[1] || 'verify',
+          file: v.file,
+          bundle: v.bundle,
+          expectRepo: v['expect-repo'],
+          expectWorkflow: v['expect-workflow'],
+          expectRef: v['expect-ref'],
+          trustedRootCert: v['trusted-root-cert'],
+          requireMac: Boolean(v['require-mac']),
         });
       case 'heal':
         return await runHealCommand({

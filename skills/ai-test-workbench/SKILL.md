@@ -16,13 +16,13 @@ Use this skill to execute an **AI-Agent-First, zero-fake-green (`FGER = 0.0%`)**
 2. **Never Target Production & Respect Egress Guards**:
    - `TEST_ENV=production|prod|live|online` or unallowlisted URLs are hard-blocked. Support `TEST_EGRESS_MODE=allowlist`; never call raw `request.newContext()` to bypass fixture guards.
 3. **Tamper-Locked Governance (`governance.lock`)**:
-   - Never modify `eslint.config.mjs`, `playwright.config.ts`, `aitest.config.json`, `waivers.json`, or `support/*.mjs` to pass gates. Only a human running `aitest governance approve` in a local terminal can re-seal `.aitest/governance.lock`.
+   - Never modify `eslint.config.mjs`, `playwright.config.ts`, `aitest.config.json`, `waivers.json`, or `support/*.mjs` to pass gates. Only a human running `npx ai-test-workbench@5.1.0 governance approve` in a local terminal can re-seal `.aitest/governance.lock`.
 
 ## Preferred Invocation: Native MCP Server v2 (`mcp-serve` — 21 Typed Tools)
 
-When connected via `npx -y ai-test-workbench mcp-serve`, invoke tools directly and inspect `structuredContent` (if a long tool returns `data.backgrounded === true`, poll `aitest_job_status` / `aitest_job_result` with `data.jobId`):
+When connected via `node tools/aitest.mjs mcp-serve` (or pinned `npx --package=ai-test-workbench@5.1.0 ai-test-workbench mcp-serve`), invoke tools directly and inspect `structuredContent` (if a long tool returns `data.backgrounded === true`, poll `aitest_job_status` / `aitest_job_result` with `data.jobId`):
 
-1. **Readiness & Init**: `aitest_doctor` -> `aitest_init(dryRun=true)` -> `aitest_init` -> `aitest_governance_status`
+1. **Readiness & Init**: `aitest_doctor` -> `aitest_init(dryRun=true)` -> `aitest_init` *(governance lock checks/approvals stay CLI-only via `governance status/verify/approve`)*
 2. **Default-Deny 0→1 Exploration & Living Code Map v4**: `aitest_explore` -> `aitest_map_sync`
 3. **Pinned 7-Pillar System MCP Hub**: `aitest_mcp_hub(action="add", profile="full-link")` -> `aitest_mcp_hub(action="doctor", lock=true)`
 4. **One-Call Change Verdict (Before PR / Merge)**: `aitest_verify_change(base="origin/main")` -> inspects `attestation.json`, `verdict-summary.md`, and `verdict.sarif.json`

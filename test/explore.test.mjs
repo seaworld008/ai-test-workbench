@@ -6,6 +6,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { startDemoServer } from '../examples/demo-webapp/server.mjs';
 import { runCli } from '../src/cli.mjs';
+import { hasPlaywrightChromium } from './fixtures/playwright-env.mjs';
 import {
   classifyActionSafety,
   detectPageArchetype,
@@ -99,8 +100,8 @@ test('runExploreCommand blocks production targets cleanly', async () => {
 });
 
 test('runExploreCommand crawls demo-webapp read-only and generates system-topology.json + system-overview.md', async (t) => {
-  if (!fs.existsSync(path.join(TEMPLATE_MODULES, '@playwright', 'test', 'cli.js'))) {
-    t.skip('Template node_modules not installed locally');
+  if (!hasPlaywrightChromium(TEMPLATE_MODULES)) {
+    t.skip('Playwright Chromium binary not installed in this environment');
     return;
   }
 

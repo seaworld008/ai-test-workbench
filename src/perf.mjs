@@ -5,8 +5,14 @@ import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 import { resolveQaDirectory } from './agents.mjs';
 import { syncLivingCodeMap } from './codemap.mjs';
-import { redactEndpointUrl } from './explore.mjs';
-import { evaluateTargetSafety, loadMergedQaEnv } from './origin-guard.mjs';
+import { detectEnvelopeBusinessError, redactEndpointUrl } from './explore.mjs';
+import {
+  DEFAULT_BLOCKED_ENDPOINTS,
+  checkOutgoingRequestSafety,
+  compileBlockedEndpointRules,
+  evaluateTargetSafety,
+  loadMergedQaEnv,
+} from './origin-guard.mjs';
 
 const DEFAULT_BUDGET = {
   browser: {
@@ -139,7 +145,9 @@ function readJsonSafe(p) {
 function medianOfNullable(nums) {
   const valid = nums.filter((n) => typeof n === 'number' && Number.isFinite(n)).sort((a, b) => a - b);
   if (valid.length === 0) return null;
-  return valid[Math.floor((valid.length - 1) / 2)];
+  const mid = Math.floor(valid.length / 2);
+  if (valid.length % 2 === 1) return valid[mid];
+  return Number(((valid[mid - 1] + valid[mid]) / 2).toFixed(2));
 }
 
 function p75OfNullable(nums) {
@@ -171,6 +179,22 @@ export async function runBrowserPerfProfile(qaDir, baseURL, routes, options = {}
     const ctxOpts = { viewport: { width: 1440, height: 900 } };
     if (readJsonSafe(userAuthPath)) ctxOpts.storageState = userAuthPath;
     const context = await browser.newContext(ctxOpts);
+
+    // Enforce target/egress firewall inside perf browser context (`E-06`)
+    if (options.guardConfig) {
+      await context.route('**/*', async (route) => {
+        const req = route.request();
+        const check = checkOutgoingRequestSafety(req.method(), req.url(), {
+          ...options.guardConfig,
+          strictReadonly: true,
+        });
+        if (check.blocked) {
+          await route.abort('blockedbyclient');
+          return;
+        }
+        await route.continue();
+      });
+    }
 
     // Pre-register PerformanceObserver BEFORE navigation so buffered LCP, CLS, FCP & INP are always captured (`P-01`)!
     await context.addInitScript(
@@ -388,6 +412,7 @@ export async function runBrowserPerfProfile(qaDir, baseURL, routes, options = {}
 async function runReadOnlyApiBenchmark(endpointUrl, concurrency, iterations) {
   const latencies = [];
   let errors = 0;
+  let envelopeErrors = 0;
   let issued = 0;
   const wallStart = performance.now();
 
@@ -399,9 +424,26 @@ async function runReadOnlyApiBenchmark(endpointUrl, concurrency, iterations) {
       const t0 = performance.now();
       try {
         const res = await fetch(endpointUrl, { method: 'GET', redirect: 'follow' });
-        await res.arrayBuffer();
+        const contentType = String(res.headers.get('content-type') || '');
+        let parsedJson = null;
+        if (/application\/json/i.test(contentType)) {
+          const text = await res.text();
+          try {
+            parsedJson = JSON.parse(text);
+          } catch {
+            // ignore non-JSON body
+          }
+        } else {
+          await res.arrayBuffer();
+        }
         latencies.push(performance.now() - t0);
-        if (res.status >= 500) errors += 1;
+        const envCheck = detectEnvelopeBusinessError(res.status, parsedJson);
+        if (res.status >= 500 || (envCheck.isError && Number(envCheck.code) >= 500)) {
+          errors += 1;
+        }
+        if (envCheck.isError && res.status < 500) {
+          envelopeErrors += 1;
+        }
       } catch {
         latencies.push(performance.now() - t0);
         errors += 1;
@@ -419,6 +461,7 @@ async function runReadOnlyApiBenchmark(endpointUrl, concurrency, iterations) {
     concurrency,
     totalRequests: latencies.length,
     errorCount: errors,
+    envelopeErrorCount: envelopeErrors,
     errorRate: latencies.length > 0 ? Number((errors / latencies.length).toFixed(4)) : 0,
     rps: Number((latencies.length / wallSec).toFixed(2)),
     ...stats,
@@ -513,12 +556,34 @@ export async function runPerfCommand(options = {}) {
     if (extras.length > 0) routes = ['/', ...extras];
   }
 
+  const perfGuardConfig = {
+    baseURL: safety.baseURL,
+    allowedHosts: safety.allowedHosts,
+    allowedOrigins: safety.allowedOrigins,
+    deniedOrigins: safety.deniedOrigins,
+    extraEgressHosts: safety.extraEgressHosts,
+    egressMode: safety.egressMode || 'allowlist',
+    blockedRules: compileBlockedEndpointRules(mergedEnv.TEST_BLOCKED_ENDPOINTS ?? DEFAULT_BLOCKED_ENDPOINTS),
+    strictReadonly: true,
+  };
+
+  // Validate ALL browser route URLs through checkOutgoingRequestSafety (`E-06` SSRF guard!)
+  for (const rPath of routes) {
+    const resolvedRouteUrl = new URL(rPath, safety.baseURL).toString();
+    const rCheck = checkOutgoingRequestSafety('GET', resolvedRouteUrl, perfGuardConfig);
+    if (rCheck.blocked) {
+      console.error(`[Target Guard Blocked] Perf route "${rPath}" blocked: ${rCheck.reason}`);
+      return 2;
+    }
+  }
+
   const browserMetrics =
     mode === 'api'
       ? []
       : await runBrowserPerfProfile(qaDir, safety.baseURL, routes, {
           samples: options.samples,
           throttle: Boolean(options.throttle),
+          guardConfig: perfGuardConfig,
         });
 
   let apiBenchmark = null;
@@ -527,6 +592,11 @@ export async function runPerfCommand(options = {}) {
     const iterations = Math.min(200, Math.max(1, Number(options.iterations || 12)));
     const ep = options.endpoint || mergedEnv.E2E_API_HEALTH_PATH || '/';
     const epUrl = new URL(ep, safety.baseURL).toString();
+    const epCheck = checkOutgoingRequestSafety('GET', epUrl, perfGuardConfig);
+    if (epCheck.blocked) {
+      console.error(`[Target Guard Blocked] Perf endpoint "${ep}" blocked: ${epCheck.reason}`);
+      return 2;
+    }
     apiBenchmark = await runReadOnlyApiBenchmark(epUrl, concurrency, iterations);
   }
 

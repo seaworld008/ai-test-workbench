@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { startDemoServer } from '../examples/demo-webapp/server.mjs';
 import { runCli } from '../src/cli.mjs';
 import { handleMcpJsonRpcMessage } from '../src/mcp-server.mjs';
+import { verifyAttestationFile } from '../src/trust.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKBENCH_ROOT = path.resolve(__dirname, '..');
@@ -48,6 +50,21 @@ try {
     throw new Error(`init failed with exit code ${initCode}`);
   }
 
+  // Initialize a real Git repository + baseline commit BEFORE linking node_modules so verify_change
+  // exercises ALL 4 layers including Layer 3 AST Semantic Diff Guard & in-toto attestation!
+  const gitExec = (args) =>
+    spawnSync('git', ['-c', 'core.quotePath=off', ...args], {
+      cwd: tempWorkspace,
+      shell: false,
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+  gitExec(['init']);
+  gitExec(['config', 'user.email', 'demo-verify@ai-test-workbench.local']);
+  gitExec(['config', 'user.name', 'Demo Verify']);
+  gitExec(['add', '.']);
+  gitExec(['commit', '-m', 'chore: initial baseline']);
+
   // Link template node_modules for fast zero-network local verification
   const qaModules = path.join(tempWorkspace, 'qa', 'node_modules');
   fs.symlinkSync(TEMPLATE_MODULES, qaModules, process.platform === 'win32' ? 'junction' : 'dir');
@@ -83,29 +100,59 @@ try {
     '--enforce-budget',
   ]);
 
-  const mcpReportReply = await handleMcpJsonRpcMessage({
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'tools/call',
-    params: { name: 'aitest_report', arguments: { target: tempWorkspace } },
-  });
+  const mcpCtx = { workspaceRoots: [tempWorkspace] };
+  const mcpReportReply = await handleMcpJsonRpcMessage(
+    {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'aitest_report', arguments: { target: tempWorkspace } },
+    },
+    mcpCtx
+  );
   const mcpOk = mcpReportReply?.result?.structuredContent?.ok === true;
 
-  const verifyReply = await handleMcpJsonRpcMessage({
-    jsonrpc: '2.0',
-    id: 2,
-    method: 'tools/call',
-    params: {
-      name: 'aitest_verify_change',
-      arguments: { target: tempWorkspace, mode: 'full', baseUrl: demo.baseURL },
+  const verifyReply = await handleMcpJsonRpcMessage(
+    {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: {
+        name: 'aitest_verify_change',
+        arguments: { target: tempWorkspace, mode: 'full', baseUrl: demo.baseURL },
+      },
     },
-  });
+    mcpCtx
+  );
   const verifyData = verifyReply?.result?.structuredContent?.data;
+  const attestPath = verifyData?.artifacts?.attestationPath;
+  const attestCheck = attestPath
+    ? verifyAttestationFile(attestPath, { allowT1: true })
+    : { ok: false, errors: ['missing attestationPath'] };
+  const strictT2RejectCheck = attestPath ? verifyAttestationFile(attestPath) : { ok: true };
   const verifyOk =
     verifyReply?.result?.structuredContent?.ok === true &&
     verifyData?.verdict === 'pass' &&
+    verifyData?.gates?.semanticDiff === 'pass' &&
     verifyData?.acceptanceScope === 'business-e2e' &&
-    Boolean(verifyData?.artifacts?.attestationPath && fs.existsSync(verifyData.artifacts.attestationPath));
+    attestCheck.ok === true &&
+    strictT2RejectCheck.ok === false &&
+    strictT2RejectCheck.trustLevel !== 'T2';
+
+  if (!mcpOk || !verifyOk) {
+    console.error('[Demo Verify] MCP/Verify failure details:', JSON.stringify({
+      mcpOk,
+      verifyOk,
+      mcpSummary: mcpReportReply?.result?.structuredContent?.summary,
+      verifyOkFlag: verifyReply?.result?.structuredContent?.ok,
+      verifySummary: verifyReply?.result?.structuredContent?.summary,
+      verdict: verifyData?.verdict,
+      gates: verifyData?.gates,
+      acceptanceScope: verifyData?.acceptanceScope,
+      gateErrors: verifyData?.gateErrors,
+      attestCheck,
+    }, null, 2));
+  }
 
   exitCode =
     seedCode === 0 &&

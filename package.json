@@ -1,6 +1,6 @@
 {
   "name": "ai-test-workbench",
-  "version": "5.0.0",
+  "version": "5.1.0",
   "description": "Trustworthy Verification Kernel & Multi-Protocol MCP Server for AI Coding Agents: 4-Layer Semantic AST Anti-Fake-Green Gates, Governance Lock, Run Ledger, One-Call verify_change Verdict, Stateful Heal Governance, Import-Graph Impact v2, and PerformanceObserver Web Vitals.",
   "license": "MIT",
   "author": "seaworld008",
@@ -15,7 +15,11 @@
   "type": "module",
   "bin": {
     "ai-test-workbench": "./tools/aitest.mjs",
-    "aitest": "./tools/aitest.mjs"
+    "aitw": "./tools/aitest.mjs"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "engines": {
     "node": ">=22.12.0"
@@ -27,7 +31,7 @@
     "bench": "node scripts/run-bench.mjs",
     "doctor": "node tools/aitest.mjs doctor",
     "mcp:serve": "node tools/aitest.mjs mcp-serve",
-    "smoke": "node tools/aitest.mjs run --target templates/playwright-qa --suite smoke --audit",
+    "smoke": "node scripts/run-smoke.mjs",
     "demo:app": "node examples/demo-webapp/server.mjs",
     "demo:verify": "node scripts/verify-demo.mjs",
     "help": "node tools/aitest.mjs --help"
@@ -67,7 +71,6 @@
     "templates/playwright-qa/scripts/",
     "templates/playwright-qa/specs/",
     "templates/playwright-qa/tests/",
-    "templates/playwright-qa/playwright/.gitkeep",
     "templates/playwright-qa/docs/",
     "skills/",
     "prompts/",

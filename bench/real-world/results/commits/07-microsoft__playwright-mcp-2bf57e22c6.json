@@ -1,0 +1,41 @@
+{
+  "id": "microsoft/playwright-mcp@2bf57e22c63929964bae47f8fa3f518524325c54",
+  "repo": "microsoft/playwright-mcp",
+  "sha": "2bf57e22c63929964bae47f8fa3f518524325c54",
+  "parentSha": "dbf113d5e4b857544a664d1927f69e16049a41a6",
+  "license": "Apache-2.0",
+  "testPaths": [
+    "tests/core.spec.ts"
+  ],
+  "commitUrl": "https://github.com/microsoft/playwright-mcp/commit/2bf57e22c63929964bae47f8fa3f518524325c54",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "fail",
+  "flagged": true,
+  "ruleCodes": [
+    "AITEST-G102",
+    "AITEST-G103"
+  ],
+  "violations": [
+    "[Healer Diff Guard][AITEST-G102] tests/core.spec.ts: net assertion reduction detected (base 13 -> head 8).",
+    "[Healer Diff Guard][AITEST-G103] tests/core.spec.ts: assertion strength downgraded (max tier S3 -> S3, total strength 39 -> 24)."
+  ],
+  "files": [
+    {
+      "testPath": "tests/core.spec.ts",
+      "status": "fail",
+      "ruleCodes": [
+        "AITEST-G102",
+        "AITEST-G103"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G102] tests/core.spec.ts: net assertion reduction detected (base 13 -> head 8).",
+        "[Healer Diff Guard][AITEST-G103] tests/core.spec.ts: assertion strength downgraded (max tier S3 -> S3, total strength 39 -> 24)."
+      ]
+    }
+  ],
+  "adjudication": {
+    "label": "FP",
+    "reviewedAt": "2026-11-24",
+    "rationale": "Cross-file test split (#767): moved `browser_type` specs out of `tests/core.spec.ts` (-58 lines) into new file `tests/type.spec.ts` (+119 lines). Single-file diff saw assertion count drop 13 -> 8 without tracking cross-file relocation."
+  }
+}

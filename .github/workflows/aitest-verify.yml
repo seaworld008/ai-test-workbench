@@ -1,0 +1,260 @@
+name: AI Test Workbench Reusable Verify & T2 Attestation
+
+# Reusable verification workflow (`workflow_call`) for producing T2 merge-grade verdicts.
+#
+# Trust Level Policy:
+# - T0: Unverified local run (not a merge-grade green).
+# - T1: Local Run Ledger + MAC (proves integrity, not provenance; not a merge-grade green).
+# - T2: Re-run from a clean checkout on a GitHub-hosted runner, keylessly signed with Sigstore,
+#       and verified for issuer identity. ONLY T2 is a merge-grade green.
+#
+# Private Repository Signing Notes:
+# - `signer: github-attest` (default) uses GitHub Artifact Attestations (`actions/attest`), which
+#   requires GitHub Enterprise Cloud for private repositories.
+# - `signer: cosign` uses public Sigstore keyless signing (`cosign attest-blob`), which records the
+#   repository and workflow identity in the public Rekor transparency log. Private projects must
+#   evaluate that public log disclosure before selecting `cosign`.
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: 'Target repository root directory relative to checkout root'
+        required: false
+        type: string
+        default: '.'
+      qa-dir:
+        description: 'Path to isolated QA workspace directory (e.g., qa)'
+        required: false
+        type: string
+        default: 'qa'
+      suite:
+        description: 'Verification suite/mode: impact | full | smoke | e2e | api | a11y | critical'
+        required: false
+        type: string
+        default: 'impact'
+      base-ref:
+        description: 'Optional Git base ref for AST Semantic Diff Guard & Impact (defaults to merge-base / HEAD~1)'
+        required: false
+        type: string
+        default: ''
+      node-version:
+        description: 'Node.js major version (>= 22)'
+        required: false
+        type: string
+        default: '22'
+      signer:
+        description: 'Sigstore keyless signer backend: github-attest | cosign'
+        required: false
+        type: string
+        default: 'github-attest'
+      workbench-version:
+        description: 'Pinned ai-test-workbench npm version'
+        required: false
+        type: string
+        default: '5.1.0'
+      use-local-cli:
+        description: 'Internal self-bootstrap option: execute ./tools/aitest.mjs instead of npx'
+        required: false
+        type: boolean
+        default: false
+      bootstrap-from-template:
+        description: 'Internal self-bootstrap option: scaffold ephemeral QA workspace from templates/playwright-qa'
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      verdict:
+        description: 'Three-state verification verdict: pass | fail | blocked'
+        value: ${{ jobs.verify.outputs.verdict }}
+      attestation-path:
+        description: 'Workspace-relative path to generated attestation.json'
+        value: ${{ jobs.verify.outputs.attestation-path }}
+      bundle-path:
+        description: 'Path to generated Sigstore signature bundle (present only when verdict=pass)'
+        value: ${{ jobs.verify.outputs.bundle-path }}
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+      security-events: write
+    outputs:
+      verdict: ${{ steps.verify.outputs.verdict }}
+      attestation-path: ${{ steps.verify.outputs.attestation-path }}
+      bundle-path: ${{ steps.bundle-path.outputs.bundle-path }}
+
+    steps:
+      - name: Checkout clean repository (full history for merge-base diff)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js ${{ inputs.node-version }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Validate signer input
+        shell: bash
+        run: |
+          if [ "${{ inputs.signer }}" != "github-attest" ] && [ "${{ inputs.signer }}" != "cosign" ]; then
+            echo "Invalid signer '${{ inputs.signer }}'. Allowed values: github-attest, cosign."
+            exit 1
+          fi
+
+      - name: Install QA dependencies & Chromium
+        shell: bash
+        run: |
+          if [ -f "${{ inputs.qa-dir }}/package-lock.json" ]; then
+            cd "${{ inputs.qa-dir }}"
+            npm ci --no-audit --no-fund
+            npx playwright install --with-deps chromium
+          fi
+
+      - name: Prepare ephemeral workspace when self-bootstrapping template
+        id: prep
+        shell: bash
+        run: |
+          if [ "${{ inputs.bootstrap-from-template }}" = "true" ]; then
+            WORK_DIR="${RUNNER_TEMP}/aitest-bootstrap-repo"
+            rm -rf "$WORK_DIR"
+            mkdir -p "$WORK_DIR"
+            node tools/aitest.mjs init --name self-bootstrap --target "$WORK_DIR" --skip-install --loop none --lang en
+            git -C "$WORK_DIR" init
+            git -C "$WORK_DIR" config user.email "ci-bootstrap@ai-test-workbench.local"
+            git -C "$WORK_DIR" config user.name "CI Bootstrap"
+            git -C "$WORK_DIR" add .
+            git -C "$WORK_DIR" commit -m "chore: bootstrap baseline"
+            ln -s "${GITHUB_WORKSPACE}/${{ inputs.qa-dir }}/node_modules" "$WORK_DIR/qa/node_modules"
+            echo "target-dir=$WORK_DIR" >> "$GITHUB_OUTPUT"
+            echo "qa-dir=$WORK_DIR/qa" >> "$GITHUB_OUTPUT"
+          else
+            echo "target-dir=${{ inputs.target }}" >> "$GITHUB_OUTPUT"
+            echo "qa-dir=${{ inputs.qa-dir }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Execute ai-test-workbench verify-change
+        id: verify
+        shell: bash
+        run: |
+          set +e
+          OUT_JSON="${RUNNER_TEMP}/verify-change-output.json"
+          ARGS=(verify-change --target "${{ steps.prep.outputs.target-dir }}" --qa-dir "${{ steps.prep.outputs.qa-dir }}" --suite "${{ inputs.suite }}" --json)
+          if [ -n "${{ inputs.base-ref }}" ]; then
+            ARGS+=(--base "${{ inputs.base-ref }}")
+          fi
+          if [ "${{ inputs.use-local-cli }}" = "true" ]; then
+            node tools/aitest.mjs "${ARGS[@]}" > "$OUT_JSON"
+          else
+            npx "ai-test-workbench@${{ inputs.workbench-version }}" "${ARGS[@]}" > "$OUT_JSON"
+          fi
+          VERIFY_EXIT=$?
+          set -e
+
+          node -e "
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const outFile = process.env.GITHUB_OUTPUT;
+            const raw = fs.readFileSync(process.argv[1], 'utf8').trim();
+            let parsed = { verdict: 'blocked', artifacts: {} };
+            try { parsed = JSON.parse(raw); } catch {
+              const first = raw.indexOf('{');
+              const last = raw.lastIndexOf('}');
+              if (first >= 0 && last > first) parsed = JSON.parse(raw.slice(first, last + 1));
+            }
+            const artifactDir = path.join(process.env.GITHUB_WORKSPACE, '.aitest-ci-artifacts');
+            fs.mkdirSync(artifactDir, { recursive: true });
+            const copyIf = (src, destName) => {
+              if (!src || !fs.existsSync(src)) return '';
+              const dst = path.join(artifactDir, destName);
+              fs.copyFileSync(src, dst);
+              return path.relative(process.env.GITHUB_WORKSPACE, dst).replace(/\\\\/g, '/');
+            };
+            const attRel = copyIf(parsed.artifacts?.attestationPath, 'attestation.json');
+            const predRel = copyIf(parsed.artifacts?.predicatePath, 'verdict-predicate.json');
+            const sarifRel = copyIf(parsed.artifacts?.sarifPath, 'verdict.sarif.json');
+            const mdRel = copyIf(parsed.artifacts?.summaryMdPath, 'verdict-summary.md');
+            fs.appendFileSync(outFile, 'verdict=' + (parsed.verdict || 'blocked') + '\n');
+            fs.appendFileSync(outFile, 'verify-exit=' + process.argv[2] + '\n');
+            fs.appendFileSync(outFile, 'attestation-path=' + attRel + '\n');
+            fs.appendFileSync(outFile, 'predicate-path=' + predRel + '\n');
+            fs.appendFileSync(outFile, 'sarif-path=' + sarifRel + '\n');
+            fs.appendFileSync(outFile, 'summary-path=' + mdRel + '\n');
+            if ((parsed.verdict || 'blocked') !== 'pass' || process.argv[2] !== '0') {
+              console.error('[verify-change output]', raw.slice(0, 2000));
+            }
+          " "$OUT_JSON" "$VERIFY_EXIT"
+
+      - name: Attest passing verdict with GitHub Artifact Attestations (T2 Sigstore)
+        id: github-attest
+        if: inputs.signer == 'github-attest' && steps.verify.outputs.verdict == 'pass' && steps.verify.outputs.attestation-path != ''
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.verify.outputs.attestation-path }}
+          predicate-type: https://github.com/seaworld008/ai-test-workbench/verdict/v1
+          predicate-path: ${{ steps.verify.outputs.predicate-path }}
+
+      - name: Install Cosign (optional keyless Sigstore signer)
+        if: inputs.signer == 'cosign' && steps.verify.outputs.verdict == 'pass' && steps.verify.outputs.attestation-path != ''
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      - name: Attest passing verdict with Cosign keyless attest-blob (T2 Sigstore)
+        id: cosign-attest
+        if: inputs.signer == 'cosign' && steps.verify.outputs.verdict == 'pass' && steps.verify.outputs.attestation-path != ''
+        shell: bash
+        run: |
+          BUNDLE=".aitest-ci-artifacts/attestation.sigstore.json"
+          cosign attest-blob "${{ steps.verify.outputs.attestation-path }}" \
+            --predicate "${{ steps.verify.outputs.predicate-path }}" \
+            --type "https://github.com/seaworld008/ai-test-workbench/verdict/v1" \
+            --bundle "$BUNDLE" \
+            --yes
+          echo "bundle-path=$BUNDLE" >> "$GITHUB_OUTPUT"
+
+      - name: Stage Sigstore signature bundle for artifact upload
+        id: bundle-path
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "${{ steps.github-attest.outputs.bundle-path }}" ] && [ -f "${{ steps.github-attest.outputs.bundle-path }}" ]; then
+            cp "${{ steps.github-attest.outputs.bundle-path }}" .aitest-ci-artifacts/attestation.sigstore.json
+            echo "bundle-path=.aitest-ci-artifacts/attestation.sigstore.json" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ steps.cosign-attest.outputs.bundle-path }}" ] && [ -f "${{ steps.cosign-attest.outputs.bundle-path }}" ]; then
+            echo "bundle-path=${{ steps.cosign-attest.outputs.bundle-path }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "bundle-path=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload attestation, SARIF, summary & Sigstore bundle artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: aitest-verdict-t2-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .aitest-ci-artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload SARIF report to GitHub Code Scanning
+        if: always() && steps.verify.outputs.sarif-path != ''
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          sarif_file: ${{ steps.verify.outputs.sarif-path }}
+          category: ai-test-workbench-verdict
+
+      - name: Enforce Fail-Closed Verdict Gate (fail or blocked MUST fail job)
+        shell: bash
+        run: |
+          VERDICT="${{ steps.verify.outputs.verdict }}"
+          EXIT_CODE="${{ steps.verify.outputs.verify-exit }}"
+          if [ "$VERDICT" != "pass" ] || [ "$EXIT_CODE" != "0" ]; then
+            echo "[AI Test Workbench CI Gate FAILED] verdict=${VERDICT} exitCode=${EXIT_CODE} (only a passing Sigstore-signed T2 verdict is a merge-grade green)."
+            exit 1
+          fi
+          echo "[AI Test Workbench CI Gate PASSED] verdict=pass signer=${{ inputs.signer }} bundle=${{ steps.bundle-path.outputs.bundle-path }}"

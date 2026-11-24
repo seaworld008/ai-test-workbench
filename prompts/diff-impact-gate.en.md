@@ -5,8 +5,8 @@
 After completing a code change in `<repo>`, run targeted regression feedback:
 
 ```bash
-npx ai-test-workbench impact --target "<repo>" --base origin/main
-npx ai-test-workbench run --target "<repo>" --suite impact --base origin/main --audit
+npx ai-test-workbench@5.1.0 impact --target "<repo>" --base origin/main
+npx ai-test-workbench@5.1.0 run --target "<repo>" --suite impact --base origin/main --audit
 ```
 
 Remember:

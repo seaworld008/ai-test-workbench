@@ -9,9 +9,9 @@
 1. **Governed Agent Layer (MCP Execution Model v2: `src/mcp-server.mjs` + `src/jobs.mjs`)**:
    - Native zero-dependency support for `stdio`, **Streamable HTTP (`/mcp`)**, and **Legacy HTTP+SSE (`/sse`)** across MCP `2024-11-05`..`2025-11-25+` (see [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md)).
    - Exposes **21 strongly typed MCP tools**. Read-only tools run concurrently with zero global mutex; mutating and long-running tools execute in isolated child processes (`AITEST_MCP_CHILD=1`) under per-workspace write locks with `_meta.progressToken` heartbeats, `notifications/cancelled` process-tree termination, and `syncBudgetMs` async backgrounding.
-   - **Privilege Isolation**: Human-only `aitest governance approve` is never registered on MCP and hard-fails inside MCP child processes.
+   - **Privilege Isolation**: Human-only `npx ai-test-workbench@5.1.0 governance approve` is never registered on MCP and hard-fails inside MCP child processes.
 2. **Deterministic Regression & One-Call Verdict Layer (`verifyChangeCore`)**:
-   - Local pre-push hooks, PR checks, and CI execute compiled TypeScript suites and `aitest verify-change` with **zero LLM calls**, producing ULID-bound `attestation.json` and `verdict.sarif.json`.
+   - Local pre-push hooks, PR checks, and CI execute compiled TypeScript suites and `npx ai-test-workbench@5.1.0 verify-change` with **zero LLM calls**, producing ULID-bound `attestation.json` and `verdict.sarif.json`.
 
 ## 2. Multi-Project Isolation (`<repo>/qa/`)
 
@@ -23,7 +23,7 @@ Each host repository receives an isolated `<repo>/qa/` workspace containing exac
 2. **All-Channel Request Interception**: Wraps `context.route`, `APIRequestContext`, `context.request`, and `page.request` in `tests/fixtures/base.ts` with `serviceWorkers: 'block'`, bans raw `request.newContext()` via ESLint, and blocks GraphQL `mutation` payloads.
 3. **Default-Deny Read-Only Explorer (`src/explore.mjs`)**: Rejects all non-`GET/HEAD/OPTIONS` requests, disables `navigator.sendBeacon`, and removes `/graphql` from default write allowlists.
 4. **Redaction v2 & Supply-Chain Pinning (`src/proc.mjs` + `src/mcp-hub.mjs`)**: Scrubs JSON passwords/tokens, JWTs, cloud API keys, PEM keys, and DB URLs (`100%` recall on 35 adversarial cases); exact-pins all external MCP presets and audits `.aitest/mcp.lock` drift and prompt-poisoning patterns.
-5. **Hardened MCP HTTP**: Loopback-default bind, `Origin` validation (`403`), `initialize`-only session creation, `404` on unknown sessions, TTL + `maxSessions` eviction, `crypto.timingSafeEqual` Bearer comparison, and `--allowed-root` workspace scoping.
+5. **Hardened MCP HTTP**: Loopback-default bind, `Origin` validation (`403`), `initialize`-only session creation, `404` on unknown sessions, TTL + `maxSessions` eviction, `crypto.timingSafeEqual` Bearer comparison, and `--workspace-root` server ceiling intersected with client roots.
 
 ## 4. 4-Layer Anti-Fake-Green Gate Kernel (`support/gate-kernel.mjs`)
 

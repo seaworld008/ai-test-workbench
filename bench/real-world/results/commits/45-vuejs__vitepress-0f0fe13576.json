@@ -1,0 +1,29 @@
+{
+  "id": "vuejs/vitepress@0f0fe135762489f1a6c73348bd8b0a86db969248",
+  "repo": "vuejs/vitepress",
+  "sha": "0f0fe135762489f1a6c73348bd8b0a86db969248",
+  "parentSha": "40380c308592cf0ffc5c83c2e69debc27b4cfa4a",
+  "license": "MIT",
+  "testPaths": [
+    "__tests__/e2e/multi-sidebar/index.test.ts"
+  ],
+  "commitUrl": "https://github.com/vuejs/vitepress/commit/0f0fe135762489f1a6c73348bd8b0a86db969248",
+  "evaluationMode": "offline-static-ast-only",
+  "gateOutcome": "pass",
+  "flagged": false,
+  "ruleCodes": [],
+  "violations": [],
+  "files": [
+    {
+      "testPath": "__tests__/e2e/multi-sidebar/index.test.ts",
+      "status": "pass",
+      "ruleCodes": [],
+      "violations": []
+    }
+  ],
+  "adjudication": {
+    "label": "PASS",
+    "reviewedAt": null,
+    "rationale": "Gate passed with zero violations."
+  }
+}

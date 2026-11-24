@@ -1,0 +1,34 @@
+name: Verify Change (AI Test Workbench T2)
+
+# Example caller workflow demonstrating one-line adoption of the reusable T2 verification workflow.
+# Copy this file to `.github/workflows/aitest-verify.yml` in your application repository.
+#
+# Notes:
+# - Only a passing run from this workflow (re-run on a GitHub-hosted runner, keylessly signed with
+#   Sigstore, and verified for issuer identity) counts as a T2 merge-grade green.
+# - `signer: github-attest` (default) uses GitHub Artifact Attestations (private repos require
+#   GitHub Enterprise Cloud). Set `signer: cosign` to use public Sigstore keyless signing (records
+#   repository/workflow identity in the public Rekor log).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  aitest-t2-verdict:
+    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v5.1.0
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+      security-events: write
+    with:
+      qa-dir: qa
+      suite: impact
+      base-ref: ${{ github.event.pull_request.base.sha || '' }}
+      node-version: '22'
+      signer: github-attest
