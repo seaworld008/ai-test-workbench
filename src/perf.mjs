@@ -5,7 +5,7 @@ import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 import { resolveQaDirectory } from './agents.mjs';
 import { syncLivingCodeMap } from './codemap.mjs';
-import { redactEndpointUrl } from './explore.mjs';
+import { detectEnvelopeBusinessError, redactEndpointUrl } from './explore.mjs';
 import {
   DEFAULT_BLOCKED_ENDPOINTS,
   checkOutgoingRequestSafety,
@@ -412,6 +412,7 @@ export async function runBrowserPerfProfile(qaDir, baseURL, routes, options = {}
 async function runReadOnlyApiBenchmark(endpointUrl, concurrency, iterations) {
   const latencies = [];
   let errors = 0;
+  let envelopeErrors = 0;
   let issued = 0;
   const wallStart = performance.now();
 
@@ -423,9 +424,26 @@ async function runReadOnlyApiBenchmark(endpointUrl, concurrency, iterations) {
       const t0 = performance.now();
       try {
         const res = await fetch(endpointUrl, { method: 'GET', redirect: 'follow' });
-        await res.arrayBuffer();
+        const contentType = String(res.headers.get('content-type') || '');
+        let parsedJson = null;
+        if (/application\/json/i.test(contentType)) {
+          const text = await res.text();
+          try {
+            parsedJson = JSON.parse(text);
+          } catch {
+            // ignore non-JSON body
+          }
+        } else {
+          await res.arrayBuffer();
+        }
         latencies.push(performance.now() - t0);
-        if (res.status >= 500) errors += 1;
+        const envCheck = detectEnvelopeBusinessError(res.status, parsedJson);
+        if (res.status >= 500 || (envCheck.isError && Number(envCheck.code) >= 500)) {
+          errors += 1;
+        }
+        if (envCheck.isError && res.status < 500) {
+          envelopeErrors += 1;
+        }
       } catch {
         latencies.push(performance.now() - t0);
         errors += 1;
@@ -443,6 +461,7 @@ async function runReadOnlyApiBenchmark(endpointUrl, concurrency, iterations) {
     concurrency,
     totalRequests: latencies.length,
     errorCount: errors,
+    envelopeErrorCount: envelopeErrors,
     errorRate: latencies.length > 0 ? Number((errors / latencies.length).toFixed(4)) : 0,
     rps: Number((latencies.length / wallSec).toFixed(2)),
     ...stats,

@@ -180,7 +180,25 @@ export const TOOL_REGISTRY = [
           type: 'integer',
           minimum: 1,
           maximum: MAX_EXPLORE_PAGES,
-          description: `Maximum routes to crawl (1..${MAX_EXPLORE_PAGES})`,
+          description: `Maximum routes to crawl across portals (1..${MAX_EXPLORE_PAGES})`,
+        },
+        explorePortals: {
+          type: 'boolean',
+          description: 'Discover & traverse multi-portal / tenant switcher drawers (default: true)',
+        },
+        exploreTabs: {
+          type: 'boolean',
+          description: 'Click read-only intra-page tabs to inspect sub-views (default: true)',
+        },
+        exploreDialogs: {
+          type: 'boolean',
+          description: 'Open & close strictly read-only detail/preview dialogs & drawers (default: true)',
+        },
+        maxPortals: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 5,
+          description: 'Maximum portal/tenant contexts to explore (1..5, default: 3)',
         },
         noSyncImpact: { type: 'boolean' },
         dryRun: { type: 'boolean', description: 'Explore in memory without writing local files' },
@@ -205,6 +223,10 @@ export const TOOL_REGISTRY = [
       pushOpt(a, '--base-url', args.baseUrl);
       pushOpt(a, '--entry-path', args.entryPath);
       pushOpt(a, '--max-pages', args.maxPages);
+      pushOpt(a, '--max-portals', args.maxPortals);
+      if (args.explorePortals === false) a.push('--no-explore-portals');
+      if (args.exploreTabs === false) a.push('--no-explore-tabs');
+      if (args.exploreDialogs === false) a.push('--no-explore-dialogs');
       pushBool(a, '--no-sync-impact', args.noSyncImpact);
       pushBool(a, '--dry-run', args.dryRun);
       return a;

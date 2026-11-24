@@ -11,6 +11,12 @@
 
 ### 新增与加固 (Added & Hardened)
 - **npm 供应链发布就绪**：`package.json` 补充 `publishConfig: { "access": "public", "provenance": true }`，新增标签触发的 [.github/workflows/release.yml](./.github/workflows/release.yml)（全量 Action 锁定至完整 Commit SHA，发布前强制执行全部 7 条验证门禁，支持首次发布后切换 npm Trusted Publisher）。
+- **`T2` 信任分级与可复用 CI 工作流**：全栈统一 `T0 / T1 / T2` 固定口径（仅 CI 干净重跑 + Sigstore 免密钥签名的 `T2` 为合入级绿灯），新增可复用 [.github/workflows/aitest-verify.yml](./.github/workflows/aitest-verify.yml)（支持 `github-attest` 与 `cosign`）与 [examples/workflows/use-aitest-verify.yml](./examples/workflows/use-aitest-verify.yml)；强化 `attest verify` 支持 `--expect-repo` / `--expect-workflow` / `--expect-ref` 与离线零依赖 Sigstore/Fulcio 验签（默认 fail-closed）。
+- **零依赖 MCP ADR 与官方合规门禁**：新增 [docs/adr/mcp-zero-dependency.md](./docs/adr/mcp-zero-dependency.md) 与隔离 `conformance/` 测试套件（锁定 `@modelcontextprotocol/conformance@0.1.16` 与 `@modelcontextprotocol/sdk@1.32.2`，接入 CI `mcp-conformance` job 覆盖 `stdio` / Streamable HTTP / Legacy SSE 三传输），修复 Legacy SSE 异步 `202` 与 Streamable HTTP 双 `Accept` 进度流。
+- **真实开源提交 Gate FPR 公开试跑与红队设计**：预登记方法 [bench/real-world/PREREGISTRATION.md](./bench/real-world/PREREGISTRATION.md) 独立先行提交，完成 5 个宽松许可开源仓 `n = 50` 真实提交离线试跑（审核后 FPR `20.8%`、Wilson 95% CI `[11.7%, 34.3%]`，原始告警率 `24.0%`，`>=200` 正式评测标记 `pending`），并新增 `FGER-agentic` 红队设计文档 [bench/agentic/DESIGN.md](./bench/agentic/DESIGN.md)。
+- **企业级多端 SaaS 深度探索与会话复用升级（真实 SaaS 实测沉淀）**：
+  - `explore` 新增**多端/多租户切换抽屉自动发现与跨端遍历**（`--explore-portals` / `--max-portals`）、**业务域分层轮询队列**（上限升至 `500` 页）、**Vue 2 `$router.getRoutes()` + Vuex 权限菜单树**发现、**折叠子菜单自动展开**、**页内 Tab 自动切换**（`--explore-tabs`）、**严格只读详情弹窗/抽屉探测与关闭**（`--explore-dialogs`，标签白名单 + 网络层默认拒绝双重保护）、**断链/缺模块路由检测**（`brokenRoutes`）、**Element UI / AntD 固定列行数去重**、**HTTP 200 包裹业务码异常检测**（`code: 401/403/500`，同步覆盖 `perf`）、**URL 编码 Query 泄漏修复**（`%5B$L%5D`）与**独立 API 网关跨源提示**（`blockedApiHosts`）。
+  - `auth-login` 新增本机回环限制的 `--cdp-url <http://127.0.0.1:9222>` 会话直采模式，复用已在 Chrome 中完成短信/滑块登录的会话，无需重复登录且不关闭用户浏览器。
 - **`lint:docs` 文档命令与版本防漂移门禁**：自动阻断文档中裸 `npx -y ai-test-workbench`、已移除的 `aitest <cmd>` CLI 命令以及与 `package.json` 版本不一致的 `@x.y.z` 示例。
 - **模块化 AST 门禁内核 v3、T1 工作区外 HMAC、结构化先解析后脱敏与模块化 MCP 服务端**：4 层 fail-closed 三态门禁拦截 `24/24` 红队留出集（`FGER-holdout = 0.0%`）且良性重构 `FPR = 0.0%`，修复 MCP 自愈 `sessionId` 脱敏阻断与真实 Playwright 堆栈 `C→A` 误判。
 

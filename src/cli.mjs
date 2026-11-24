@@ -90,6 +90,13 @@ const CLI_OPTION_DEFS = {
   'expect-workflow': { type: /** @type {'string'} */ ('string') },
   'expect-ref': { type: /** @type {'string'} */ ('string') },
   'trusted-root-cert': { type: /** @type {'string'} */ ('string') },
+  'cdp-url': { type: /** @type {'string'} */ ('string') },
+  'max-portals': { type: /** @type {'string'} */ ('string') },
+  'max-tabs': { type: /** @type {'string'} */ ('string') },
+  'max-dialogs': { type: /** @type {'string'} */ ('string') },
+  'no-explore-tabs': { type: /** @type {'boolean'} */ ('boolean') },
+  'no-explore-dialogs': { type: /** @type {'boolean'} */ ('boolean') },
+  'no-explore-portals': { type: /** @type {'boolean'} */ ('boolean') },
   'allow-mutation': { type: /** @type {'boolean'} */ ('boolean') },
   'dry-run': { type: /** @type {'boolean'} */ ('boolean') },
   'skip-install': { type: /** @type {'boolean'} */ ('boolean') },
@@ -241,6 +248,7 @@ export async function runCli(argv = process.argv.slice(2)) {
           baseUrl: v['base-url'],
           account: v.account,
           loginPath: v['login-path'],
+          cdpUrl: v['cdp-url'],
           timeout: v.timeout ? Number(v.timeout) : undefined,
         });
       case 'explore':
@@ -249,6 +257,12 @@ export async function runCli(argv = process.argv.slice(2)) {
           baseUrl: v['base-url'],
           entryPath: v['entry-path'],
           maxPages: v['max-pages'] ? Number(v['max-pages']) : undefined,
+          maxPortals: v['max-portals'] ? Number(v['max-portals']) : undefined,
+          maxTabsPerPage: v['max-tabs'] !== undefined ? Number(v['max-tabs']) : undefined,
+          maxDialogsPerPage: v['max-dialogs'] !== undefined ? Number(v['max-dialogs']) : undefined,
+          exploreTabs: !v['no-explore-tabs'],
+          exploreDialogs: !v['no-explore-dialogs'],
+          explorePortals: !v['no-explore-portals'],
           noSyncImpact: Boolean(v['no-sync-impact']),
         });
       case 'map':
