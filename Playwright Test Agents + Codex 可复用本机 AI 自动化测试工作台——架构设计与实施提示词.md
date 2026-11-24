@@ -117,15 +117,15 @@ ai-test-workbench/
 
 1. **Claude Code**（项目根 `.mcp.json` 或 CLI）：
    ```bash
-   claude mcp add ai-test-workbench -- npx -y ai-test-workbench mcp-serve
+   claude mcp add ai-test-workbench -- node /path/to/ai-test-workbench/tools/aitest.mjs mcp-serve --workspace-root /path/to/your-repo
    ```
 2. **OpenAI Codex CLI**（`.codex/config.toml`）：
    ```toml
    [mcp_servers.ai-test-workbench]
    command = "npx"
-   args = ["-y", "ai-test-workbench", "mcp-serve"]
+   args = ["--package=ai-test-workbench@5.0.0", "ai-test-workbench", "mcp-serve"]
    ```
-3. **Cursor / Windsurf / Antigravity / VS Code Copilot / Gemini CLI**：统一配置 `command: "npx"`, `args: ["-y", "ai-test-workbench", "mcp-serve"]`；远程或容器化环境运行 `npx ai-test-workbench mcp-serve --transport http --port 3847` 后连接 `/mcp`（Streamable HTTP）或 `/sse`（Legacy SSE）。
+3. **Cursor / Windsurf / Antigravity / VS Code Copilot / Gemini CLI**：统一配置 `command: "npx"`, `args: ["--package=ai-test-workbench@5.0.0", "ai-test-workbench", "mcp-serve"]`（或本地源码直连 `node tools/aitest.mjs mcp-serve`）；远程或容器化环境运行 `node tools/aitest.mjs mcp-serve --transport http --port 3847` 后连接 `/mcp`（Streamable HTTP）或 `/sse`（Legacy SSE）。
 
 > 更多客户端配置 JSON/TOML 样本与 Bearer Token 安全部署指南见 [AI Agent 快速上手指南](./docs/ai-agent-quickstart.md)。
 

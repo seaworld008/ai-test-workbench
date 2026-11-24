@@ -81,13 +81,18 @@ test('MCP server negotiates all supported protocol versions (2024-11-05 .. 2025-
 
 test('MCP stdio transport emits pure NDJSON JSON-RPC frames across initialize, tools/call, progress & resources/read', async () => {
   const tmpRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'aitest-mcp-stdio-'));
+  let child = null;
   try {
-    const child = spawn(process.execPath, [path.join(WORKBENCH_ROOT, 'tools', 'aitest.mjs'), 'mcp-serve'], {
-      cwd: WORKBENCH_ROOT,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      shell: false,
-      windowsHide: true,
-    });
+    child = spawn(
+      process.execPath,
+      [path.join(WORKBENCH_ROOT, 'tools', 'aitest.mjs'), 'mcp-serve', '--workspace-root', tmpRepo],
+      {
+        cwd: WORKBENCH_ROOT,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        shell: false,
+        windowsHide: true,
+      }
+    );
 
     const lines = [];
     let buffer = '';
@@ -169,6 +174,9 @@ test('MCP stdio transport emits pure NDJSON JSON-RPC frames across initialize, t
     await new Promise((resolve) => child.once('close', resolve));
     assert.equal(buffer.trim(), '');
   } finally {
+    if (child && child.exitCode === null) {
+      child.kill();
+    }
     fs.rmSync(tmpRepo, { recursive: true, force: true });
   }
 });

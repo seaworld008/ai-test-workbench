@@ -15,7 +15,7 @@ description: 使用 ai-test-workbench v5.0 可信验证内核与 21 个原生 MC
 
 ## 2. AI Agent 首选调用流程（21 个原生 MCP 工具）
 
-1. **体检与初始化**：`aitest_doctor` → `aitest_init(dryRun=true)` → `aitest_init` → `aitest_governance_status`
+1. **体检与初始化**：`aitest_doctor` → `aitest_init(dryRun=true)` → `aitest_init`（注：治理锁 `governance status/verify/approve` 仅限人类本地 CLI，不暴露给 MCP）
 2. **默认禁写 0→1 探索与建图**：`aitest_explore` → `aitest_map_sync`
 3. **锁版本全链路 MCP 中枢**：`aitest_mcp_hub(action="add", profile="full-link")` → `aitest_mcp_hub(action="doctor", lock=true)`
 4. **提交前一键终审判决**：`aitest_verify_change(base="origin/main")`（自动校验治理锁、反向依赖选测、运行账本绑定、四层门禁并产出 `attestation.json` 与 `verdict.sarif.json`）

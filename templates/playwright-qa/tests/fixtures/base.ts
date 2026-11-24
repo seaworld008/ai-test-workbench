@@ -59,8 +59,13 @@ function buildRequestGuardConfig(baseURL: string | undefined) {
   const blockedRules = compileBlockedEndpointRules(
     process.env.TEST_BLOCKED_ENDPOINTS ?? DEFAULT_BLOCKED_ENDPOINTS
   );
+  const allowMutation =
+    process.env.TEST_ALLOW_MUTATION === '1' || process.env.TEST_ALLOW_MUTATION === 'true';
+  // Default strict-readonly ON whenever TEST_ALLOW_MUTATION is disabled unless explicitly overridden (`E-01`)
   const strictReadonly =
-    process.env.TEST_STRICT_READONLY === '1' || process.env.TEST_STRICT_READONLY === 'true';
+    process.env.TEST_STRICT_READONLY !== undefined && process.env.TEST_STRICT_READONLY !== ''
+      ? process.env.TEST_STRICT_READONLY === '1' || process.env.TEST_STRICT_READONLY === 'true'
+      : !allowMutation;
   const safeWritePaths = parseCsvList(
     process.env.TEST_SAFE_WRITE_PATHS ?? DEFAULT_SAFE_WRITE_PATHS
   );
@@ -208,13 +213,6 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
       const trace = generateW3cTraceContext();
       const guardConfig = buildRequestGuardConfig(baseURL);
 
-      // Close S-04 bypass: wrap both `context.request` and `page.request` (plus any popup pages)
-      guardRequestPropertyOnObject(context, guardConfig, trace.traceparent);
-      guardRequestPropertyOnObject(page, guardConfig, trace.traceparent);
-      context.on('page', (popupPage) => {
-        guardRequestPropertyOnObject(popupPage, guardConfig, trace.traceparent);
-      });
-
       // Pre-install buffered PerformanceObserver for real LCP / CLS / INP collection (`P-01`)
       await context.addInitScript(() => {
         const w = window as unknown as {
@@ -291,8 +289,70 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
       ];
 
       const baseOrigin = baseURL ? new URL(baseURL).origin.toLowerCase() : null;
+      const isWatched5xxOrigin = (url: string): boolean => {
+        try {
+          const parsed = new URL(url);
+          const origin = parsed.origin.toLowerCase();
+          const host = parsed.hostname.toLowerCase();
+          const hostPort = parsed.host.toLowerCase();
+          if (baseOrigin && origin === baseOrigin) return true;
+          if (guardConfig.allowedOrigins.includes(origin)) return true;
+          if (guardConfig.allowedHosts.includes(host) || guardConfig.allowedHosts.includes(hostPort)) return true;
+          return false;
+        } catch {
+          return false;
+        }
+      };
 
-      // Guard ALL pages/frames in BrowserContext + actively inject W3C `traceparent` (`D-02`, `S-03`)
+      const attachPageRuntimeGuards = (targetPage: Page) => {
+        guardRequestPropertyOnObject(targetPage, guardConfig, trace.traceparent);
+        targetPage.on('pageerror', (err) => {
+          const msg = err?.stack || err?.message || String(err);
+          if (!ignorePageErrorPatterns.some((re) => re.test(msg))) {
+            pageErrors.push(msg);
+          }
+        });
+        targetPage.on('response', (res) => {
+          const headers = res.headers();
+          for (const hName of TRACE_HEADER_NAMES) {
+            const hVal = headers[hName];
+            if (hVal && traceIdsSet.size < 20) {
+              traceIdsSet.add(`${hName}:${hVal.slice(0, 128)}`);
+            }
+          }
+
+          const status = res.status();
+          if (status < 500) return;
+          const url = res.url();
+          if (!isWatched5xxOrigin(url)) return;
+          const summary = `${status} ${res.request().method()} ${url}`;
+          if (!ignore5xxPatterns.some((re) => re.test(summary))) {
+            serverErrors.push(summary);
+          }
+        });
+      };
+
+      // Guard ALL pages/frames/popups in BrowserContext (`E-03`)
+      guardRequestPropertyOnObject(context, guardConfig, trace.traceparent);
+      attachPageRuntimeGuards(page);
+      context.on('page', (popupPage) => {
+        attachPageRuntimeGuards(popupPage);
+      });
+
+      // Block non-allowlisted WebSockets (`E-03`)
+      if (typeof context.routeWebSocket === 'function') {
+        await context.routeWebSocket('**/*', (ws) => {
+          const check = checkOutgoingRequestSafety('GET', ws.url(), guardConfig);
+          if (check.blocked && check.reason) {
+            blockedRequests.push(check.reason);
+            void ws.close({ code: 1008, reason: 'Blocked by AI Test Workbench egress guard' });
+            return;
+          }
+          ws.connectToServer();
+        });
+      }
+
+      // Guard ALL HTTP(S) requests in BrowserContext + actively inject W3C `traceparent` (`D-02`, `S-03`)
       await context.route('**/*', async (route) => {
         const req = route.request();
         const check = checkOutgoingRequestSafety(req.method(), req.url(), {
@@ -316,37 +376,6 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
           return;
         }
         await route.continue();
-      });
-
-      page.on('pageerror', (err) => {
-        const msg = err?.stack || err?.message || String(err);
-        if (!ignorePageErrorPatterns.some((re) => re.test(msg))) {
-          pageErrors.push(msg);
-        }
-      });
-
-      page.on('response', (res) => {
-        const headers = res.headers();
-        for (const hName of TRACE_HEADER_NAMES) {
-          const hVal = headers[hName];
-          if (hVal && traceIdsSet.size < 20) {
-            traceIdsSet.add(`${hName}:${hVal.slice(0, 128)}`);
-          }
-        }
-
-        const status = res.status();
-        if (status < 500) return;
-        const url = res.url();
-        try {
-          const resOrigin = new URL(url).origin.toLowerCase();
-          if (baseOrigin && resOrigin !== baseOrigin) return;
-        } catch {
-          return;
-        }
-        const summary = `${status} ${res.request().method()} ${url}`;
-        if (!ignore5xxPatterns.some((re) => re.test(summary))) {
-          serverErrors.push(summary);
-        }
       });
 
       await use();

@@ -44,7 +44,7 @@
    - 监听 `notifications/cancelled`，调用跨平台 `killProcessTree(pid)` 清理 Chromium/Playwright 进程树。
 3. **读写分级并发与工作区边界锁**：
    - 只读工具（`aitest_doctor`、`aitest_impact`、`aitest_audit`、`aitest_diagnose`、`aitest_report`、`aitest_trace_matrix` 等）完全并发无锁。
-   - 写工具按 `target` 规范化路径加细粒度工作区互斥锁（`withWorkspaceWriteLock`），并强制校验 `--allowed-root` 工作区越界访问。
+   - 写工具按 `target` 规范化路径加细粒度跨进程工作区互斥锁（`withWorkspaceWriteLock`），并基于服务端 `--workspace-root` 上限与客户端 `roots` 交集强制拦截越界路径访问。
 4. **硬化 Streamable HTTP 与安全鉴权**：
    - 仅 `initialize` 创建 `Mcp-Session-Id`；未知或过期会话严格返回 `404 Not Found`；内置会话空闲 TTL 与 `maxSessions` 上限淘汰；使用 `crypto.timingSafeEqual` 校验 Bearer Token；在 `2025-06-18` 及更新协议版本下拒绝 JSON-RPC 数组批处理。
    - **安全隔离铁律**：人工治理命令 `aitest governance approve` 永不注册为 MCP 工具，且在 `AITEST_MCP_CHILD=1` 环境下硬阻断执行。

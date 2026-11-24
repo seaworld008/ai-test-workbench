@@ -4,7 +4,7 @@
 
 **AI 编码 Agent 的独立可信验证内核、原生多协议 MCP 服务端与活体代码知识图谱**
 
-支持 **一键变更判决 (`verify_change`)** · **四层防假绿门禁 + `S0–S5` 断言强度格 + 治理锁 (`FGER=0%`)** · **原生 MCP v2 (`stdio` / `/mcp` / `/sse` · 21 Tools · 异步 Jobs)** · **有状态自愈状态机** · **Import-Graph 精准回归** · **真实 `PerformanceObserver` Web Vitals**
+支持 **一键变更判决 (`verify_change` · in-toto v1 + T0/T1/T2 信任分级)** · **四层 fail-closed AST 防假绿门禁 (`S0–S5` + `AITEST-G101..G115`)** · **原生 MCP v2 (`stdio` / `/mcp` / `/sse` · 21 Tools · 异步 Jobs)** · **防篡改自愈状态机** · **Import-Graph 精准回归** · **真实 `PerformanceObserver` Web Vitals**
 
 [English README](./README.en.md) · [四层门禁与治理指南](./docs/governance.md) · [v5.0 验证评分卡](./docs/review/v5-verification-scorecard.md) · [AI Agent 快速上手](./docs/ai-agent-quickstart.md) · [AGENTS.md](./AGENTS.md) · [架构与安全边界](./ARCHITECTURE.md) · [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) · [更新日志](./CHANGELOG.md)
 
@@ -12,7 +12,7 @@
 [![Release](https://img.shields.io/github/v/release/seaworld008/ai-test-workbench?style=flat-square&color=0ea5e9&label=Release)](https://github.com/seaworld008/ai-test-workbench/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-10b981.svg?style=flat-square)](./LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.12-339933?style=flat-square&logo=node.js&logoColor=white)](./VERSION.md)
-[![FGER](https://img.shields.io/badge/Fake--Green%20Escape-0.0%25%20(26%2F26)-16a34a?style=flat-square)](./docs/review/v5-verification-scorecard.md)
+[![Internal Corpus](https://img.shields.io/badge/Gate%20Corpus-Internal%20%2B%20Red--Team%20Holdout-16a34a?style=flat-square)](./docs/review/v5-verification-scorecard.md)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05%20..%202025--11--25+-0284c7?style=flat-square)](./skills/ai-test-workbench/references/mcp-server-protocol.md)
 [![Playwright](https://img.shields.io/badge/Playwright-1.65.1-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev/)
 
@@ -30,12 +30,14 @@
 
 **AI Test Workbench v5.0** 将定位彻底收敛为 **“AI 编码 Agent 的独立可信验证内核（Trustworthy Verification Kernel）”**——不比谁“修得多”，只确保每一次绿灯 **“修得可信”**：
 
-| 北极星可信度指标 | `v5.0.0` 本机基准实测 (`npm run bench`) | 核心保障机制 |
+| 北极星可信度指标 | 本机可复现基准实测 (`npm run bench`，标明语料范围) | 核心保障机制 |
 |---|---|---|
-| **假绿逃逸率 (`FGER`)** | **`0.0%`（`26/26` 种作弊补丁全部拦截）** | 四层防假绿门禁 + `S0–S5` 断言强度格 + `.aitest/governance.lock` |
-| **种子缺陷检出率 (`SDDR`)** | **`100.0%`（`7/7` 类全栈真实缺陷检出）** | JSON Schema 契约校验 + RBAC/并发竞态 + WCAG 2.1/2.2 扫描 |
-| **诊断分类准确率 / 误修率** | **`100.0%` (`45/45`) / 误修率 `0.0%`** | 结构化运行时守卫信号 + `aitest_heal_*` 有状态自愈状态机 |
-| **凭据脱敏召回率** | **`100.0%`（`35/35` 类凭据零泄露）** | Redaction v2（覆盖 JSON 密码、JWT、云 Token、私钥、DB 串） |
+| **假绿逃逸率 (`FGER-internal` / `FGER-holdout`)** | 内部回归语料 **`0.0%` (`26/26`)** · 红队留出集 **`0.0%` (`24/24`)** | 四层 fail-closed AST 门禁 (`AITEST-G101..G115`) + T1 MAC 治理锁 |
+| **良性重构误报率 (`Gate FPR`)** | 良性重构语料 **`0.0%`**（零误拦 Prettier 换行 / 合法抽提 / ARIA 合并） | TypeScript Compiler API 全文件 AST 比对 |
+| **种子缺陷检出率 (`SDDR`)** | 单应用靶场 **`100.0%` (`7/7`)** | 零依赖 JSON Schema 契约校验 + RBAC/并发竞态 + WCAG 2.1/2.2 |
+| **诊断分类准确率 / C→A 误判率 / 误修率** | 内部语料 + 真实 Playwright 堆栈 **`100%` · C→A `0.0%` · 误修率 `0.0%`** | 结构化运行时守卫 + C 优先于 A 值断言规则 + 防篡改自愈状态机 |
+| **凭据脱敏召回率** | 内部对抗语料 **`100.0%` (`35/35`)** | Redaction v2（结构化先解析后脱敏，保留内部 `heal_*`/`job_*` ID） |
+| **判决信任分级 (`T0 / T1 / T2`)** | 本地无密钥 `T0` · 机外 HMAC `T1` · CI 重跑 in-toto v1 签名 **`T2`** | 只有 CI 重跑并验签（`attest verify`）的 `T2` 绿灯作为合入级可信背书 |
 
 ---
 
@@ -54,18 +56,18 @@ flowchart TB
         K1 --> K2
     end
 
-    subgraph KERNEL["四层可信防假绿门禁内核 (gate-kernel.mjs) & 一键终审"]
-        G0["Layer 0: .aitest/governance.lock (11 项受保护文件 SHA-256 · 人类专属 approve)"]
-        G1["Layer 1: tsc --noEmit + eslint-plugin-playwright (禁裸 request / test.fail)"]
-        G2["Layer 2: ULID Run Ledger 源码输入指纹绑定 + 人类审批 waivers.json"]
-        G3["Layer 3: S0–S5 断言强度格 & 全目录语义 Diff 守卫 (AITEST-G101..G113)"]
+    subgraph KERNEL["四层可信 AST 防假绿门禁内核 (support/gate/*) & 一键终审"]
+        G0["Layer 0: fail-closed .aitest/governance.lock (T1 MAC · 人类专属 CLI approve)"]
+        G1["Layer 1: tsc --noEmit + eslint-plugin-playwright (禁裸 request / fetch / test.fail)"]
+        G2["Layer 2: T1 签名 ULID Run Ledger 源码输入指纹 + 严格豁免/隔离校验"]
+        G3["Layer 3: TypeScript AST S0–S5 断言强度格全文件语义 Diff 守卫 (AITEST-G101..G115)"]
         G0 --> G1 --> G2 --> G3
     end
 
-    subgraph VERDICT["有状态自愈 · 真实 Web Vitals · 可验签判决"]
-        V1["aitest_heal_begin/attempt/conclude: 硬阻断 B/C/D 改测试 · C 类自动提缺陷单"]
-        V2["aitest_perf: PerformanceObserver LCP/CLS/INP (Median+P75) + GET API SLO"]
-        V3["aitest_verify_change: 产出 attestation.json + verdict-summary.md + verdict.sarif.json"]
+    subgraph VERDICT["防篡改自愈 · 真实 Web Vitals · in-toto v1 判决证书"]
+        V1["aitest_heal_begin/attempt/conclude: 硬阻断 B/C/D · 跨会话 3 轮上限 · C 类缺陷单"]
+        V2["aitest_perf: PerformanceObserver LCP/CLS/INP (Median+P75) + 出站守卫 API SLO"]
+        V3["aitest_verify_change: T0/T1/T2 三态判决 + in-toto attestation.json + SARIF"]
     end
 
     AGENT --> BRAIN --> KERNEL --> VERDICT
@@ -75,17 +77,19 @@ flowchart TB
 
 ## 🚀 30 秒接入 AI Agent（零运行时第三方依赖）
 
-### 方式一：一键注册原生 MCP Server
+### 方式一：一键注册原生 MCP Server（锁版本或本地源码直连）
+
+> **安全提示**：在 npm 正式发布前请优先通过本地仓库 `node tools/aitest.mjs mcp-serve` 启动；发布后请始终锁定精确版本号（`--package=ai-test-workbench@5.0.0`），避免无锁版本拉取。
 
 - **Claude Code**：
   ```bash
-  claude mcp add ai-test-workbench -- npx -y ai-test-workbench mcp-serve
+  claude mcp add ai-test-workbench -- node /path/to/ai-test-workbench/tools/aitest.mjs mcp-serve --workspace-root /path/to/your-repo
   ```
 - **Codex CLI**（`.codex/config.toml`）：
   ```toml
   [mcp_servers.ai-test-workbench]
   command = "npx"
-  args = ["-y", "ai-test-workbench", "mcp-serve"]
+  args = ["--package=ai-test-workbench@5.0.0", "ai-test-workbench", "mcp-serve"]
   ```
 - **Cursor / Windsurf / Antigravity / Gemini CLI**（`.mcp.json`）：
   ```json
@@ -93,14 +97,14 @@ flowchart TB
     "mcpServers": {
       "ai-test-workbench": {
         "command": "npx",
-        "args": ["-y", "ai-test-workbench", "mcp-serve"]
+        "args": ["--package=ai-test-workbench@5.0.0", "ai-test-workbench", "mcp-serve"]
       }
     }
   }
   ```
 - **Streamable HTTP (`/mcp`) + Legacy SSE (`/sse`) 远程服务模式**：
   ```bash
-  npx ai-test-workbench mcp-serve --transport http --port 3847 --target /path/to/your-repo
+  node tools/aitest.mjs mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
   ```
 
 ### 方式二：复制即用的首次提示词
@@ -109,8 +113,8 @@ flowchart TB
 > 请使用 ai-test-workbench MCP 工具为当前仓库建立可信自动化测试闭环：
 > 1. 调用 aitest_doctor 检查 Node >= 22.12、Chromium 与 Gate Kernel 状态；
 > 2. 先传 dryRun=true 调用 aitest_init 预览，再正式初始化 qa/ 与 governance.lock；
-> 3. 调用 aitest_verify_change(base="HEAD") 跑通一键可信验证并生成 attestation.json；
-> 4. 调用 aitest_map_sync 构建活体代码地图，严格区分「本机工作台验收」与「真实业务 E2E 验收」向我汇报。
+> 3. 调用 aitest_verify_change(base="origin/main") 跑通一键可信验证并生成 in-toto attestation.json（默认自动解析 merge-base，绝不跳过已提交变更）；
+> 4. 调用 aitest_map_sync 构建活体代码地图，严格区分「本机工作台验收 (T0/T1)」与「CI 签名业务 E2E 验收 (T2)」向我汇报。
 > ```
 
 ---
@@ -163,18 +167,19 @@ npm run bench
 | `verify-change` | `aitest_verify_change` | **一键终审闭环**：治理锁 → 反向依赖选测 → 账本运行 → 四层门禁 → 产出 `attestation.json` & `verdict.sarif.json` |
 | `doctor` | `aitest_doctor` | 探测 Node/npm、Git、Codex/Claude、Chromium 缓存与 Gate Kernel 版本一致性 |
 | `init` | `aitest_init` | 幂等初始化 `<repo>/qa` 并签发初始 `.aitest/governance.lock` |
-| `governance` | `aitest_governance_status` *(只读)* | `verify \| status \| approve`；其中 **`approve` 仅限人类本地 CLI 执行，永不暴露给 MCP** |
-| `auth-login` | *(交互式 CLI)* | 有头浏览器人工完成短信验证码 / SSO（绝不绕过门禁），保存会话状态 |
-| `explore` | `aitest_explore` | 默认禁写 0→1 探索（禁 POST/变更/sendBeacon），产出 `system-overview.md` 与 `specs/pages/*.md` |
+| `governance` | *(人类专属 CLI)* | `verify \| status \| approve`；全部治理锁操作**仅限人类本地 CLI 执行，永不暴露给 MCP** |
+| `attest` | *(CLI 验签命令)* | `attest verify --file <attestation.json>` 离线验证 in-toto Statement v1 证书与 SHA-256 绑定 |
+| `auth-login` | *(交互式 CLI)* | 有头浏览器人工完成短信验证码 / SSO（绝不绕过门禁），`0o600` 权限保存会话状态 |
+| `explore` | `aitest_explore` | 默认禁写 0→1 探索（禁 POST/变更/sendBeacon/WS），产出 `system-overview.md` 与 `<untrusted-data>` 脱敏 `specs/pages/*.md` |
 | `map` | `aitest_map_sync` | 融合静态/动态路由（`:id`/`[id]`）、Controller、DB 表并自动收敛历史缺陷（Schema v4） |
-| `impact` | `aitest_impact` | 基于 Git Diff + 静态 `import` 反向依赖图精选传递受影响测试并附 `why` 证据链 |
-| `run` | `aitest_run` | 运行确定性套件并写入 ULID `Run Ledger`，注入/捕获 W3C `Trace-ID` |
-| `audit` | `aitest_audit` | 四层防假绿门禁：`governance.lock` + `tsc/eslint` + `Run Ledger/waivers` + `S0–S5` 语义 Diff 守卫 |
-| `heal` | `aitest_heal_begin` / `attempt` / `conclude` | 有状态自愈状态机：B/C/D 类硬阻断改测试（`0%` 误修率），A 类限 3 轮，C 类自动产缺陷工单 |
-| `diagnose` | `aitest_diagnose` | 结构化守卫信号优先定责（`100%` 语料准确率）、Redaction v2 脱敏与可观测查询生成 |
+| `impact` | `aitest_impact` | 基于 Git Diff + 静态 `import` 反向依赖图精选传递受影响测试并附 `why` 证据链（映射缺口自动降级全量） |
+| `run` | `aitest_run` | 运行确定性套件并写入 T1 签名 ULID `Run Ledger`，注入/捕获 W3C `Trace-ID` |
+| `audit` | `aitest_audit` | fail-closed 四层 AST 门禁：`governance.lock` + `tsc/eslint` + `Run Ledger/waivers` + `S0–S5` AST Diff 守卫 (`AITEST-G101..G115`) |
+| `heal` | `aitest_heal_begin` / `attempt` / `conclude` | 防篡改自愈状态机：B/C/D 类硬阻断改测试（`0%` 误修率），跨会话 A 类限 3 轮，C 类自动产缺陷工单 |
+| `diagnose` | `aitest_diagnose` | 结构化守卫 + C 优先于 A 规则定责、Redaction v2 脱敏与可观测查询生成 |
 | `perf` | `aitest_perf` | 预注入 `PerformanceObserver` 采集真实 `LCP/CLS/INP`（Median+P75）与并发 GET API P95/RPS |
 | `trace-matrix` | `aitest_trace_matrix` | 审计 `specs/*.md` ↔ `tests/**/*.spec.ts` ↔ 运行结果的 `REQ-xxx` 需求追溯覆盖率 |
-| `flaky` | `aitest_flaky_status` | 统计近 20 次运行历史抖动率与 `.aitest/quarantine.json`（`<= 7 天` TTL）隔离状态 |
+| `flaky` | `aitest_flaky_report` | 统计近 20 次运行历史抖动率与 `.aitest/quarantine.json`（`<= 7 天` TTL + 真实抖动证据）隔离状态 |
 | `mcp` | `aitest_mcp_hub` | 7 大支柱锁版本 MCP 配置、`.aitest/mcp.lock` 哈希漂移与提示词投毒审计 |
 | `mcp-serve` | `aitest_job_status` / `result` / `cancel` | 启动全协议 MCP v2 服务端，支持子进程异步后台作业状态查询、结果拉取与进程树强杀 |
 | `report` | `aitest_report` | 索引 HTML、JUnit、JSON、Attestation、SARIF、全景图、代码地图与 `.zip` Trace |

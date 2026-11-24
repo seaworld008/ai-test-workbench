@@ -3,9 +3,29 @@ import path from 'node:path';
 
 /**
  * Single source of truth for target URL allowlist/denylist, outbound egress allowlist (`TEST_EGRESS_MODE=allowlist`),
- * production blocking, dangerous endpoint blocking, GraphQL mutation blocking, and .env loading.
- * Zero external dependencies. Shared by playwright.config.ts, tests/fixtures/base.ts, explore.mjs, and CLI.
+ * production blocking, normalized dangerous endpoint blocking, WebSocket egress blocking, GraphQL mutation blocking,
+ * and .env loading (`E-01`, `E-02`, `E-03`, `E-08`).
+ * Zero external dependencies. Shared by playwright.config.ts, tests/fixtures/base.ts, explore.mjs, perf.mjs, and CLI.
  */
+
+const ALLOWED_TEST_ENVS = new Set([
+  'local',
+  'dev',
+  'development',
+  'test',
+  'testing',
+  'qa',
+  'staging',
+  'stage',
+  'ci',
+  'sandbox',
+  'preview',
+  'e2e',
+  'integration',
+  'uat',
+]);
+
+const PROD_HOST_LABEL_RE = /(?:^|[.-])(prod|prd|production)(?:$|[.-])/i;
 
 export function parseCsvList(value) {
   if (!value || typeof value !== 'string') return [];
@@ -79,6 +99,35 @@ export function parseSafeHttpUrl(rawUrl) {
   return parsed;
 }
 
+/**
+ * Normalizes a request pathname prior to endpoint rule matching (`E-02`):
+ * - Iteratively percent-decodes (`%70ay` -> `pay`, `%2570ay` -> `pay`)
+ * - Strips matrix parameters (`/api;x=1/pay` -> `/api/pay`)
+ * - Collapses repeated slashes (`//api///pay` -> `/api/pay`)
+ * - Normalizes `.` / `..` segments (`/safe/../api/pay` -> `/api/pay`)
+ * @param {string} rawPathname
+ */
+export function normalizeGuardPathname(rawPathname) {
+  let p = String(rawPathname || '/');
+  for (let pass = 0; pass < 3; pass += 1) {
+    try {
+      const decoded = decodeURIComponent(p);
+      if (decoded === p) break;
+      p = decoded;
+    } catch {
+      break;
+    }
+  }
+  // Strip `;param` matrix path segments (Spring / Tomcat / Jetty bypass vector)
+  p = p
+    .split('/')
+    .map((seg) => seg.split(';')[0])
+    .join('/');
+  p = p.replace(/\/{2,}/g, '/');
+  p = path.posix.normalize(p.startsWith('/') ? p : `/${p}`);
+  return p.startsWith('/') ? p : `/${p}`;
+}
+
 export function evaluateTargetSafety(envInput = {}) {
   const testEnv = (envInput.TEST_ENV || 'local').trim().toLowerCase();
   const baseUrl = (envInput.TEST_BASE_URL || '').trim();
@@ -91,8 +140,10 @@ export function evaluateTargetSafety(envInput = {}) {
 
   const errors = [];
 
-  if (['production', 'prod', 'live', 'online'].includes(testEnv)) {
-    errors.push(`Refusing to run automated tests when TEST_ENV="${testEnv}". Production environments are blocked.`);
+  if (['production', 'prod', 'prd', 'live', 'online'].includes(testEnv) || !ALLOWED_TEST_ENVS.has(testEnv)) {
+    errors.push(
+      `Refusing to run automated tests when TEST_ENV="${testEnv}". Production environments are blocked; allowed TEST_ENV values: ${[...ALLOWED_TEST_ENVS].join(', ')}.`
+    );
   }
 
   errors.push(...validateAllowlistEntries(allowedHosts));
@@ -131,7 +182,7 @@ export function evaluateTargetSafety(envInput = {}) {
       errors.push(`Target URL "${baseUrl}" matches TEST_DENIED_ORIGINS.`);
     }
 
-    if (/(^|\.)(prod|production)\./i.test(hostname) && !allowedOrigins.includes(origin)) {
+    if (PROD_HOST_LABEL_RE.test(hostname) && !allowedOrigins.includes(origin)) {
       errors.push(`Target hostname "${hostname}" looks like a production host and is blocked.`);
     }
 
@@ -170,7 +221,8 @@ export function assertTargetSafety(envInput = {}) {
 }
 
 function globToRegExp(globPattern) {
-  const escaped = globPattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  const norm = normalizeGuardPathname(globPattern);
+  const escaped = norm.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
   return new RegExp(`^${escaped}$`, 'i');
 }
 
@@ -217,12 +269,15 @@ export function inspectGraphqlPayload(postData) {
     } else if (parsed && typeof parsed === 'object') {
       queryText = String(parsed.query || '');
       operationName = typeof parsed.operationName === 'string' ? parsed.operationName : null;
+      // Persisted queries (APQ) without query text cannot be proven read-only!
+      if (!queryText && parsed.extensions?.persistedQuery) {
+        return { isGraphql: true, hasMutation: true, isPureQuery: false, operationName };
+      }
     }
   } catch {
     // raw graphql body
   }
 
-  // Strip # comments before checking operation keywords
   const stripped = queryText.replace(/#[^\r\n]*/g, '').trim();
   if (!stripped) {
     return { isGraphql: false, hasMutation: false, isPureQuery: false, operationName };
@@ -232,9 +287,23 @@ export function inspectGraphqlPayload(postData) {
   return { isGraphql: true, hasMutation, isPureQuery, operationName };
 }
 
+function getVersionStrippedPathCandidates(normPathname) {
+  const candidates = [normPathname];
+  // Match `/v1/api/pay` against `/api/pay*` AND `/api/v1/pay` against `/api/pay*` (`E-02`)
+  const stripLeadingVersion = normPathname.replace(/^\/v\d+(?=\/)/i, '');
+  if (stripLeadingVersion && stripLeadingVersion !== normPathname) {
+    candidates.push(stripLeadingVersion);
+  }
+  const stripMidVersion = normPathname.replace(/^(\/api)\/v\d+(?=\/)/i, '$1');
+  if (stripMidVersion && stripMidVersion !== normPathname) {
+    candidates.push(stripMidVersion);
+  }
+  return [...new Set(candidates)];
+}
+
 /**
- * Checks whether an outgoing HTTP request violates outbound egress allowlist, denied origins,
- * blocked endpoint rules, GraphQL mutation guards, or strict read-only mode (`S-02`, `S-03`).
+ * Checks whether an outgoing HTTP(S) or WebSocket (`ws:`/`wss:`) request violates outbound egress allowlist,
+ * denied origins, normalized blocked endpoint rules, GraphQL mutation guards, or strict read-only mode (`E-01..E-03`).
  */
 export function checkOutgoingRequestSafety(method, rawUrl, options = {}) {
   const upperMethod = (method || 'GET').toUpperCase();
@@ -245,24 +314,38 @@ export function checkOutgoingRequestSafety(method, rawUrl, options = {}) {
     return { blocked: false, reason: null };
   }
 
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return { blocked: false, reason: null };
+  const isHttp = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  const isWs = parsed.protocol === 'ws:' || parsed.protocol === 'wss:';
+  if (!isHttp && !isWs) {
+    // Allow inert browser schemes (`data:`, `blob:`, `about:`) only
+    if (['data:', 'blob:', 'about:'].includes(parsed.protocol)) {
+      return { blocked: false, reason: null };
+    }
+    return {
+      blocked: true,
+      reason: `Blocked unsupported outgoing scheme "${parsed.protocol}" (${upperMethod} ${rawUrl})`,
+    };
   }
 
   const origin = parsed.origin.toLowerCase();
+  const httpComparableOrigin = origin.replace(/^ws:/, 'http:').replace(/^wss:/, 'https:');
   const hostname = parsed.hostname.toLowerCase();
   const hostWithPort = parsed.host.toLowerCase();
-  const pathname = parsed.pathname;
+  const pathname = normalizeGuardPathname(parsed.pathname);
 
   const deniedOrigins = options.deniedOrigins || [];
-  if (deniedOrigins.some((d) => origin === d || hostname === d || hostWithPort === d)) {
+  if (
+    deniedOrigins.some(
+      (d) => origin === d || httpComparableOrigin === d || hostname === d || hostWithPort === d
+    )
+  ) {
     return {
       blocked: true,
       reason: `Blocked request to denied origin "${parsed.origin}" (${upperMethod} ${pathname})`,
     };
   }
 
-  // Outbound Egress Allowlist (`TEST_EGRESS_MODE=allowlist`, `S-03`)
+  // Outbound Egress Allowlist (`TEST_EGRESS_MODE=allowlist`, covering HTTP(S) AND WS(S)!)
   if (options.egressMode === 'allowlist') {
     const allowedHosts = options.allowedHosts || ['localhost', '127.0.0.1'];
     const allowedOrigins = options.allowedOrigins || [];
@@ -284,21 +367,27 @@ export function checkOutgoingRequestSafety(method, rawUrl, options = {}) {
       extraHosts.includes(hostname) ||
       extraHosts.includes(hostWithPort) ||
       allowedOrigins.includes(origin) ||
+      allowedOrigins.includes(httpComparableOrigin) ||
       (baseHost && hostname === baseHost) ||
-      (baseOrigin && origin === baseOrigin);
+      (baseOrigin && httpComparableOrigin === baseOrigin);
 
     if (!hostPermitted) {
       return {
         blocked: true,
-        reason: `Blocked outbound request to non-allowlisted host "${parsed.origin}" (${upperMethod} ${pathname}) under TEST_EGRESS_MODE=allowlist`,
+        reason: `Blocked outbound ${isWs ? 'WebSocket' : 'request'} to non-allowlisted host "${parsed.origin}" (${upperMethod} ${pathname}) under TEST_EGRESS_MODE=allowlist`,
       };
     }
   }
 
+  if (isWs) {
+    return { blocked: false, reason: null };
+  }
+
+  const pathCandidates = getVersionStrippedPathCandidates(pathname);
   const rules = options.blockedRules || [];
   for (const rule of rules) {
     const methodMatch = rule.method === '*' || rule.method === upperMethod;
-    if (methodMatch && rule.pathRegex.test(pathname)) {
+    if (methodMatch && pathCandidates.some((cand) => rule.pathRegex.test(cand))) {
       return {
         blocked: true,
         reason: `Blocked dangerous endpoint matching rule "${rule.raw}": ${upperMethod} ${pathname}`,
@@ -309,7 +398,6 @@ export function checkOutgoingRequestSafety(method, rawUrl, options = {}) {
   if (options.strictReadonly) {
     const readMethods = new Set(['GET', 'HEAD', 'OPTIONS']);
     if (!readMethods.has(upperMethod)) {
-      // GraphQL mutation inspection even if /graphql was manually added to safeWritePaths
       if (/\/graphql\b/i.test(pathname)) {
         const gql = inspectGraphqlPayload(options.postData);
         if (gql.hasMutation) {
@@ -323,8 +411,12 @@ export function checkOutgoingRequestSafety(method, rawUrl, options = {}) {
         }
       }
 
-      const safeWritePaths = options.safeWritePaths || parseCsvList(DEFAULT_SAFE_WRITE_PATHS);
-      const isSafeException = safeWritePaths.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+      const safeWritePaths = (options.safeWritePaths || parseCsvList(DEFAULT_SAFE_WRITE_PATHS)).map(
+        normalizeGuardPathname
+      );
+      const isSafeException = safeWritePaths.some(
+        (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+      );
       if (!isSafeException) {
         return {
           blocked: true,
@@ -339,9 +431,6 @@ export function checkOutgoingRequestSafety(method, rawUrl, options = {}) {
 
 /**
  * Strict Zero-Mutation Request Firewall for 0->1 Exploration (`S-01`, `E-05`).
- * Reuses `checkOutgoingRequestSafety` (egress allowlist + denied origins + blocked endpoints)
- * AND default-denies ALL non-GET/HEAD/OPTIONS requests unless explicitly allowlisted via `safePostPaths`
- * or verified as a pure read-only GraphQL `query` (never `mutation`).
  */
 export function evaluateExploreRequestSafety(method, rawUrl, postData, guardConfig = {}) {
   const upperMethod = (method || 'GET').toUpperCase();
@@ -358,7 +447,7 @@ export function evaluateExploreRequestSafety(method, rawUrl, postData, guardConf
 
   let pathname = '/';
   try {
-    pathname = new URL(rawUrl, guardConfig.baseURL || 'http://localhost').pathname;
+    pathname = normalizeGuardPathname(new URL(rawUrl, guardConfig.baseURL || 'http://localhost').pathname);
   } catch {
     pathname = '/';
   }
@@ -376,7 +465,7 @@ export function evaluateExploreRequestSafety(method, rawUrl, postData, guardConf
     }
   }
 
-  const safePostPaths = guardConfig.safePostPaths || [];
+  const safePostPaths = (guardConfig.safePostPaths || []).map(normalizeGuardPathname);
   if (
     upperMethod === 'POST' &&
     safePostPaths.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))

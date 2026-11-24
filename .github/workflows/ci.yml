@@ -5,11 +5,18 @@ on:
     branches: [main, master]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
-  unit-and-typecheck-matrix:
+  unit-matrix:
     strategy:
       fail-fast: false
       matrix:
@@ -26,16 +33,16 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
-      - name: Verify Bilingual Docs, Claims Mapping & Desensitization Hygiene
+      - name: Verify Bilingual Docs, MCP Registry Parity, Claims Mapping & Hygiene
         run: npm run lint:docs
 
-      - name: Run CLI, Adversarial & Governance Unit Tests
+      - name: Run CLI, Adversarial, AST & Governance Unit Tests
         run: npm test
 
-      - name: Run Fast North-Star Gate Benchmark (FGER / Triage / Redaction / MisHeal)
+      - name: Run Fast North-Star & Holdout Benchmark (FGER / Holdout / FPR / Triage / Redaction / MisHeal)
         run: node scripts/run-bench.mjs --fast
 
-  verify-e2e-and-seeded-benchmark:
+  verify-e2e-typecheck-and-t2-attestation:
     strategy:
       fail-fast: false
       matrix:
@@ -57,19 +64,19 @@ jobs:
           npm ci --no-audit --no-fund
           npx playwright install chromium
 
-      - name: Run TypeScript checkJs across src/**/*.mjs & Gate Kernel
+      - name: Run Fail-Closed TypeScript checkJs across src/**/*.mjs & Gate Kernel
         run: npm run typecheck
 
-      - name: Run Unit & Live Browser LCP Regression Tests
-        run: npm test
+      - name: Run Full Unit & Live Browser LCP Regression Tests (Zero Skips Allowed)
+        run: node --test --test-reporter=spec test/*.test.mjs
 
       - name: Run Offline Smoke + 4-Layer Quality Gate
         run: npm run smoke
 
-      - name: Run Full-Stack Local Demo E2E + One-Call Verify Change + Web Vitals
+      - name: Run Full-Stack Local Demo E2E + One-Call Verify Change (T2 CI Attestation) + Web Vitals
         run: npm run demo:verify
 
-      - name: Run Live Seeded-Defect & Anti-Fake-Green Benchmark (SDDR + FGER)
+      - name: Run Live Seeded-Defect & Red-Team Holdout Benchmark (SDDR + FGER + FPR)
         run: npm run bench
 
       - name: Verify npm Package Tarball Hygiene

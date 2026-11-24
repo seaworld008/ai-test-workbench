@@ -23,7 +23,7 @@
 2. **全通道请求拦截**：在 `tests/fixtures/base.ts` 同时包装 `context.route`、`APIRequestContext`、`context.request` 与 `page.request`，设置 `serviceWorkers: 'block'`，并通过 ESLint 禁止裸调 `request.newContext()`；拦截 GraphQL `mutation` 载荷。
 3. **默认禁写探索器（`src/explore.mjs`）**：`explore` 默认拒绝一切非 `GET/HEAD/OPTIONS` 请求并禁用 `navigator.sendBeacon`，移除 `/graphql` 默认写豁免。
 4. **凭据脱敏 v2 与供应链锁（`src/proc.mjs` + `src/mcp-hub.mjs`）**：自动擦除 JSON 密码/令牌、JWT、云厂商密钥、PEM 私钥与连接串（35/35 对抗语料召回率 `100%`）；7 大支柱外部 MCP 预设全量精确锁版本并支持 `.aitest/mcp.lock` 漂移与投毒审计。
-5. **MCP HTTP 安全边界**：默认监听 `127.0.0.1`、严格校验 `Origin`（`403`）、仅允许 `initialize` 创建会话、未知会话返回 `404`、采用 `crypto.timingSafeEqual` 校验 Bearer Token 并限制 `--allowed-root` 工作区根目录。
+5. **MCP HTTP 安全边界**：默认监听 `127.0.0.1`、严格校验 `Origin`（`403`）、仅允许 `initialize` 创建会话、未知会话返回 `404`、采用 `crypto.timingSafeEqual` 校验 Bearer Token，并基于服务端 `--workspace-root` 与客户端 `roots` 的交集强制拦截越界路径访问。
 
 ## 4. 四层防假绿质量门禁内核 (`support/gate-kernel.mjs`)
 

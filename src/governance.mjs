@@ -4,31 +4,35 @@ import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
 import { SCHEMA_VERSIONS } from './version.mjs';
 import {
+  BOT_APPROVER_RE,
   GATE_KERNEL_VERSION,
   PROTECTED_GOVERNANCE_REL_FILES,
   computeProtectedFileHashes,
   loadAitestConfig,
   loadAndValidateWaivers,
+  resolveGitIdentity,
+  signPayloadT1,
   verifyGovernanceLockInQaDir,
 } from '../templates/playwright-qa/support/gate-kernel.mjs';
-
-const BOT_APPROVER_RE = /^(ai|agent|bot|healer|codex|claude|cursor|copilot|gemini|antigravity|auto|self)$/i;
 
 export { PROTECTED_GOVERNANCE_REL_FILES, computeProtectedFileHashes, verifyGovernanceLockInQaDir };
 
 /**
- * Writes `.aitest/governance.lock` inside `<qaDir>` and records an entry in `.aitest/governance-audit.jsonl`.
+ * Writes `.aitest/governance.lock` inside `<qaDir>` with T1 out-of-workspace HMAC tamper-evidence
+ * and Git user identity attribution, plus appends an audit record to `.aitest/governance-audit.jsonl`.
  * @param {string} qaDir
  * @param {{ approvedBy: string, reason: string, source?: string }} meta
  */
 export function writeGovernanceLock(qaDir, meta) {
   const approvedBy = String(meta?.approvedBy || '').trim();
   const reason = String(meta?.reason || '').trim();
+  const source = meta.source || 'human-cli';
+
   if (!approvedBy) {
     throw new Error('Missing mandatory human approver (--by <identifier>).');
   }
-  if (BOT_APPROVER_RE.test(approvedBy)) {
-    throw new Error(`Approver "${approvedBy}" looks like an AI agent/bot; human approval is required.`);
+  if (source !== 'aitest-init' && BOT_APPROVER_RE.test(approvedBy)) {
+    throw new Error(`Approver "${approvedBy}" matches a reserved AI agent/bot identifier; human approval is required.`);
   }
   if (!reason) {
     throw new Error('Missing mandatory approval reason (--reason <text>).');
@@ -39,14 +43,29 @@ export function writeGovernanceLock(qaDir, meta) {
 
   const approvedAt = new Date().toISOString();
   const files = computeProtectedFileHashes(qaDir);
-  const lockPayload = {
+  const gitIdentity = resolveGitIdentity(qaDir);
+
+  const corePayload = {
     schemaVersion: SCHEMA_VERSIONS.governanceLock,
     gateKernelVersion: GATE_KERNEL_VERSION,
     approvedBy,
     approvedAt,
+    gitUserEmail: gitIdentity.email,
+    gitUserName: gitIdentity.name,
     reason,
-    source: meta.source || 'human-cli',
+    source,
     files,
+  };
+
+  const sig = signPayloadT1('governance.lock', corePayload, {
+    qaDir,
+    repoDir: path.dirname(qaDir),
+    createIfMissing: true,
+  });
+
+  const lockPayload = {
+    ...corePayload,
+    ...(sig.signed ? { mac: sig.mac } : {}),
   };
 
   const lockPath = path.join(aitestDir, 'governance.lock');
@@ -58,14 +77,16 @@ export function writeGovernanceLock(qaDir, meta) {
     JSON.stringify({
       approvedAt,
       approvedBy,
+      gitUserEmail: gitIdentity.email,
       reason,
       source: lockPayload.source,
       fileCount: Object.keys(files).length,
+      trustTier: sig.trustTier,
     }) + '\n',
     'utf8'
   );
 
-  return { lockPath, lock: lockPayload };
+  return { lockPath, lock: lockPayload, trustTier: sig.trustTier };
 }
 
 /**
@@ -86,8 +107,8 @@ export function ensureInitialGovernanceLock(qaDir) {
 }
 
 /**
- * CLI-only governance command (`aitest governance status | verify | approve`).
- * Intentionally NEVER registered in MCP `TOOL_SPECS` so AI Agents cannot self-approve tampered configs.
+ * CLI-only governance command (`ai-test-workbench governance status | verify | approve`).
+ * Intentionally NEVER registered in MCP tool registry so AI Agents cannot invoke approval via MCP.
  * @param {Record<string, any>} [options]
  */
 export async function runGovernanceCommand(options = {}) {
@@ -111,14 +132,15 @@ export async function runGovernanceCommand(options = {}) {
       console.log(JSON.stringify(check, null, 2));
       return check.ok ? 0 : 1;
     }
+    for (const w of check.warnings || []) console.warn(`[WARN] ${w}`);
     if (!check.ok) {
       for (const e of check.errors) console.error(`[FAIL] ${e}`);
       return 1;
     }
     console.log(
       check.enforced
-        ? `[Governance OK] All protected QA files match .aitest/governance.lock (approvedBy=${check.approvedBy}).`
-        : '[Governance WARN] .aitest/governance.lock not initialized yet.'
+        ? `[Governance OK] All protected QA files match .aitest/governance.lock (approvedBy=${check.approvedBy}, trustTier=${check.trustTier}).`
+        : '[Governance WARN] Workspace is not initialized yet.'
     );
     return 0;
   }
@@ -142,7 +164,7 @@ export async function runGovernanceCommand(options = {}) {
       return 1;
     }
     if (BOT_APPROVER_RE.test(by)) {
-      console.error(`[Governance Security Blocked] Approver "${by}" is a reserved AI/bot identifier. Human reviewer required.`);
+      console.error(`[Governance Security Blocked] Approver "${by}" matches a reserved AI/bot identifier. Human reviewer required.`);
       return 2;
     }
 
@@ -165,13 +187,15 @@ export async function runGovernanceCommand(options = {}) {
       lockPath: written.lockPath,
       approvedBy: written.lock.approvedBy,
       approvedAt: written.lock.approvedAt,
+      gitUserEmail: written.lock.gitUserEmail,
+      trustTier: written.trustTier,
       protectedCount: Object.keys(written.lock.files).length,
     };
     if (options.json) {
       console.log(JSON.stringify(out, null, 2));
     } else {
       console.log(
-        `[Governance Approved] Locked ${out.protectedCount} protected QA file(s) by "${out.approvedBy}" -> ${out.lockPath}`
+        `[Governance Approved] Locked ${out.protectedCount} protected QA file(s) by "${out.approvedBy}" (${out.trustTier}) -> ${out.lockPath}`
       );
     }
     return 0;

@@ -11,17 +11,20 @@ test('repository passes bilingual docs pairing, relative links, and desensitizat
   assert.ok(res.checkedMarkdownCount >= 40);
 });
 
-test('checkDocsAndHygiene detects missing English pair, English-only default doc, broken link, and sensitive leak', () => {
+test('checkDocsAndHygiene detects missing English pair, English-only default doc, broken link, unknown MCP tool, and sensitive leak', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aitest-doccheck-'));
   try {
     fs.writeFileSync(path.join(tmpDir, 'GUIDE.md'), '# Guide\nSee [Missing](./missing.md)\nEnglish only.\n', 'utf8');
-    fs.writeFileSync(path.join(tmpDir, 'leak.txt'), ['jin', 'ling', 'test'].join('') + '\n', 'utf8');
+    fs.writeFileSync(path.join(tmpDir, 'AGENTS.md'), '# 指南\n调用 `aitest_nonexistent_tool`。\n', 'utf8');
+    fs.writeFileSync(path.join(tmpDir, 'AGENTS.en.md'), '# Guide\nCall `aitest_doctor`.\n', 'utf8');
+    fs.writeFileSync(path.join(tmpDir, 'leak.txt'), 'Leaked local path: C:\\Users\\alice\\private-repo\\qa\n', 'utf8');
 
     const res = checkDocsAndHygiene(tmpDir);
     assert.equal(res.ok, false);
     assert.ok(res.errors.some((e) => e.includes('[Broken Link]')));
     assert.ok(res.errors.some((e) => e.includes('[Chinese Default Missing]')));
     assert.ok(res.errors.some((e) => e.includes('[Missing English Pair]')));
+    assert.ok(res.errors.some((e) => e.includes('[Unknown MCP Tool in Docs]')));
     assert.ok(res.errors.some((e) => e.includes('[Hygiene Violation:')));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

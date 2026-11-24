@@ -43,7 +43,7 @@ We adopt **Option B: Zero-Dependency Multi-Protocol Kernel v2 (`src/mcp-server.m
    - Emits `notifications/progress` whenever `_meta.progressToken` is supplied.
    - Handles `notifications/cancelled` by terminating the entire child process tree via `killProcessTree(pid)`.
 3. **Read Concurrency & Per-Workspace Write Locks**:
-   - Read-only tools execute concurrently with zero global lock; mutating tools acquire a normalized per-workspace lock (`withWorkspaceWriteLock`) within `--allowed-root` boundaries.
+   - Read-only tools execute concurrently with zero global lock; mutating tools acquire a normalized cross-process per-workspace lock (`withWorkspaceWriteLock`) strictly bounded by the `--workspace-root` ceiling intersected with client roots.
 4. **Hardened Streamable HTTP & Privilege Separation**:
    - Only `initialize` creates sessions; unknown/expired `Mcp-Session-Id` returns `404 Not Found`; sessions enforce idle TTL and `maxSessions` eviction; Bearer auth uses `crypto.timingSafeEqual`.
    - Human-only `aitest governance approve` is **never** exposed over MCP and hard-fails if `AITEST_MCP_CHILD=1`.

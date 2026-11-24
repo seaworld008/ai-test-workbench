@@ -28,7 +28,7 @@
 
 - **Protocol Versions Supported**: `2025-11-25` (latest negotiated fallback), `2025-06-18`, `2025-03-26`, `2024-11-05`.
 - **Transports**:
-  - `stdio`: `npx -y ai-test-workbench mcp-serve`
+  - `stdio`: `node tools/aitest.mjs mcp-serve` (or pinned `npx --package=ai-test-workbench@5.0.0 ai-test-workbench mcp-serve`)
   - **Streamable HTTP** (`/mcp`): `POST` (single + JSON-RPC batch, `application/json` or `text/event-stream` per `Accept`, `Mcp-Session-Id` & `MCP-Protocol-Version` headers), `GET` (SSE stream), `DELETE` (close session)
   - **Legacy HTTP+SSE** (`GET /sse` + `POST /messages?sessionId=...`) + `GET /health`
 - **Capabilities**:

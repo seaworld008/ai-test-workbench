@@ -5,13 +5,18 @@ import { loadMergedQaEnv } from './origin-guard.mjs';
 import {
   GATE_KERNEL_VERSION,
   analyzeHealerDiffText,
+  analyzeSourceAst,
   auditResultsJson,
   classifyAssertionStatement,
+  compareSpecSourcesAst,
   computeProtectedFileHashes,
   computeWorkspaceInputHash,
   isCoveredByWaiver,
+  isProtectedDiffPath,
   loadAitestConfig,
   loadAndValidateWaivers,
+  resolveDefaultDiffBase,
+  resolveGitRoot,
   runAuditForQaDir,
   runGitDiffGuard,
   runStaticSpecChecks,
@@ -23,13 +28,18 @@ import {
 export {
   GATE_KERNEL_VERSION,
   analyzeHealerDiffText,
+  analyzeSourceAst,
   auditResultsJson,
   classifyAssertionStatement,
+  compareSpecSourcesAst,
   computeProtectedFileHashes,
   computeWorkspaceInputHash,
   isCoveredByWaiver,
+  isProtectedDiffPath,
   loadAitestConfig,
   loadAndValidateWaivers,
+  resolveDefaultDiffBase,
+  resolveGitRoot,
   runAuditForQaDir,
   runGitDiffGuard,
   runStaticSpecChecks,
@@ -55,13 +65,17 @@ export async function runAuditCommand(options = {}) {
   const mergedEnv = loadMergedQaEnv(qaDir);
   const allowMutation = mergedEnv.TEST_ALLOW_MUTATION === '1' || mergedEnv.TEST_ALLOW_MUTATION === 'true';
 
+  // Fail-closed: never allow MCP child processes to bypass Run Ledger binding (`T-03`)
+  const allowUnbound =
+    process.env.AITEST_MCP_CHILD === '1' ? false : Boolean(options.allowUnboundResults);
+
   const res = runAuditForQaDir(qaDir, {
     resultsPath: options.results,
     waiversPath: options.waivers,
     checkSpecs: Boolean(options.checkSpecs),
     requireE2e: Boolean(options.requireE2e),
     staticOnly: Boolean(options.staticOnly),
-    allowUnboundResults: Boolean(options.allowUnboundResults),
+    allowUnboundResults: allowUnbound,
     maxFlaky: options.maxFlaky,
     maxSkipped: options.maxSkipped,
     diffBase: options.diffBase,
@@ -70,10 +84,13 @@ export async function runAuditCommand(options = {}) {
 
   if (options.json) {
     console.log(JSON.stringify(res, null, 2));
-    return res.ok ? 0 : 1;
+    return res.outcome === 'blocked' ? 2 : res.ok ? 0 : 1;
   }
 
-  console.log(`\n=== ${lang === 'zh' ? '四层防假绿质量门禁审计 (audit v5)' : '4-Layer Anti-Fake-Green Quality Gate (audit v5)'} ===`);
+  console.log(
+    `\n=== ${lang === 'zh' ? '四层防假绿质量门禁审计 (audit v5.1)' : '4-Layer Anti-Fake-Green Quality Gate (audit v5.1)'} ===`
+  );
+  console.log(`Outcome: ${String(res.outcome || (res.ok ? 'pass' : 'fail')).toUpperCase()} · TrustTier: ${res.trustTier || 'T0'}`);
   if (res.runId) {
     console.log(`Bound Run ID: ${res.runId}`);
   }
@@ -92,7 +109,7 @@ export async function runAuditCommand(options = {}) {
     for (const e of res.errors) {
       console.error(`[FAIL] ${e}`);
     }
-    return 1;
+    return res.outcome === 'blocked' ? 2 : 1;
   }
   console.log(`[OK] ${lang === 'zh' ? '四层防假绿质量门禁全部通过' : 'All 4 quality gate layers passed'}.\n`);
   return 0;

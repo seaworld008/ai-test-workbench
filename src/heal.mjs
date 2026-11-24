@@ -4,8 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
 import {
-  analyzeHealerDiffText,
+  compareSpecSourcesAst,
   loadAitestConfig,
+  resolveDefaultDiffBase,
   scanSpecFilesFallback,
   verifyGovernanceLockInQaDir,
 } from './audit.mjs';
@@ -13,54 +14,124 @@ import { generateDiagnosticsMarkdown } from './diagnose.mjs';
 import { redactSecrets, resolvePlaywrightCli } from './proc.mjs';
 import { executeSuiteCore } from './runner.mjs';
 import { SCHEMA_VERSIONS } from './version.mjs';
+import {
+  getFileAtGitRef,
+  signPayloadT1,
+  verifyPayloadT1,
+} from '../templates/playwright-qa/support/gate-kernel.mjs';
 
 export const MAX_HEAL_ATTEMPTS = 3;
 
-function buildUnifiedDiffFromSnapshots(relFile, beforeText, afterText) {
-  if (beforeText === afterText) return '';
-  const beforeLines = String(beforeText || '').split(/\r?\n/);
-  const afterLines = String(afterText || '').split(/\r?\n/);
-  const lines = [
-    `diff --git a/${relFile} b/${relFile}`,
-    `--- a/${relFile}`,
-    `+++ b/${relFile}`,
-    `@@ -1,${beforeLines.length} +1,${afterLines.length} @@`,
-  ];
-  // Line-level diff preserving removed/added statements for semantic diff analysis
-  const beforeCounts = new Map();
-  for (const l of beforeLines) beforeCounts.set(l, (beforeCounts.get(l) || 0) + 1);
-  const afterCounts = new Map();
-  for (const l of afterLines) afterCounts.set(l, (afterCounts.get(l) || 0) + 1);
-
-  const emittedRemoved = new Map();
-  for (const l of beforeLines) {
-    const keep = afterCounts.get(l) || 0;
-    const used = emittedRemoved.get(l) || 0;
-    if (used < (beforeCounts.get(l) || 0) - keep) {
-      lines.push(`-${l}`);
-      emittedRemoved.set(l, used + 1);
-    }
-  }
-  const emittedAdded = new Map();
-  for (const l of afterLines) {
-    const keep = beforeCounts.get(l) || 0;
-    const used = emittedAdded.get(l) || 0;
-    if (used < (afterCounts.get(l) || 0) - keep) {
-      lines.push(`+${l}`);
-      emittedAdded.set(l, used + 1);
-    }
-  }
-  return lines.join('\n');
+function getHealsDir(qaDir) {
+  return path.join(qaDir, '.aitest', 'heals');
 }
 
 function getSessionPath(qaDir, sessionId) {
   const safeId = String(sessionId || '').replace(/[^a-zA-Z0-9_-]/g, '');
-  return path.join(qaDir, '.aitest', 'heals', `${safeId}.json`);
+  return path.join(getHealsDir(qaDir), `${safeId}.json`);
+}
+
+function getHealLedgerPath(qaDir) {
+  return path.join(getHealsDir(qaDir), 'ledger.json');
 }
 
 /**
- * Starts a stateful Heal Governance Session (`R1-4`: `aitest_heal_begin`).
- * Only Class A failures allow repair attempts (<= 3); B/C/D are locked to reporting/escalation.
+ * Reads cross-session per-`testId` attempt counters (`T-07`, `A-6`) so opening a new heal session
+ * cannot reset the 3-attempt hard cap.
+ */
+function readHealAttemptLedger(qaDir) {
+  const lp = getHealLedgerPath(qaDir);
+  if (!fs.existsSync(lp)) return { ok: true, byTestId: {} };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(lp, 'utf8'));
+    const macCheck = verifyPayloadT1('heal.ledger', parsed, parsed.mac, {
+      qaDir,
+      repoDir: path.dirname(qaDir),
+      requireMac: Boolean(parsed.mac),
+    });
+    if (!macCheck.ok) {
+      return { ok: false, error: `[Heal Governance Blocked] ${macCheck.reason}`, byTestId: {} };
+    }
+    return { ok: true, byTestId: parsed.byTestId && typeof parsed.byTestId === 'object' ? parsed.byTestId : {} };
+  } catch (err) {
+    return { ok: false, error: `[Heal Governance Blocked] Corrupted heal ledger: ${err.message}`, byTestId: {} };
+  }
+}
+
+function writeHealAttemptLedger(qaDir, byTestId) {
+  const healsDir = getHealsDir(qaDir);
+  fs.mkdirSync(healsDir, { recursive: true });
+  const core = {
+    schemaVersion: 1,
+    updatedAt: new Date().toISOString(),
+    byTestId,
+  };
+  const sig = signPayloadT1('heal.ledger', core, { qaDir, repoDir: path.dirname(qaDir), createIfMissing: true });
+  const payload = { ...core, ...(sig.signed ? { mac: sig.mac } : {}) };
+  fs.writeFileSync(getHealLedgerPath(qaDir), JSON.stringify(payload, null, 2) + '\n', 'utf8');
+}
+
+function writeSignedSession(qaDir, session) {
+  const healsDir = getHealsDir(qaDir);
+  fs.mkdirSync(healsDir, { recursive: true });
+  const core = { ...session };
+  delete core.mac;
+  const sig = signPayloadT1('heal.session', core, { qaDir, repoDir: path.dirname(qaDir), createIfMissing: true });
+  const signed = { ...core, ...(sig.signed ? { mac: sig.mac } : {}) };
+  fs.writeFileSync(getSessionPath(qaDir, session.sessionId), JSON.stringify(signed, null, 2) + '\n', 'utf8');
+  return signed;
+}
+
+function readAndVerifySession(qaDir, sessionId) {
+  const sessionPath = getSessionPath(qaDir, sessionId);
+  if (!sessionId || !fs.existsSync(sessionPath)) {
+    return { ok: false, exitCode: 1, error: `Unknown heal session "${sessionId}". Call aitest_heal_begin first.` };
+  }
+  let session;
+  try {
+    session = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
+  } catch (err) {
+    return { ok: false, exitCode: 2, error: `[Heal Governance Blocked] Corrupted heal session "${sessionId}": ${err.message}` };
+  }
+  const macCheck = verifyPayloadT1('heal.session', session, session.mac, {
+    qaDir,
+    repoDir: path.dirname(qaDir),
+    requireMac: Boolean(session.mac),
+  });
+  if (!macCheck.ok) {
+    return {
+      ok: false,
+      exitCode: 2,
+      error: `[Heal Governance Blocked] Tampered heal session "${sessionId}": ${macCheck.reason}`,
+    };
+  }
+  return { ok: true, session, sessionPath };
+}
+
+/**
+ * Captures the authoritative baseline of `relSpec` from Git base ref (`T-07`) when available,
+ * preventing agents from mutating the spec BEFORE calling `aitest_heal_begin`.
+ */
+function resolveSpecBaseline(qaDir, relSpec, absSpec) {
+  const baseRes = resolveDefaultDiffBase(qaDir);
+  if (baseRes.isGitRepo && baseRes.gitRoot && baseRes.resolved) {
+    const relFromGitRoot = path.relative(baseRes.gitRoot, absSpec).replace(/\\/g, '/');
+    const gitContent = getFileAtGitRef(baseRes.gitRoot, baseRes.resolved, relFromGitRoot);
+    if (typeof gitContent === 'string') {
+      return { content: gitContent, source: `git:${baseRes.resolved}`, baseSha: baseRes.sha };
+    }
+  }
+  return {
+    content: fs.existsSync(absSpec) ? fs.readFileSync(absSpec, 'utf8') : '',
+    source: 'disk-snapshot',
+    baseSha: null,
+  };
+}
+
+/**
+ * Starts a stateful, T1-HMAC-signed Heal Governance Session (`R1-4`, `T-07`).
+ * Only Class A failures allow repair attempts (<= 3 across ALL sessions for the same `testId`);
+ * Class B/C/D are locked to reporting/escalation.
  * @param {string} qaDir
  * @param {{ testId?: string, resultsPath?: string }} [options]
  */
@@ -97,18 +168,27 @@ export function beginHealSession(qaDir, options = {}) {
     };
   }
 
+  // Enforce cross-session attempt accounting per testId (`T-07`)
+  const ledger = readHealAttemptLedger(qaDir);
+  if (!ledger.ok) {
+    return { ok: false, exitCode: 2, error: ledger.error };
+  }
+  const priorAttemptsForTest = Number(ledger.byTestId[targetFailure.testId]?.attemptsUsed || 0);
+
   const sessionId = `heal_${crypto.randomBytes(6).toString('hex')}`;
   const relSpec = targetFailure.file.startsWith('tests/') ? targetFailure.file : `tests/${targetFailure.file}`;
   const absSpec = path.join(qaDir, relSpec);
-  const baselineSpecContent = fs.existsSync(absSpec) ? fs.readFileSync(absSpec, 'utf8') : '';
+  const baseline = resolveSpecBaseline(qaDir, relSpec, absSpec);
 
-  const repairPermitted = targetFailure.categoryCode === 'A';
+  const repairPermitted = targetFailure.categoryCode === 'A' && priorAttemptsForTest < MAX_HEAL_ATTEMPTS;
+  const remainingAttempts = targetFailure.categoryCode === 'A' ? Math.max(0, MAX_HEAL_ATTEMPTS - priorAttemptsForTest) : 0;
+
   const session = {
     schemaVersion: SCHEMA_VERSIONS.healSession,
     sessionId,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    state: 'diagnosed',
+    state: priorAttemptsForTest >= MAX_HEAL_ATTEMPTS && targetFailure.categoryCode === 'A' ? 'escalated' : 'diagnosed',
     testId: targetFailure.testId,
     title: targetFailure.title,
     specFile: relSpec,
@@ -116,21 +196,23 @@ export function beginHealSession(qaDir, options = {}) {
     categoryCode: targetFailure.categoryCode,
     category: targetFailure.category,
     confidence: targetFailure.confidence,
+    candidates: targetFailure.candidates || [targetFailure.categoryCode],
     traceId: targetFailure.traceId,
     errorSnippet: targetFailure.errorSnippet,
     codeCorrelation: targetFailure.codeCorrelation,
     repairPermitted,
-    maxAttempts: repairPermitted ? MAX_HEAL_ATTEMPTS : 0,
-    attemptsUsed: 0,
+    maxAttempts: targetFailure.categoryCode === 'A' ? MAX_HEAL_ATTEMPTS : 0,
+    attemptsUsed: priorAttemptsForTest,
+    remainingAttempts,
+    baselineSource: baseline.source,
+    baselineSha: baseline.baseSha,
     allowedActions: repairPermitted ? ['attempt', 'conclude'] : ['conclude'],
-    baselineSpecContent,
+    baselineSpecContent: baseline.content,
     attempts: [],
     conclusion: null,
   };
 
-  const healDir = path.join(qaDir, '.aitest', 'heals');
-  fs.mkdirSync(healDir, { recursive: true });
-  fs.writeFileSync(getSessionPath(qaDir, sessionId), JSON.stringify(session, null, 2) + '\n', 'utf8');
+  writeSignedSession(qaDir, session);
 
   const { baselineSpecContent: _omit, ...publicSession } = session;
   return {
@@ -142,22 +224,16 @@ export function beginHealSession(qaDir, options = {}) {
 
 /**
  * Validates and executes a single Class-A repair attempt (`aitest_heal_attempt`), enforcing:
- * 1) Category === 'A' (B/C/D hard-blocked -> 0% mis-heal rate)
- * 2) `attemptsUsed < 3`
- * 3) Layer 0 Governance Lock + Layer 2 Static AST + Layer 3 Semantic AST Diff Guard
- * 4) Optional targeted Playwright re-run when `skipRun !== true`
+ * 1) T1 HMAC session integrity
+ * 2) Category === 'A' (B/C/D hard-blocked -> 0% mis-heal rate)
+ * 3) Cross-session `attemptsUsed < 3` per `testId`
+ * 4) Layer 0 Governance Lock + Layer 2 Static AST + Layer 3 Full-File AST Semantic Diff Guard
+ * 5) Optional targeted Playwright re-run when `skipRun !== true`
  */
 export async function attemptHealRepair(qaDir, options = {}) {
-  const sessionPath = getSessionPath(qaDir, options.sessionId);
-  if (!options.sessionId || !fs.existsSync(sessionPath)) {
-    return {
-      ok: false,
-      exitCode: 1,
-      error: `Unknown heal session "${options.sessionId}". Call aitest_heal_begin first.`,
-    };
-  }
-
-  const session = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
+  const loaded = readAndVerifySession(qaDir, options.sessionId);
+  if (!loaded.ok) return loaded;
+  const session = loaded.session;
 
   if (session.state === 'verified' || session.state === 'concluded' || session.state === 'escalated') {
     return {
@@ -173,7 +249,7 @@ export async function attemptHealRepair(qaDir, options = {}) {
       attemptedAt: session.updatedAt,
       blockedReason: `Category ${session.categoryCode} does not permit test modification`,
     });
-    fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2) + '\n', 'utf8');
+    writeSignedSession(qaDir, session);
     return {
       ok: false,
       exitCode: 2,
@@ -182,16 +258,27 @@ export async function attemptHealRepair(qaDir, options = {}) {
     };
   }
 
-  if (session.attemptsUsed >= session.maxAttempts) {
+  const ledger = readHealAttemptLedger(qaDir);
+  if (!ledger.ok) {
+    return { ok: false, exitCode: 2, error: ledger.error };
+  }
+  const crossSessionAttempts = Math.max(
+    Number(session.attemptsUsed || 0),
+    Number(ledger.byTestId[session.testId]?.attemptsUsed || 0)
+  );
+
+  if (crossSessionAttempts >= session.maxAttempts) {
+    session.attemptsUsed = crossSessionAttempts;
+    session.remainingAttempts = 0;
     session.state = 'escalated';
     session.allowedActions = ['conclude'];
     session.updatedAt = new Date().toISOString();
-    fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2) + '\n', 'utf8');
+    writeSignedSession(qaDir, session);
     return {
       ok: false,
       exitCode: 2,
       exhausted: true,
-      error: `[Heal Governance Blocked] Maximum ${session.maxAttempts} repair attempts exhausted for "${session.testId}". Session escalated to human review.`,
+      error: `[Heal Governance Blocked] Maximum ${session.maxAttempts} repair attempts exhausted across sessions for "${session.testId}". Session escalated to human review.`,
     };
   }
 
@@ -207,41 +294,56 @@ export async function attemptHealRepair(qaDir, options = {}) {
     };
   }
 
-  // Enforce Semantic AST Diff Guard against baseline snapshot captured at `heal_begin`
+  // Enforce Full-File AST Semantic Diff Guard against Git/session baseline (`B-1`)
   const absSpec = path.join(qaDir, session.specFile);
   const currentContent = fs.existsSync(absSpec) ? fs.readFileSync(absSpec, 'utf8') : '';
-  const syntheticDiff = buildUnifiedDiffFromSnapshots(session.specFile, session.baselineSpecContent || '', currentContent);
   const cfg = loadAitestConfig(qaDir);
-  const diffCheck = analyzeHealerDiffText(syntheticDiff, { assertFunctionNames: cfg.assertFunctionNames });
+  const astDiffCheck = compareSpecSourcesAst(session.specFile, session.baselineSpecContent || '', currentContent, {
+    assertFunctionNames: cfg.assertFunctionNames,
+    qaDir,
+  });
   const staticCheck = scanSpecFilesFallback(path.join(qaDir, 'tests'), {
     assertFunctionNames: cfg.assertFunctionNames,
     qaDir,
   });
 
-  const gateViolations = [...diffCheck.violations, ...staticCheck.errors];
+  const gateViolations = [...new Set([...astDiffCheck.violations, ...staticCheck.errors])];
+  const nextAttempts = crossSessionAttempts + 1;
+  ledger.byTestId[session.testId] = {
+    attemptsUsed: nextAttempts,
+    lastSessionId: session.sessionId,
+    updatedAt: new Date().toISOString(),
+  };
+
   if (gateViolations.length > 0) {
-    session.attemptsUsed += 1;
-    session.state = session.attemptsUsed >= session.maxAttempts ? 'escalated' : 'repairing';
+    session.attemptsUsed = nextAttempts;
+    session.remainingAttempts = Math.max(0, session.maxAttempts - nextAttempts);
+    session.state = nextAttempts >= session.maxAttempts ? 'escalated' : 'repairing';
+    if (session.state === 'escalated') session.allowedActions = ['conclude'];
     session.updatedAt = new Date().toISOString();
     session.attempts.push({
-      attemptNumber: session.attemptsUsed,
+      attemptNumber: nextAttempts,
       attemptedAt: session.updatedAt,
       gatePassed: false,
       violations: gateViolations,
     });
-    fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2) + '\n', 'utf8');
+    writeHealAttemptLedger(qaDir, ledger.byTestId);
+    writeSignedSession(qaDir, session);
     return {
       ok: false,
       exitCode: 2,
       gateBlocked: true,
-      attemptsUsed: session.attemptsUsed,
-      remainingAttempts: Math.max(0, session.maxAttempts - session.attemptsUsed),
+      sessionId: session.sessionId,
+      state: session.state,
+      attemptsUsed: nextAttempts,
+      remainingAttempts: session.remainingAttempts,
       violations: gateViolations,
-      error: `[Heal Semantic Gate Blocked] Repair attempt #${session.attemptsUsed} violated anti-fake-green rules:\n${gateViolations.join('\n')}`,
+      error: `[Heal Semantic Gate Blocked] Repair attempt #${nextAttempts} violated anti-fake-green rules:\n${gateViolations.join('\n')}`,
     };
   }
 
-  session.attemptsUsed += 1;
+  session.attemptsUsed = nextAttempts;
+  session.remainingAttempts = Math.max(0, session.maxAttempts - nextAttempts);
   let testPassed = Boolean(options.assumeTestPassed);
   let runId = null;
 
@@ -259,28 +361,29 @@ export async function attemptHealRepair(qaDir, options = {}) {
   session.updatedAt = new Date().toISOString();
   session.state = testPassed
     ? 'verified'
-    : session.attemptsUsed >= session.maxAttempts
+    : nextAttempts >= session.maxAttempts
       ? 'escalated'
       : 'repairing';
   if (session.state === 'verified' || session.state === 'escalated') {
     session.allowedActions = ['conclude'];
   }
   session.attempts.push({
-    attemptNumber: session.attemptsUsed,
+    attemptNumber: nextAttempts,
     attemptedAt: session.updatedAt,
     gatePassed: true,
     testPassed,
     runId,
   });
-  fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2) + '\n', 'utf8');
+  writeHealAttemptLedger(qaDir, ledger.byTestId);
+  writeSignedSession(qaDir, session);
 
   return {
     ok: testPassed,
     exitCode: testPassed ? 0 : 1,
     sessionId: session.sessionId,
     state: session.state,
-    attemptsUsed: session.attemptsUsed,
-    remainingAttempts: Math.max(0, session.maxAttempts - session.attemptsUsed),
+    attemptsUsed: nextAttempts,
+    remainingAttempts: session.remainingAttempts,
     runId,
   };
 }
@@ -289,16 +392,9 @@ export async function attemptHealRepair(qaDir, options = {}) {
  * Concludes a Heal Session (`aitest_heal_conclude`), generating a structured Defect Ticket for Class C bugs.
  */
 export function concludeHealSession(qaDir, options = {}) {
-  const sessionPath = getSessionPath(qaDir, options.sessionId);
-  if (!options.sessionId || !fs.existsSync(sessionPath)) {
-    return {
-      ok: false,
-      exitCode: 1,
-      error: `Unknown heal session "${options.sessionId}".`,
-    };
-  }
-
-  const session = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
+  const loaded = readAndVerifySession(qaDir, options.sessionId);
+  if (!loaded.ok) return loaded;
+  const session = loaded.session;
   const outcome = String(options.outcome || (session.state === 'verified' ? 'verified' : 'reported')).toLowerCase();
 
   if (outcome === 'verified' && session.state !== 'verified') {
@@ -358,7 +454,7 @@ export function concludeHealSession(qaDir, options = {}) {
     defectTicketPath,
     concludedAt: session.updatedAt,
   };
-  fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2) + '\n', 'utf8');
+  writeSignedSession(qaDir, session);
 
   return {
     ok: true,

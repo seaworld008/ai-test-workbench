@@ -1,0 +1,74 @@
+[
+  {
+    "id": "REAL-PW-01-toHaveText-value-regression-with-call-log",
+    "expected": "C",
+    "description": "Real Playwright toHaveText value regression with waiting for getByTestId call log MUST classify as C (never A)",
+    "error": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('seats-left')\nExpected string: \"49/50\"\nReceived string: \"50/50\"\nTimeout: 5000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 5000ms\n  - waiting for getByTestId('seats-left')\n    9 × locator resolved to <span data-testid=\"seats-left\">50/50</span>\n      - unexpected value \"50/50\""
+  },
+  {
+    "id": "REAL-PW-02-toHaveCount-regression-with-call-log",
+    "expected": "C",
+    "description": "Real Playwright toHaveCount regression with waiting for locator call log MUST classify as C",
+    "error": "Error: expect(locator).toHaveCount(expected) failed\n\nLocator: getByRole('listitem')\nExpected: 3\nReceived: 2\nTimeout: 5000ms\n\nCall log:\n  - Expect \"toHaveCount\" with timeout 5000ms\n  - waiting for getByRole('listitem')\n    9 × locator resolved to 2 elements\n      - unexpected value \"2\""
+  },
+  {
+    "id": "REAL-PW-03-toHaveValue-regression-with-call-log",
+    "expected": "C",
+    "description": "Real Playwright toHaveValue input mismatch with call log MUST classify as C",
+    "error": "Error: expect(locator).toHaveValue(expected) failed\n\nLocator: getByLabel('Quantity')\nExpected string: \"2\"\nReceived string: \"1\"\nTimeout: 5000ms\n\nCall log:\n  - Expect \"toHaveValue\" with timeout 5000ms\n  - waiting for getByLabel('Quantity')\n    8 × locator resolved to <input value=\"1\" />\n      - unexpected value \"1\""
+  },
+  {
+    "id": "REAL-PW-04-toHaveURL-regression-with-call-log",
+    "expected": "C",
+    "description": "Real Playwright toHaveURL redirect regression MUST classify as C",
+    "error": "Error: expect(page).toHaveURL(expected) failed\n\nExpected pattern: /\\/orders\\/\\d+/\nReceived string:  \"http://127.0.0.1:4173/error?code=500\"\nTimeout: 5000ms\n\nCall log:\n  - Expect \"toHaveURL\" with timeout 5000ms\n  - waiting for navigation"
+  },
+  {
+    "id": "REAL-PW-05-toContainText-regression-with-call-log",
+    "expected": "C",
+    "description": "Real Playwright toContainText mismatch with locator resolved MUST classify as C",
+    "error": "Error: expect(locator).toContainText(expected) failed\n\nLocator: getByRole('status')\nExpected substring: \"Enrollment confirmed\"\nReceived string:    \"Enrollment failed: seat conflict\"\nTimeout: 5000ms\n\nCall log:\n  - waiting for getByRole('status')\n    9 × locator resolved to <div role=\"status\">Enrollment failed: seat conflict</div>"
+  },
+  {
+    "id": "REAL-PW-06-toBeDisabled-state-regression",
+    "expected": "C",
+    "description": "Real Playwright toBeDisabled regression (sold-out button left enabled) MUST classify as C",
+    "error": "Error: expect(locator).toBeDisabled() failed\n\nLocator: getByRole('button', { name: 'Sold Out' })\nExpected: disabled\nReceived: enabled\nTimeout: 5000ms\n\nCall log:\n  - Expect \"toBeDisabled\" with timeout 5000ms\n  - waiting for getByRole('button', { name: 'Sold Out' })\n    9 × locator resolved to <button>Sold Out</button>\n      - unexpected value \"enabled\""
+  },
+  {
+    "id": "REAL-PW-07-toMatchAriaSnapshot-regression",
+    "expected": "C",
+    "description": "Real Playwright toMatchAriaSnapshot structural diff MUST classify as C",
+    "error": "Error: expect(locator).toMatchAriaSnapshot(expected) failed\n\nLocator: getByRole('main')\n- Expected  - 1\n+ Received  + 1\n  - heading \"Smart Campus\"\n- - button \"Sold Out\" [disabled]\n+ - button \"Sold Out\"\nCall log:\n  - waiting for getByRole('main')"
+  },
+  {
+    "id": "REAL-PW-08-api-status-toBe-regression",
+    "expected": "C",
+    "description": "Real Playwright API status code regression (403 -> 200 RBAC leak) MUST classify as C",
+    "error": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: 403\nReceived: 200\n    at tests/api/courses.spec.ts:51:28"
+  },
+  {
+    "id": "REAL-PW-09-real-locator-not-found-timeout",
+    "expected": "A",
+    "description": "True Class A locator drift where element never existed (no Received value)",
+    "error": "TimeoutError: locator.click: Timeout 15000ms exceeded.\nCall log:\n  - waiting for getByRole('button', { name: 'Legacy Submit CTA' })"
+  },
+  {
+    "id": "REAL-PW-10-strict-mode-violation-multiple-elements",
+    "expected": "A",
+    "description": "True Class A strict mode locator ambiguity matching 2 elements",
+    "error": "Error: locator.click: Error: strict mode violation: getByRole('button', { name: 'Enroll' }) resolved to 2 elements:\n    1) <button>Enroll</button>\n    2) <button>Enroll</button>\nCall log:\n  - waiting for getByRole('button', { name: 'Enroll' })"
+  },
+  {
+    "id": "REAL-PW-11-connection-refused-env-failure",
+    "expected": "B",
+    "description": "Real Class B network connection refused to local target server",
+    "error": "Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:4173/\nCall log:\n  - navigating to \"http://127.0.0.1:4173/\", waiting until \"load\""
+  },
+  {
+    "id": "REAL-PW-12-toHaveText-element-not-found-received-not-found",
+    "expected": "A",
+    "description": "Playwright toHaveText where element literally was not found in DOM (Received: <element(s) not found>) is Class A locator drift",
+    "error": "Error: expect(locator).toHaveText(expected) failed\n\nLocator: getByTestId('legacy-badge-id')\nExpected string: \"49/50\"\nReceived: <element(s) not found>\nTimeout: 5000ms\n\nCall log:\n  - Expect \"toHaveText\" with timeout 5000ms\n  - waiting for getByTestId('legacy-badge-id')"
+  }
+]

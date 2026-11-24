@@ -1,9 +1,13 @@
 // @ts-check
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
-import { GATE_KERNEL_VERSION, runAuditForQaDir, verifyGovernanceLockInQaDir } from './audit.mjs';
+import {
+  GATE_KERNEL_VERSION,
+  resolveDefaultDiffBase,
+  runAuditForQaDir,
+  verifyGovernanceLockInQaDir,
+} from './audit.mjs';
 import { generateDiagnosticsMarkdown } from './diagnose.mjs';
 import { computeImpact } from './impact.mjs';
 import { resolveGitHeadSha } from './ledger.mjs';
@@ -11,12 +15,24 @@ import { evaluateTargetSafety, loadMergedQaEnv } from './origin-guard.mjs';
 import { resolvePlaywrightCli } from './proc.mjs';
 import { executeSuiteCore } from './runner.mjs';
 import { buildRequirementTraceMatrix } from './traceability.mjs';
+import {
+  buildInTotoVerdictAttestation,
+  resolveVerdictTrustTier,
+  tryCosignKeylessSign,
+} from './trust.mjs';
 import { SCHEMA_VERSIONS, WORKBENCH_VERSION } from './version.mjs';
+import {
+  listChangedFilesUnderDir,
+  resolveGitTreeSha,
+  verifyPayloadT1,
+} from '../templates/playwright-qa/support/gate-kernel.mjs';
 
 function buildSarifReport(verdictObj) {
   const results = [];
   for (const errMsg of verdictObj.gateErrors || []) {
-    const codeMatch = /\[(AITEST-G\d+|Governance Tamper Blocked|Stale Results Blocked|Static Check)\]/.exec(errMsg);
+    const codeMatch = /\[(AITEST-G\d+|Governance Tamper Blocked|Stale Results Blocked|Run Ledger Blocked|Heal Governance Blocked|Static Check)\]/.exec(
+      errMsg
+    );
     results.push({
       ruleId: codeMatch ? codeMatch[1].replace(/\s+/g, '-') : 'AITEST-GATE-FAILURE',
       level: 'error',
@@ -65,6 +81,18 @@ function buildPrVerdictMarkdown(verdict, lang = 'zh') {
       : verdict.verdict === 'blocked'
         ? 'BLOCKED'
         : 'FAIL';
+  const trustLabel =
+    verdict.trustTier === 'T2'
+      ? isZh
+        ? 'T2 CI 证明（可信绿灯）'
+        : 'T2 CI-Attested (Trustworthy Green)'
+      : verdict.trustTier === 'T1'
+        ? isZh
+          ? 'T1 本地防篡改预检（需 CI T2 终审）'
+          : 'T1 Local Tamper-Evident Pre-Check (CI T2 required to merge)'
+        : isZh
+          ? 'T0 本地建议（不可作为可信绿灯）'
+          : 'T0 Advisory Only (Not a Trustworthy Green)';
   const scopeLabel =
     verdict.acceptanceScope === 'business-e2e'
       ? isZh
@@ -76,14 +104,16 @@ function buildPrVerdictMarkdown(verdict, lang = 'zh') {
 
   const lines = [
     isZh
-      ? `## AI Test Workbench 变更可信判决：**${badge}**`
-      : `## AI Test Workbench Change Verdict: **${badge}**`,
+      ? `## AI Test Workbench 变更验证判决：**${badge}**（\`${verdict.trustTier}\`）`
+      : `## AI Test Workbench Change Verdict: **${badge}** (\`${verdict.trustTier}\`)`,
     '',
-    `- **Run ID**: \`${verdict.runId || 'none'}\` · **Git SHA**: \`${verdict.gitSha}\` · **Confidence**: \`${verdict.confidence.level}\``,
+    `- **Trust Tier**: **${trustLabel}**`,
+    `- **Run ID**: \`${verdict.runId || 'none'}\` · **Git SHA**: \`${verdict.gitSha}\` · **Diff Base**: \`${verdict.base?.resolved || 'none'}\` (${verdict.base?.strategy || 'unknown'})`,
     `- **验收口径 (` + 'acceptanceScope' + `)**: **${scopeLabel}** (\`${verdict.acceptanceScope}\`)`,
-    `- **测试范围**: mode=\`${verdict.scope.mode}\`, executed=\`${verdict.counts?.executed ?? 0}\` (passed=\`${verdict.counts?.passed ?? 0}\`, failed=\`${verdict.counts?.failed ?? 0}\`, flaky=\`${verdict.counts?.flaky ?? 0}\`)`,
+    `- **测试范围**: requested=\`${verdict.scope.requested}\`, actual=\`${verdict.scope.actual}\`${verdict.scope.downgraded ? ' **(DOWNGRADED -> T0)**' : ''}, executed=\`${verdict.counts?.executed ?? 0}\` (passed=\`${verdict.counts?.passed ?? 0}\`, failed=\`${verdict.counts?.failed ?? 0}\`, flaky=\`${verdict.counts?.flaky ?? 0}\`)`,
     `- **四层门禁**: governance=\`${verdict.gates.governance}\` · static=\`${verdict.gates.static}\` · runtime=\`${verdict.gates.runtime}\` · semanticDiff=\`${verdict.gates.semanticDiff}\``,
     `- **需求追溯**: \`${verdict.traceability.coveredRequirements}/${verdict.traceability.totalRequirements}\` (${verdict.traceability.coveragePct}%)`,
+    `- **AI-BOM**: llmCalls=\`${verdict.ai?.llmCalls ?? 0}\``,
     '',
   ];
 
@@ -107,27 +137,89 @@ function buildPrVerdictMarkdown(verdict, lang = 'zh') {
 }
 
 /**
- * One-Call Agent Change Verification Orchestrator (`R1-7`: `aitest_verify_change`).
- * Runs: Layer 0 Governance -> Impact v2 -> Suite Run (Ledger-bound) -> 4-Layer Audit -> Diagnostics v2 -> Attestation + SARIF + PR Summary.
+ * Checks `.aitest/heals/*.json` against modified specs in the current diff (`T-07`):
+ * If an active/unclosed B/C/D heal session exists AND its spec file was edited, block the verdict!
+ * Also detects tampered heal session files via T1 HMAC.
+ */
+function checkHealSessionConflicts(qaDir, baseResolution) {
+  const healsDir = path.join(qaDir, '.aitest', 'heals');
+  if (!fs.existsSync(healsDir)) return { ok: true, errors: [] };
+
+  const errors = [];
+  let changedInsideQa = new Set();
+
+  if (baseResolution.isGitRepo && baseResolution.gitRoot && baseResolution.resolved) {
+    const ch = listChangedFilesUnderDir(baseResolution.gitRoot, baseResolution.resolved, qaDir);
+    if (ch.ok) {
+      for (const item of ch.changed) {
+        const rel = path.relative(qaDir, path.join(baseResolution.gitRoot, item.path)).replace(/\\/g, '/');
+        changedInsideQa.add(rel);
+      }
+      for (const u of ch.untracked) {
+        const rel = path.relative(qaDir, path.join(baseResolution.gitRoot, u)).replace(/\\/g, '/');
+        changedInsideQa.add(rel);
+      }
+    }
+  }
+
+  for (const name of fs.readdirSync(healsDir)) {
+    if (!name.endsWith('.json') || name === 'ledger.json') continue;
+    const full = path.join(healsDir, name);
+    try {
+      const session = JSON.parse(fs.readFileSync(full, 'utf8'));
+      const macCheck = verifyPayloadT1('heal.session', session, session.mac, {
+        qaDir,
+        repoDir: path.dirname(qaDir),
+        requireMac: Boolean(session.mac),
+      });
+      if (!macCheck.ok) {
+        errors.push(`[Heal Governance Blocked] Tampered heal session "${session.sessionId || name}": ${macCheck.reason}`);
+        continue;
+      }
+
+      const isNonA = session.categoryCode && session.categoryCode !== 'A';
+      const isOpen = session.state !== 'concluded' && session.state !== 'verified';
+      const specFile = String(session.specFile || '').replace(/\\/g, '/');
+      if (isNonA && isOpen && specFile && changedInsideQa.has(specFile)) {
+        errors.push(
+          `[Heal Governance Blocked] Spec "${specFile}" was modified while non-repairable Class-${session.categoryCode} heal session "${session.sessionId}" is open. Revert spec edit and conclude as defect/escalation.`
+        );
+      }
+    } catch {
+      errors.push(`[Heal Governance Blocked] Corrupted heal session file "${name}".`);
+    }
+  }
+
+  return { ok: errors.length === 0, errors };
+}
+
+/**
+ * One-Call Agent Change Verification Orchestrator (`T-04`, `T-05`, `T-07`, `I-09`).
+ * Runs: Layer 0 Governance -> Git merge-base resolution -> Impact v2 (single pass) ->
+ * Ledger-bound Suite Run -> 4-Layer Fail-Closed AST Audit -> Heal Conflict Check ->
+ * Diagnostics v2 -> in-toto Statement v1 Attestation + SARIF + PR Summary.
+ *
  * @param {Record<string, any>} [options]
  */
 export async function verifyChangeCore(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   if (!options.target) {
-    return { ok: false, exitCode: 1, verdict: 'blocked', error: 'Missing --target option' };
+    return { ok: false, exitCode: 1, verdict: 'blocked', trustTier: 'T0', error: 'Missing --target option' };
   }
 
   const target = path.resolve(options.target);
   const qaDir = resolveQaDirectory(target, options.qaDir);
   if (!qaDir) {
-    return { ok: false, exitCode: 1, verdict: 'blocked', error: `QA directory not found under ${target}` };
+    return { ok: false, exitCode: 1, verdict: 'blocked', trustTier: 'T0', error: `QA directory not found under ${target}` };
   }
 
   const repoDir = target === qaDir ? path.dirname(qaDir) : target;
-  const baseRef = options.base || 'HEAD';
-  const mode = String(options.mode || 'impact').toLowerCase() === 'full' ? 'full' : 'impact';
+  const requestedMode = String(options.mode || 'impact').toLowerCase() === 'full' ? 'full' : 'impact';
 
-  // Step 1: Pre-flight Layer 0 Governance Lock Integrity
+  // Step 0: Resolve real Git root (monorepo/worktree aware) & safe diff base (`T-05`)
+  const baseResolution = resolveDefaultDiffBase(repoDir, options.base || null);
+
+  // Step 1: Pre-flight Layer 0 Governance Lock Integrity (Fail-Closed!)
   const govPre = verifyGovernanceLockInQaDir(qaDir);
   if (!govPre.ok) {
     return {
@@ -135,15 +227,43 @@ export async function verifyChangeCore(options = {}) {
       ok: false,
       exitCode: 2,
       verdict: 'blocked',
+      trustTier: 'T0',
       confidence: { level: 'high', reasons: ['governance-tamper-detected'] },
       runId: null,
       gitSha: resolveGitHeadSha(repoDir),
+      base: baseResolution,
       acceptanceScope: 'local-workbench',
-      scope: { mode, selected: 0, total: 0, why: [] },
-      gates: { governance: 'fail', static: 'skipped', runtime: 'skipped', semanticDiff: 'skipped' },
+      scope: { requested: requestedMode, actual: 'none', downgraded: true, mode: requestedMode, selected: 0, total: 0, why: [] },
+      gates: { governance: govPre.status || 'blocked', static: 'skipped', runtime: 'skipped', semanticDiff: 'skipped' },
       gateErrors: govPre.errors,
       failures: [],
+      ai: { llmCalls: 0, models: [], promptHashes: [] },
       nextActions: [{ action: 'human-cli', command: 'npx ai-test-workbench governance approve --target <repo> --by <human> --reason <why>' }],
+    };
+  }
+
+  // Step 1b: Fail-closed if Git diff base cannot be resolved (unless explicit CLI-only allowNonGit for T0 advisory)
+  const allowNonGit = process.env.AITEST_MCP_CHILD !== '1' && Boolean(options.allowNonGit);
+  if ((!baseResolution.isGitRepo || !baseResolution.resolved) && !allowNonGit) {
+    return {
+      schemaVersion: SCHEMA_VERSIONS.verdict,
+      ok: false,
+      exitCode: 2,
+      verdict: 'blocked',
+      trustTier: 'T0',
+      confidence: { level: 'high', reasons: ['semantic-diff-base-unresolved'] },
+      runId: null,
+      gitSha: resolveGitHeadSha(repoDir),
+      base: baseResolution,
+      acceptanceScope: 'local-workbench',
+      scope: { requested: requestedMode, actual: 'none', downgraded: true, mode: requestedMode, selected: 0, total: 0, why: [] },
+      gates: { governance: govPre.status || 'pass', static: 'skipped', runtime: 'skipped', semanticDiff: 'blocked' },
+      gateErrors: [
+        `[Verify Change Blocked] ${baseResolution.error || 'Unable to resolve Git diff base for Layer 3 Semantic AST Guard.'} Initialize Git or specify a valid --base commit.`,
+      ],
+      failures: [],
+      ai: { llmCalls: 0, models: [], promptHashes: [] },
+      nextActions: [{ action: 'git-check', command: 'git status && git rev-parse --show-toplevel' }],
     };
   }
 
@@ -158,54 +278,66 @@ export async function verifyChangeCore(options = {}) {
       ok: false,
       exitCode: 2,
       verdict: 'blocked',
+      trustTier: 'T0',
       confidence: { level: 'high', reasons: ['target-guard-blocked'] },
       runId: null,
       gitSha: resolveGitHeadSha(repoDir),
+      base: baseResolution,
       acceptanceScope: 'local-workbench',
-      scope: { mode, selected: 0, total: 0, why: [] },
-      gates: { governance: govPre.enforced ? 'pass' : 'skipped', static: 'skipped', runtime: 'skipped', semanticDiff: 'skipped' },
+      scope: { requested: requestedMode, actual: 'none', downgraded: true, mode: requestedMode, selected: 0, total: 0, why: [] },
+      gates: { governance: govPre.status || 'pass', static: 'skipped', runtime: 'skipped', semanticDiff: 'skipped' },
       gateErrors: safety.errors,
       failures: [],
+      ai: { llmCalls: 0, models: [], promptHashes: [] },
       nextActions: [],
     };
   }
 
-  const impact = await computeImpact(repoDir, { qaDir: options.qaDir, base: baseRef });
+  const effectiveBaseRef = baseResolution.resolved || 'HEAD~1';
+  const impact = await computeImpact(repoDir, { qaDir: options.qaDir, base: effectiveBaseRef });
   const hasPlaywright = Boolean(resolvePlaywrightCli(qaDir));
   if (!hasPlaywright) {
     return {
+      schemaVersion: SCHEMA_VERSIONS.verdict,
       ok: false,
-      exitCode: 1,
+      exitCode: 2,
       verdict: 'blocked',
+      trustTier: 'T0',
       error: `Playwright dependencies not installed in ${qaDir}. Run init first.`,
     };
   }
 
   const effectiveSuite =
-    mode === 'full' ? (safety.baseURL ? 'all' : 'smoke') : safety.baseURL ? 'impact' : 'smoke';
+    requestedMode === 'full' ? (safety.baseURL ? 'all' : 'smoke') : safety.baseURL ? 'impact' : 'smoke';
+  const scopeDowngraded = !safety.baseURL && (requestedMode === 'full' || requestedMode === 'impact');
 
-  // Step 3: Execute suite bound to Run Ledger
+  // Step 3: Execute suite bound to Run Ledger (pass precomputedImpact so computeImpact runs ONCE!)
   const runOut = await executeSuiteCore({
     target,
     qaDir: options.qaDir,
     suite: effectiveSuite,
     baseUrl: options.baseUrl,
-    base: baseRef,
+    base: effectiveBaseRef,
+    precomputedImpact: impact,
     audit: false,
     timeoutMs: options.budgetMs || 15 * 60_000,
     onProgress: options.onProgress,
     signal: options.signal,
   });
 
-  // Step 4: Full 4-Layer Audit (including Semantic Diff Guard when inside git repo)
-  const isGitRepo = fs.existsSync(path.join(repoDir, '.git'));
+  // Step 4: Full 4-Layer Fail-Closed AST Audit
   const auditOut = runAuditForQaDir(qaDir, {
     checkSpecs: true,
-    requireE2e: Boolean(safety.baseURL && mode === 'full'),
+    requireE2e: Boolean(safety.baseURL && requestedMode === 'full'),
     allowMutation: safety.allowMutation,
     expectedRunId: runOut.runId,
-    diffBase: isGitRepo ? baseRef : null,
+    diffBase: baseResolution.resolved,
+    requireDiff: !allowNonGit,
   });
+
+  // Step 4b: Check Heal Session Conflicts (`T-07`)
+  const healCheck = checkHealSessionConflicts(qaDir, baseResolution);
+  const combinedGateErrors = [...auditOut.errors, ...healCheck.errors];
 
   // Step 5: Structured Diagnostics on Failures
   const resultsPath = path.join(qaDir, 'reports', 'results.json');
@@ -220,6 +352,7 @@ export async function verifyChangeCore(options = {}) {
       categoryCode: f.categoryCode,
       category: f.category,
       confidence: f.confidence,
+      candidates: f.candidates,
       traceId: f.traceId,
       traceIds: f.traceIds,
       errorSnippet: f.errorSnippet,
@@ -231,16 +364,50 @@ export async function verifyChangeCore(options = {}) {
   // Step 6: Requirement Traceability Matrix
   const traceMatrix = buildRequirementTraceMatrix(qaDir);
 
-  const allPassed = runOut.exitCode === 0 && auditOut.ok;
-  const verdictStatus = allPassed ? 'pass' : 'fail';
+  // Step 7: Strict 3-State Verdict (`pass | fail | blocked`) — NEVER turn `skipped`/`blocked` into `pass`!
+  const gateValues = Object.values(auditOut.gates || {});
+  const hasBlockedGate = auditOut.outcome === 'blocked' || gateValues.includes('blocked') || !healCheck.ok;
+  const hasRequiredSkippedGate = !allowNonGit && gateValues.includes('skipped');
+  const allPassed =
+    runOut.exitCode === 0 &&
+    auditOut.ok &&
+    healCheck.ok &&
+    !hasBlockedGate &&
+    !hasRequiredSkippedGate;
+
+  /** @type {'pass' | 'fail' | 'blocked'} */
+  const verdictStatus = hasBlockedGate || hasRequiredSkippedGate ? 'blocked' : allPassed ? 'pass' : 'fail';
+  const exitCode = verdictStatus === 'pass' ? 0 : verdictStatus === 'blocked' ? 2 : 1;
+
+  if (hasRequiredSkippedGate) {
+    combinedGateErrors.push(
+      `[Verify Change Blocked] One or more required quality gates were skipped (${JSON.stringify(auditOut.gates)}).`
+    );
+  }
+
+  const hasAllFourGates =
+    auditOut.gates.governance === 'pass' &&
+    auditOut.gates.static === 'pass' &&
+    auditOut.gates.runtime === 'pass' &&
+    auditOut.gates.semanticDiff === 'pass';
+
+  const trustTier = resolveVerdictTrustTier({
+    verdict: verdictStatus,
+    auditTrustTier: auditOut.trustTier,
+    scopeDowngraded,
+    hasAllFourGates,
+  });
+
   const confidenceReasons = [
-    `selection=${mode}(recallEst=${impact.recallEstimate ?? 1})`,
+    `trustTier=${trustTier}`,
+    `selection=${requestedMode}->${effectiveSuite}${scopeDowngraded ? '(downgraded-no-baseUrl)' : ''}`,
+    `base=${baseResolution.strategy}`,
     `gateKernel=${GATE_KERNEL_VERSION}`,
     `acceptanceScope=${runOut.acceptanceScope}`,
   ];
 
   const nextActions = [];
-  if (!allPassed) {
+  if (verdictStatus !== 'pass') {
     for (const f of diagFailures.slice(0, 5)) {
       if (f.categoryCode === 'A') {
         nextActions.push({ tool: 'aitest_heal_begin', args: { target, testId: f.testId } });
@@ -255,28 +422,50 @@ export async function verifyChangeCore(options = {}) {
   }
 
   const gitSha = resolveGitHeadSha(repoDir);
+  const treeDigest = resolveGitTreeSha(repoDir);
   const verdictPayload = {
     schemaVersion: SCHEMA_VERSIONS.verdict,
-    ok: allPassed,
-    exitCode: allPassed ? 0 : 1,
+    ok: verdictStatus === 'pass',
+    exitCode,
     verdict: verdictStatus,
+    trustTier,
     confidence: {
-      level: runOut.acceptanceScope === 'business-e2e' ? 'high' : 'medium',
+      level: trustTier === 'T2' ? 'high' : trustTier === 'T1' && runOut.acceptanceScope === 'business-e2e' ? 'medium-high' : 'medium',
       reasons: confidenceReasons,
     },
     runId: runOut.runId,
     gitSha,
+    base: {
+      requested: baseResolution.requested,
+      resolved: baseResolution.resolved,
+      strategy: baseResolution.strategy,
+      sha: baseResolution.sha,
+    },
     acceptanceScope: runOut.acceptanceScope,
     counts: runOut.counts,
     scope: {
-      mode,
+      requested: requestedMode,
+      actual: effectiveSuite,
+      downgraded: scopeDowngraded,
+      mode: requestedMode,
       effectiveSuite,
       selected: impact.specs.length,
       total: impact.totalSpecsCount ?? impact.specs.length,
       why: impact.why || [],
     },
     gates: auditOut.gates,
-    gateErrors: auditOut.errors,
+    gateErrors: combinedGateErrors,
+    evidence: {
+      treeDigest,
+      resultsDigest: auditOut.evidence?.resultsDigest || null,
+      lockDigest: auditOut.evidence?.lockDigest || null,
+      ledgerMac: auditOut.evidence?.ledgerMac || null,
+    },
+    ai: {
+      llmCalls: 0,
+      models: [],
+      promptHashes: [],
+    },
     failures: diagFailures,
     traceability: {
       coveredRequirements: traceMatrix.coveredRequirements,
@@ -286,7 +475,7 @@ export async function verifyChangeCore(options = {}) {
     nextActions,
   };
 
-  // Step 7: Write Attestation, PR Markdown Summary & SARIF 2.1.0
+  // Step 8: Write in-toto Statement v1 Attestation, PR Markdown Summary & SARIF 2.1.0
   const reportsDir = path.join(qaDir, 'reports');
   fs.mkdirSync(reportsDir, { recursive: true });
   const mdSummary = buildPrVerdictMarkdown(verdictPayload, lang);
@@ -305,34 +494,26 @@ export async function verifyChangeCore(options = {}) {
   }
 
   let attestationPath = null;
+  let sigstoreBundlePath = null;
   if (runOut.runId) {
     const runDir = path.join(qaDir, '.aitest', 'runs', runOut.runId);
     fs.mkdirSync(runDir, { recursive: true });
     attestationPath = path.join(runDir, 'attestation.json');
-    const canonicalDigest = crypto
-      .createHash('sha256')
-      .update(JSON.stringify({ runId: runOut.runId, gitSha, verdict: verdictStatus, gates: auditOut.gates, counts: runOut.counts }))
-      .digest('hex');
-    fs.writeFileSync(
-      attestationPath,
-      JSON.stringify(
-        {
-          schemaVersion: 1,
-          attestedAt: new Date().toISOString(),
-          toolVersion: WORKBENCH_VERSION,
-          gateKernelVersion: GATE_KERNEL_VERSION,
-          runId: runOut.runId,
-          gitSha,
-          verdict: verdictStatus,
-          acceptanceScope: runOut.acceptanceScope,
-          gates: auditOut.gates,
-          attestationDigest: `sha256:${canonicalDigest}`,
-        },
-        null,
-        2
-      ) + '\n',
-      'utf8'
-    );
+    const statement = buildInTotoVerdictAttestation({
+      verdictPayload,
+      qaDir,
+      repoDir,
+      treeDigest,
+      resultsDigest: auditOut.evidence?.resultsDigest,
+      lockDigest: auditOut.evidence?.lockDigest,
+      gateKernelVersion: GATE_KERNEL_VERSION,
+    });
+    fs.writeFileSync(attestationPath, JSON.stringify(statement, null, 2) + '\n', 'utf8');
+
+    const cosignRes = tryCosignKeylessSign(attestationPath);
+    if (cosignRes.signed) {
+      sigstoreBundlePath = cosignRes.bundlePath;
+    }
   }
 
   return {
@@ -341,6 +522,7 @@ export async function verifyChangeCore(options = {}) {
       summaryMdPath,
       sarifPath,
       attestationPath,
+      sigstoreBundlePath,
     },
   };
 }
@@ -357,12 +539,13 @@ export async function runVerifyChangeCommand(options = {}) {
     return res.exitCode;
   }
   console.log(
-    `\n[Verify Change] Verdict=${String(res.verdict).toUpperCase()} runId=${res.runId || 'none'} scope=${res.acceptanceScope}`
+    `\n[Verify Change] Verdict=${String(res.verdict).toUpperCase()} trustTier=${res.trustTier || 'T0'} runId=${res.runId || 'none'} scope=${res.acceptanceScope}`
   );
   if (res.artifacts?.summaryMdPath) {
     console.log(`  Verdict MD   : ${res.artifacts.summaryMdPath}`);
     console.log(`  SARIF Report : ${res.artifacts.sarifPath}`);
     if (res.artifacts.attestationPath) console.log(`  Attestation  : ${res.artifacts.attestationPath}`);
+    if (res.artifacts.sigstoreBundlePath) console.log(`  Sigstore     : ${res.artifacts.sigstoreBundlePath}`);
   }
   for (const e of res.gateErrors || []) console.error(`  [GATE FAIL] ${e}`);
   return res.exitCode;

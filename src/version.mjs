@@ -24,7 +24,7 @@ export const SCHEMA_VERSIONS = Object.freeze({
   ledgerManifest: 1,
   governanceLock: 1,
   healSession: 1,
-  verdict: 1,
+  verdict: 2,
   mcpLock: 1,
   quarantine: 1,
   traceMatrix: 1,

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
 import { readPerTestLedgerRuns } from './ledger.mjs';
 import { SCHEMA_VERSIONS } from './version.mjs';
+import { signPayloadT1 } from '../templates/playwright-qa/support/gate-kernel.mjs';
 
 /**
  * Computes historical flaky & failure rates per test from Run Ledger (`R1-2`).
@@ -155,13 +156,30 @@ export function syncQuarantineFromLedger(qaDir, options = {}) {
     }
   }
 
-  const payload = {
+  const nextEntries = [...existingMap.values()];
+  if (nextEntries.length === 0 && added.length === 0 && released.length === 0 && !fs.existsSync(qPath)) {
+    return {
+      quarantinePath: qPath,
+      activeCount: 0,
+      added,
+      released,
+      entries: [],
+    };
+  }
+
+  const corePayload = {
     schemaVersion: SCHEMA_VERSIONS.quarantine,
     updatedAt: new Date(nowMs).toISOString(),
     maxQuarantined,
     ttlDays,
-    entries: [...existingMap.values()],
+    entries: nextEntries,
   };
+  const sig = signPayloadT1('quarantine.json', corePayload, {
+    qaDir,
+    repoDir: path.dirname(qaDir),
+    createIfMissing: true,
+  });
+  const payload = { ...corePayload, ...(sig.signed ? { mac: sig.mac } : {}) };
   fs.mkdirSync(aitestDir, { recursive: true });
   fs.writeFileSync(qPath, JSON.stringify(payload, null, 2) + '\n', 'utf8');
 

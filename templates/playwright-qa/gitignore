@@ -7,10 +7,10 @@ playwright/.auth/*
 !playwright/.auth/.gitkeep
 playwright-report/
 test-results/
-reports/
+reports/*
+!reports/defects/
 blob-report/
 .aitest/runs/
 .aitest/heals/
 .aitest/jobs/
-*.aitest-new
 *.log

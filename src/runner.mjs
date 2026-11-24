@@ -110,7 +110,7 @@ export async function executeSuiteCore(options = {}) {
   let pwArgs = [];
   let impactResult = null;
   if (suite === 'impact') {
-    impactResult = await computeImpact(target, { qaDir: options.qaDir, base: options.base });
+    impactResult = options.precomputedImpact || (await computeImpact(target, { qaDir: options.qaDir, base: options.base }));
     if (impactResult.mode === 'targeted') {
       pwArgs.push('test', 'tests/smoke', ...impactResult.specs, '--project=smoke');
       if (safety.baseURL) {
@@ -153,6 +153,7 @@ export async function executeSuiteCore(options = {}) {
   const runEnv = {
     ...process.env,
     ...overrides,
+    ...(mergedEnv.TEST_STRICT_READONLY === undefined && !safety.allowMutation ? { TEST_STRICT_READONLY: '1' } : {}),
     AITEST_ACTIVE_SUITE: suite,
     AITEST_RUN_ID: ledgerBegin.runId,
   };

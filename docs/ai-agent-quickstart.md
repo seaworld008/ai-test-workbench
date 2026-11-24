@@ -49,11 +49,11 @@
 ### 1. Claude Code（一键命令或 `.mcp.json`）
 
 ```bash
-# CLI 一键注册（项目级）
-claude mcp add ai-test-workbench -- npx -y ai-test-workbench mcp-serve
+# CLI 一键注册（项目级，推荐本地源码直连或精确锁版本）
+claude mcp add ai-test-workbench -- node /path/to/ai-test-workbench/tools/aitest.mjs mcp-serve --workspace-root /path/to/your-repo
 
-# 如需固定绑定当前项目根目录
-claude mcp add ai-test-workbench -- npx -y ai-test-workbench mcp-serve --target /path/to/your-repo
+# 发布到 npm 后如需通过 npx 拉起，请始终锁定精确版本：
+claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@5.0.0 ai-test-workbench mcp-serve --target /path/to/your-repo --workspace-root /path/to/your-repo
 ```
 
 或直接在项目根目录写入 `.mcp.json`：
@@ -63,7 +63,7 @@ claude mcp add ai-test-workbench -- npx -y ai-test-workbench mcp-serve --target 
   "mcpServers": {
     "ai-test-workbench": {
       "command": "npx",
-      "args": ["-y", "ai-test-workbench", "mcp-serve"]
+      "args": ["--package=ai-test-workbench@5.0.0", "ai-test-workbench", "mcp-serve"]
     }
   }
 }
@@ -74,10 +74,10 @@ claude mcp add ai-test-workbench -- npx -y ai-test-workbench mcp-serve --target 
 ```toml
 [mcp_servers.ai-test-workbench]
 command = "npx"
-args = ["-y", "ai-test-workbench", "mcp-serve"]
+args = ["--package=ai-test-workbench@5.0.0", "ai-test-workbench", "mcp-serve"]
 ```
 
-*(也可在目标项目直接运行 `npx ai-test-workbench mcp add --target . --profile minimal`，自动同时写入 `.mcp.json` 与 `.codex/config.toml`。)*
+*(也可在目标项目直接运行 `node tools/aitest.mjs mcp add --target . --profile minimal`，自动同时写入 `.mcp.json` 与 `.codex/config.toml`。)*
 
 ### 3. Cursor / Windsurf / VS Code Copilot / Gemini CLI / Antigravity
 
@@ -88,7 +88,7 @@ args = ["-y", "ai-test-workbench", "mcp-serve"]
   "mcpServers": {
     "ai-test-workbench": {
       "command": "npx",
-      "args": ["-y", "ai-test-workbench", "mcp-serve"]
+      "args": ["--package=ai-test-workbench@5.0.0", "ai-test-workbench", "mcp-serve"]
     }
   }
 }
@@ -102,7 +102,7 @@ args = ["-y", "ai-test-workbench", "mcp-serve"]
     "ai-test-workbench": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "ai-test-workbench", "mcp-serve"]
+      "args": ["--package=ai-test-workbench@5.0.0", "ai-test-workbench", "mcp-serve"]
     }
   }
 }
@@ -115,7 +115,7 @@ args = ["-y", "ai-test-workbench", "mcp-serve"]
   "mcpServers": {
     "ai-test-workbench": {
       "command": "npx",
-      "args": ["-y", "ai-test-workbench", "mcp-serve"]
+      "args": ["--package=ai-test-workbench@5.0.0", "ai-test-workbench", "mcp-serve"]
     }
   }
 }

@@ -13,12 +13,12 @@
   - Emits `notifications/progress` when `_meta.progressToken` is supplied.
   - Terminates spawned process trees via `killProcessTree` on `notifications/cancelled` or `aitest_job_cancel`.
   - Transitions calls exceeding `syncBudgetMs` into async background jobs (`aitest_job_status` / `aitest_job_result`).
-- **Security**: `Origin` allowlisting (`403`), `crypto.timingSafeEqual` Bearer auth (`401`), `--allowed-root` workspace scoping, and strict exclusion of human-only `governance approve` from MCP.
+- **Security**: `Origin` allowlisting (`403`), `crypto.timingSafeEqual` Bearer auth (`401`), fail-closed `--workspace-root` ceiling intersected with client roots, full path-argument traversal checks, live JSON Schema validation, and strict exclusion of all `governance` CLI commands from MCP.
 
-## 2. Registered MCP Tools
+## 2. Registered MCP Tools (Exact 21 Tools)
 
-`tools/list` exposes strongly-typed tools with `inputSchema`, `outputSchema`, `ToolAnnotations`, and `structuredContent`:
-`aitest_doctor`, `aitest_init`, `aitest_explore`, `aitest_map_sync`, `aitest_impact`, `aitest_run`, `aitest_audit`, `aitest_governance_status`, `aitest_diagnose`, `aitest_heal_begin`, `aitest_heal_attempt`, `aitest_heal_conclude`, `aitest_perf`, `aitest_verify_change`, `aitest_trace_matrix`, `aitest_flaky_status`, `aitest_mcp_hub`, `aitest_report`, `aitest_skill_install`, `aitest_job_status`, `aitest_job_result`, and `aitest_job_cancel`.
+`tools/list` exposes **21 strongly-typed tools** from the single declarative registry (`src/mcp/registry.mjs`) with `inputSchema`, `outputSchema`, `ToolAnnotations`, and version-aware `structuredContent`:
+`aitest_doctor`, `aitest_init`, `aitest_explore`, `aitest_map_sync`, `aitest_impact`, `aitest_run`, `aitest_audit`, `aitest_diagnose`, `aitest_perf`, `aitest_mcp_hub`, `aitest_report`, `aitest_skill_install`, `aitest_verify_change`, `aitest_heal_begin`, `aitest_heal_attempt`, `aitest_heal_conclude`, `aitest_flaky_report`, `aitest_trace_matrix`, `aitest_job_status`, `aitest_job_result`, and `aitest_job_cancel`.
 
 ## 3. Resources & Prompts
 

@@ -27,7 +27,7 @@
 | **F-02** | 治理配置与 `waivers.json` 可被 Agent 自行篡改或自签豁免 | 新增 `.aitest/governance.lock`（11 项受保护文件 SHA-256）+ 人类专属 CLI `governance approve` + 严格豁免上限/TTL | `test/governance-and-ledger.test.mjs` |
 | **F-03** | `aitest_audit` 读取未绑定的陈旧 `results.json` | 新增 `src/ledger.mjs`（ULID `runId` + 输入源码指纹绑定），代码或用例变动后旧结果立即失效 | `test/governance-and-ledger.test.mjs` |
 | **F-04** | `LCP` 恒为 `null`、`CLS` 恒为 `0`；缺少 WCAG 2.1 标签 | 改用预注入 `PerformanceObserver({ buffered: true })` + 多样本中位数/P75；补齐 `wcag21a` / `wcag21aa` | `test/perf.test.mjs` + `base.ts` |
-| **F-05** | `explore` 默认放行 POST，且 `/graphql` 在默认安全写白名单 | `explore` 默认拒绝一切非 `GET/HEAD/OPTIONS` 请求并封禁 `sendBeacon`；移除 `/graphql` 白名单并拦截 GraphQL `mutation` | `test/target-guard.test.mjs` + `src/explore.mjs` |
+| **F-05** | `explore` 默认放行 POST，且 `/graphql` 在默认安全写白名单 | `explore` 默认拒绝一切非 `GET/HEAD/OPTIONS` 请求并封禁 `sendBeacon`；移除 `/graphql` 白名单并拦截 GraphQL `mutation` | `test/origin-guard.test.mjs` + `src/explore.mjs` |
 | **F-06** | 出站仅有黑名单，且 `page.request` / `context.request` 绕过守卫 | 支持 `TEST_EGRESS_MODE=allowlist`；在 `base.ts` 统一代理 `context.request`、`page.request` 与 `context.route`，ESLint 禁裸调 `request.newContext()` | `templates/playwright-qa/tests/fixtures/base.ts` |
 | **F-07** | JSON `"password"` 与 JWT 逃逸脱敏；外部 MCP 预设用 `@latest` | 升级 `redactSecrets` v2（覆盖 JSON 键值、JWT、云厂商 Token、PEM 私钥、DB URL）；全量锁死 MCP 预设版本并替换为 `@bytebase/dbhub@0.15.0 --readonly` | `test/adversarial.test.mjs` + `test/mcp-hub.test.mjs` |
 | **F-08** | 全局互斥锁串行化所有 MCP 工具并劫持 `globalThis.console` | 新增 `src/jobs.mjs` 子进程作业隔离器，彻底移除 `console` 劫持；只读工具全并发 + 工作区级细粒度写锁 | `test/mcp-jobs.test.mjs` + `test/mcp-server.test.mjs` |

@@ -183,6 +183,7 @@ await page.evaluate(() => {
 }).catch(() => {});
 
 await context.storageState({ path: storageStatePath });
+try { fs.chmodSync(storageStatePath, 0o600); } catch {}
 const sessionDump = await page.evaluate(() => ({
   origin: window.location.origin,
   url: window.location.href,
@@ -190,7 +191,7 @@ const sessionDump = await page.evaluate(() => ({
   localStorageKeys: Object.keys(window.localStorage),
 })).catch(() => ({ origin: '', url: page.url(), entries: [], localStorageKeys: [] }));
 
-fs.writeFileSync(sessionStoragePath, JSON.stringify(sessionDump, null, 2) + '\\n', 'utf8');
+fs.writeFileSync(sessionStoragePath, JSON.stringify(sessionDump, null, 2) + '\\n', { encoding: 'utf8', mode: 0o600 });
 console.log(JSON.stringify({
   saved: true,
   finalUrl: sessionDump.url,

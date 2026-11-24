@@ -49,17 +49,17 @@ Set up full-link System MCPs and investigate recent failures / slow endpoints:
 ### 1. Claude Code
 
 ```bash
-claude mcp add ai-test-workbench -- npx -y ai-test-workbench mcp-serve
+claude mcp add ai-test-workbench -- node /path/to/ai-test-workbench/tools/aitest.mjs mcp-serve --workspace-root /path/to/your-repo
 ```
 
-Or `.mcp.json`:
+Or `.mcp.json` (always pin an exact version when using `npx` once published):
 
 ```json
 {
   "mcpServers": {
     "ai-test-workbench": {
       "command": "npx",
-      "args": ["-y", "ai-test-workbench", "mcp-serve"]
+      "args": ["--package=ai-test-workbench@5.0.0", "ai-test-workbench", "mcp-serve"]
     }
   }
 }
@@ -70,7 +70,7 @@ Or `.mcp.json`:
 ```toml
 [mcp_servers.ai-test-workbench]
 command = "npx"
-args = ["-y", "ai-test-workbench", "mcp-serve"]
+args = ["--package=ai-test-workbench@5.0.0", "ai-test-workbench", "mcp-serve"]
 ```
 
 ### 3. Cursor / Windsurf / VS Code Copilot / Gemini CLI / Antigravity
@@ -82,7 +82,7 @@ args = ["-y", "ai-test-workbench", "mcp-serve"]
   "mcpServers": {
     "ai-test-workbench": {
       "command": "npx",
-      "args": ["-y", "ai-test-workbench", "mcp-serve"]
+      "args": ["--package=ai-test-workbench@5.0.0", "ai-test-workbench", "mcp-serve"]
     }
   }
 }
@@ -96,7 +96,7 @@ args = ["-y", "ai-test-workbench", "mcp-serve"]
     "ai-test-workbench": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "ai-test-workbench", "mcp-serve"]
+      "args": ["--package=ai-test-workbench@5.0.0", "ai-test-workbench", "mcp-serve"]
     }
   }
 }

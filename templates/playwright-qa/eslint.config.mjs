@@ -53,8 +53,28 @@ export default [
       'playwright/no-force-option': 'error',
       'playwright/prefer-web-first-assertions': 'error',
       'playwright/no-conditional-in-test': 'error',
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            { name: 'http', message: '[aitest/no-raw-http] Use the guarded { request } fixture from fixtures/base.ts.' },
+            { name: 'https', message: '[aitest/no-raw-http] Use the guarded { request } fixture from fixtures/base.ts.' },
+            { name: 'node:http', message: '[aitest/no-raw-http] Use the guarded { request } fixture from fixtures/base.ts.' },
+            { name: 'node:https', message: '[aitest/no-raw-http] Use the guarded { request } fixture from fixtures/base.ts.' },
+            { name: 'undici', message: '[aitest/no-raw-http] Use the guarded { request } fixture from fixtures/base.ts.' },
+            { name: 'axios', message: '[aitest/no-raw-http] Use the guarded { request } fixture from fixtures/base.ts.' },
+            { name: 'node-fetch', message: '[aitest/no-raw-http] Use the guarded { request } fixture from fixtures/base.ts.' },
+            { name: 'got', message: '[aitest/no-raw-http] Use the guarded { request } fixture from fixtures/base.ts.' },
+          ],
+        },
+      ],
       'no-restricted-syntax': [
         'error',
+        {
+          selector: "CallExpression[callee.name='fetch']",
+          message:
+            '[aitest/no-raw-fetch] Do not call global fetch() in tests; use the guarded { request } fixture from fixtures/base.ts.',
+        },
         {
           selector: "CallExpression[callee.property.name='newContext'][callee.object.name='request']",
           message:

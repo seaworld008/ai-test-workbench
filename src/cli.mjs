@@ -20,6 +20,7 @@ import { runReportCommand } from './report.mjs';
 import { runSuiteCommand } from './runner.mjs';
 import { runSkillInstallCommand } from './skill-install.mjs';
 import { runTraceMatrixCommand } from './traceability.mjs';
+import { runAttestCommand } from './trust.mjs';
 import { runVerifyChangeCommand } from './verdict.mjs';
 
 const CLI_OPTION_DEFS = {
@@ -80,6 +81,10 @@ const CLI_OPTION_DEFS = {
   'sync-quarantine': { type: /** @type {'boolean'} */ ('boolean') },
   'skip-run': { type: /** @type {'boolean'} */ ('boolean') },
   'allow-unbound-results': { type: /** @type {'boolean'} */ ('boolean') },
+  'allow-non-git': { type: /** @type {'boolean'} */ ('boolean') },
+  'require-mac': { type: /** @type {'boolean'} */ ('boolean') },
+  file: { type: /** @type {'string'} */ ('string') },
+  bundle: { type: /** @type {'string'} */ ('string') },
   'allow-mutation': { type: /** @type {'boolean'} */ ('boolean') },
   'dry-run': { type: /** @type {'boolean'} */ ('boolean') },
   'skip-install': { type: /** @type {'boolean'} */ ('boolean') },
@@ -331,6 +336,15 @@ export async function runCli(argv = process.argv.slice(2)) {
           base: v.base,
           mode: v.mode,
           budgetMs: v['budget-ms'] ? Number(v['budget-ms']) : undefined,
+          allowNonGit: Boolean(v['allow-non-git']),
+        });
+      case 'attest':
+        return await runAttestCommand({
+          ...common,
+          action: v.action || parsed.positionals[1] || 'verify',
+          file: v.file,
+          bundle: v.bundle,
+          requireMac: Boolean(v['require-mac']),
         });
       case 'heal':
         return await runHealCommand({

@@ -27,7 +27,7 @@
     "bench": "node scripts/run-bench.mjs",
     "doctor": "node tools/aitest.mjs doctor",
     "mcp:serve": "node tools/aitest.mjs mcp-serve",
-    "smoke": "node tools/aitest.mjs run --target templates/playwright-qa --suite smoke --audit",
+    "smoke": "node scripts/run-smoke.mjs",
     "demo:app": "node examples/demo-webapp/server.mjs",
     "demo:verify": "node scripts/verify-demo.mjs",
     "help": "node tools/aitest.mjs --help"
@@ -67,7 +67,6 @@
     "templates/playwright-qa/scripts/",
     "templates/playwright-qa/specs/",
     "templates/playwright-qa/tests/",
-    "templates/playwright-qa/playwright/.gitkeep",
     "templates/playwright-qa/docs/",
     "skills/",
     "prompts/",
