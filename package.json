@@ -1,6 +1,6 @@
 {
   "name": "ai-test-workbench",
-  "version": "6.0.0",
+  "version": "6.1.0",
   "description": "Trustworthy Verification Kernel & Multi-Protocol MCP Server for AI Coding Agents: 4-Layer Semantic AST Anti-Fake-Green Gates, Governance Lock, Run Ledger, One-Call verify_change Verdict, Stateful Heal Governance, Import-Graph Impact v2, and PerformanceObserver Web Vitals.",
   "license": "MIT",
   "author": "seaworld008",
@@ -42,6 +42,7 @@
     "docs:sync": "node scripts/generate-docs.mjs",
     "lint:docs": "node scripts/check-docs-and-hygiene.mjs",
     "bench": "node scripts/run-bench.mjs",
+    "bench:agentic": "node scripts/bench-agentic.mjs",
     "doctor": "node tools/aitest.mjs doctor",
     "mcp:serve": "node tools/aitest.mjs mcp-serve",
     "smoke": "node scripts/run-smoke.mjs",

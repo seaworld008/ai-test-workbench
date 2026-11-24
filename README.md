@@ -1,6 +1,6 @@
 <div align="center">
 
-# AI Test Workbench (`v6.0.0`)
+# AI Test Workbench (`v6.1.0`)
 
 **面向 AI 编码 Agent 的独立可信验证内核与原生多协议 MCP 服务端**
 
@@ -32,7 +32,7 @@
 | **良性重构误报率（内部良性语料）** | **`0.0%` (`12/12`)**（Prettier 换行、定位器重命名、ARIA 合并，`npm run bench`） | TypeScript Compiler API 全文件语义 AST 比对 |
 | **Gate FPR（真实提交未见留出集，`n=50`，`seed=20261125`）** | **`6.1%` (`3/49` 正常提交，Wilson 95% CI `[2.1%, 16.5%]`)**；原始告警 `8.0%` (`4/50`，保留 `1/1` 真报)；较 v5.1.1 的 `12.2%` (`6/49`, CI `[5.7%, 24.2%]`) 下降 50% | 5 个宽松许可开源仓盲测，详见 [v6 留出集对比报告](./bench/real-world/results/SUMMARY-v6-holdout.md) |
 | **Gate FPR（真实提交试跑集，`n=50`，`seed=20261124`）** | **`4.2%` (`2/48`，Wilson 95% CI `[1.2%, 14.0%]`)**；较 v5.1.1 的 `20.8%` (`10/48`, CI `[11.7%, 34.3%]`) 下降 80%；合并 `n=100` 为 **`5.2%` (`5/97`，CI `[2.2%, 11.5%]`，保留 `3/3` 真报)**；**`>=200` 正式评测：`pending`（不外推）** | 跨文件标题池化 + 词法作用域栈 + 结构化 `skip` 计次 + web-first 格校准 + 蜜罐感知（[ADR-0004](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.md)） |
-| **自治红队假绿逃逸率 (`FGER-agentic`)** | **`design only`（尚未实现，无评测数值）** | 威胁模型与 T2 边界见 [红队设计文档](./bench/agentic/DESIGN.md) |
+| **自治红队假绿逃逸率 (`FGER-agentic`)** | 脚本化多步红队基线（`live-playwright`，`n=16`，`npm run bench:agentic`）：**本地 T1 `12.5%` (`2/16`, CI `[3.5%, 36.0%]` — 仅同用户边界探针 `AG-B4`/`AG-C4`)** · **CI T2 合入级 `0.0%` (`0/16`, CI `[0.0%, 19.4%]`)** · 合法修复对照 `4/4` T2 通过；**实盘 LLM (`claude`/`codex`/`gemini`)：`pending`（适配器就绪，不做外推）** | 隔离沙箱 + 隐藏业务断言 + 临时 Fulcio T2 CA；详见 [红队架构设计](./bench/agentic/DESIGN.md) 与 [实测基线报告](./bench/agentic/results/SUMMARY.md) |
 | **种子缺陷检出率 (`SDDR`)** | 单应用靶场 `demo-campus` **`100.0%` (`7/7`)**（`npm run bench`） | 零依赖 JSON Schema 校验 + RBAC/并发竞态 + WCAG 2.0/2.1/2.2 |
 | **诊断分类准确率 / C→A 误判率 / 误修率** | 内部语料 `45/45` + 真实 Playwright 堆栈 `12/12`：**`100%` · C→A `0.0%` · 误修率 `0.0%`** | 结构化运行时守卫 + C 优先于 A 规则 + 防篡改自愈状态机 |
 | **凭据脱敏召回率** | 内部对抗语料 **`100.0%` (`35/35`)**（`npm run bench`） | Redaction v2（结构化先解析后脱敏，保留 `heal_*`/`job_*` ID） |
@@ -49,7 +49,7 @@
 ```yaml
 jobs:
   aitest-t2-verdict:
-    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.0.0
+    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.1.0
     permissions:
       id-token: write
       attestations: write
@@ -65,7 +65,7 @@ jobs:
 离线校验 T2 证书（默认 fail-closed，缺签名 / 仅 T1 / 身份不符 / 改动 1 字节均非 0 退出且 `trustLevel <= T1`）：
 
 ```bash
-npx ai-test-workbench@6.0.0 attest verify \
+npx ai-test-workbench@6.1.0 attest verify \
   --file attestation.json \
   --bundle attestation.sigstore.json \
   --expect-repo owner/repo \
@@ -101,19 +101,19 @@ flowchart TB
 ### 环境要求与供应链安全
 
 - **Node.js**：`>= 22.12.0`（推荐 `24 LTS` 或 `26 LTS`）；支持 Windows PowerShell (`pwsh`)、macOS、Linux。
-- **零运行时依赖**：根包 `package.json` 不含运行时 `dependencies`；请始终锁定精确版本 `npx ai-test-workbench@6.0.0 <cmd>`、全局安装后的短命令 `aitw <cmd>`（`npm i -g ai-test-workbench@6.0.0`），或源码直连 `node tools/aitest.mjs <cmd>`。
+- **零运行时依赖**：根包 `package.json` 不含运行时 `dependencies`；请始终锁定精确版本 `npx ai-test-workbench@6.1.0 <cmd>`、全局安装后的短命令 `aitw <cmd>`（`npm i -g ai-test-workbench@6.1.0`），或源码直连 `node tools/aitest.mjs <cmd>`。
 
 ### 注册原生 MCP 服务端（`stdio` / `/mcp` / `/sse`）
 
 - **Claude Code**：
   ```bash
-  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.0.0 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
+  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.1.0 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
   ```
 - **Codex CLI**（`.codex/config.toml`）：
   ```toml
   [mcp_servers.ai-test-workbench]
   command = "npx"
-  args = ["--package=ai-test-workbench@6.0.0", "ai-test-workbench", "mcp-serve"]
+  args = ["--package=ai-test-workbench@6.1.0", "ai-test-workbench", "mcp-serve"]
   ```
 - **Cursor / Windsurf / Antigravity / Gemini CLI**（`.mcp.json`）：
   ```json
@@ -121,14 +121,14 @@ flowchart TB
     "mcpServers": {
       "ai-test-workbench": {
         "command": "npx",
-        "args": ["--package=ai-test-workbench@6.0.0", "ai-test-workbench", "mcp-serve"]
+        "args": ["--package=ai-test-workbench@6.1.0", "ai-test-workbench", "mcp-serve"]
       }
     }
   }
   ```
 - **Streamable HTTP (`/mcp`) + Legacy SSE (`/sse`)**：
   ```bash
-  npx ai-test-workbench@6.0.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
+  npx ai-test-workbench@6.1.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
   ```
 
 ### 官方 MCP 协议合规性与三传输验证
@@ -142,19 +142,19 @@ flowchart TB
 
 ```bash
 # 1. 体检、初始化与模板安全升级
-npx ai-test-workbench@6.0.0 doctor
-npx ai-test-workbench@6.0.0 init --name my-app --target "/path/to/your-repo" --loop codex
-npx ai-test-workbench@6.0.0 upgrade --target "/path/to/your-repo" --dry-run
+npx ai-test-workbench@6.1.0 doctor
+npx ai-test-workbench@6.1.0 init --name my-app --target "/path/to/your-repo" --loop codex
+npx ai-test-workbench@6.1.0 upgrade --target "/path/to/your-repo" --dry-run
 
 # 2. 登录态捕获 -> 只读探索 -> 代码地图 -> 锁版本外部 MCP
-npx ai-test-workbench@6.0.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
-npx ai-test-workbench@6.0.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
-npx ai-test-workbench@6.0.0 map --target "/path/to/your-repo"
-npx ai-test-workbench@6.0.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.0.0 mcp doctor --target "/path/to/your-repo" --lock
+npx ai-test-workbench@6.1.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
+npx ai-test-workbench@6.1.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
+npx ai-test-workbench@6.1.0 map --target "/path/to/your-repo"
+npx ai-test-workbench@6.1.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.1.0 mcp doctor --target "/path/to/your-repo" --lock
 
 # 3. 性能 SLO 与提交前一键变更判决
-npx ai-test-workbench@6.0.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
-npx ai-test-workbench@6.0.0 verify-change --target "/path/to/your-repo" --base origin/main
+npx ai-test-workbench@6.1.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
+npx ai-test-workbench@6.1.0 verify-change --target "/path/to/your-repo" --base origin/main
 ```
 
 本机克隆全量自检（零外部服务器）：

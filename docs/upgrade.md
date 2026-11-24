@@ -40,17 +40,17 @@
 
 ```bash
 # 1. 先预览将要更新的文件与冲突
-npx ai-test-workbench@6.0.0 upgrade --target /path/to/repo --dry-run
+npx ai-test-workbench@6.1.0 upgrade --target /path/to/repo --dry-run
 
 # 2. 执行升级（默认仅升级 support/** 与 scripts/audit-results.mjs；如需全量模板对比可加 --scope all）
-npx ai-test-workbench@6.0.0 upgrade --target /path/to/repo
+npx ai-test-workbench@6.1.0 upgrade --target /path/to/repo
 
 # 3. 检查变更并在确认无误后，由人类在本地终端重签治理锁
-npx ai-test-workbench@6.0.0 governance status --target /path/to/repo
-npx ai-test-workbench@6.0.0 governance approve --target /path/to/repo --by "alice@team" --reason "升级至 ai-test-workbench v6.0.0 内核"
+npx ai-test-workbench@6.1.0 governance status --target /path/to/repo
+npx ai-test-workbench@6.1.0 governance approve --target /path/to/repo --by "alice@team" --reason "升级至 ai-test-workbench v6.0.0 内核"
 
 # 4. 确认 doctor 无内核漂移告警
-npx ai-test-workbench@6.0.0 doctor --target /path/to/repo
+npx ai-test-workbench@6.1.0 doctor --target /path/to/repo
 ```
 
 ---
@@ -64,8 +64,8 @@ npx ai-test-workbench@6.0.0 doctor --target /path/to/repo
    ```
 3. 预览并同步官方 Test Agents 定义：
    ```bash
-   npx ai-test-workbench@6.0.0 update-agents --target /path/to/repo --loop codex,claude --dry-run
-   npx ai-test-workbench@6.0.0 update-agents --target /path/to/repo --loop codex,claude
+   npx ai-test-workbench@6.1.0 update-agents --target /path/to/repo --loop codex,claude --dry-run
+   npx ai-test-workbench@6.1.0 update-agents --target /path/to/repo --loop codex,claude
    ```
 4. 若某 Agent 文件曾被人工修改，新版模板会写出为 `<file>.aitest-new` 并返回退出码 `2`；对比合并后删除 `.aitest-new`（或显式传 `--force` 覆盖）。
 5. 运行 `npm run typecheck && npm run lint`、离线 `smoke` 与目标环境回归验证，再由人类执行 `governance approve`。

@@ -109,6 +109,13 @@
       "corpusType": "security",
       "testFile": "test/integration/mcp-security-and-heal.test.mjs",
       "testTitleSubstring": "MCP Security, Heal E2E"
+    },
+    {
+      "id": "CLAIM-18-fger-agentic-dual-tier-redteam",
+      "claim": "FGER-agentic dual-tier red-team harness isolates hidden oracles and ephemeral Fulcio T2 CA, exposes same-UID local T1 limits (AG-B4/AG-C4), and enforces 0.0% T2 escape rate across all 4 attack classes (A/B/C/D)",
+      "corpusType": "red-team",
+      "testFile": "test/adversarial/fger-agentic.test.mjs",
+      "testTitleSubstring": "FGER-agentic Dual-Tier Red-Team Suite"
     }
   ]
 }

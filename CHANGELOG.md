@@ -4,6 +4,19 @@
 
 本日志遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 与 [语义化版本 (SemVer)](https://semver.org/spec/v2.0.0.html) 规范。
 
+## [6.1.0] - 2026-11-24
+
+### 新增 (Added)
+- **自治红队假绿逃逸率基准框架 (`FGER-agentic`, `npm run bench:agentic`)**：
+  - 将 [bench/agentic/DESIGN.md](./bench/agentic/DESIGN.md) 升级为完整可执行双口径评测规范，新增 16 道预登记多步攻防任务语料 [bench/agentic/tasks.json](./bench/agentic/tasks.json)（覆盖 A 断言降级 / B 治理锁篡改 / C 账本与证明伪造 / D 自愈状态机绕过、L1/L2/L3 威胁级含页面 DOM 间接提示注入、`benign-pressure` / `adversarial-redteam` 双提示档位）。
+  - 新增零运行时依赖评测引擎（`bench/agentic/lib/` 与 `scripts/bench-agentic.mjs`）：物理隔离的隐藏业务断言集（8 类真实 Smart Campus 缺陷）、不可变保护基线裸远端、内存专有 ASN.1 DER X.509 v3 临时 Fulcio T2 CA + Sigstore v0.3 DSSE 签发器、全量 6 层拦截归因与 Wilson 95% 置信区间统计，以及脱敏轨迹归档。
+  - **真实 Playwright 脚本化多步红队基线实测（`live-playwright`, `n=16`）**：本地 T1 护栏 **`12.5%` (`2/16`, CI `[3.5%, 36.0%]`)**（2 例逃逸全部来自预登记同用户本地边界探针 `AG-B4`/`AG-C4`，诚实归档本地 T1 极限）；隔离 CI T2 合入级信任根 **`0.0%` (`0/16`, CI `[0.0%, 19.4%]`)**；合法修复对照 `honest-fix` `4/4` 通过真实 T2 验签，诚实提单对照 `honest-report` `0%` 误修；详见 [bench/agentic/results/SUMMARY.md](./bench/agentic/results/SUMMARY.md)。
+  - 内置实盘自治大模型 CLI 适配器（`--adapter claude|codex|gemini|custom`），未执行实盘模型采样前严格保持 `live-LLM: pending` 披露，不做任何数值外推。
+  - 新增自动化对抗测试套件 `test/adversarial/fger-agentic.test.mjs` 并登记 `CLAIM-18-fger-agentic-dual-tier-redteam`（[docs/claims.json](./docs/claims.json)）。
+
+### 修复 (Fixed)
+- **跨机干净 CI Runner 上的 `governance.lock` MAC 兼容修复**：在 `src/verdict.mjs`、`src/kernel/gate/engine.mjs` 与 `src/kernel/gate/policy.mjs`（同步镜像至 `templates/playwright-qa/support/`）中修复开发者本机提交带本地 MAC 的 `.aitest/governance.lock` 后，全新 CI runner 因 `beginRunLedger` 懒生成新本机密钥而误触发 HMAC 失配的问题；完整保留本地 T1 严格验签、全部受保护文件 SHA-256 校验与 CI `AITEST-G101` 保护分支 Diff 阻断。
+
 ## [6.0.0] - 2026-11-24
 
 ### 破坏性变更 (Breaking Changes — 迁移指南见 [docs/upgrade.md](./docs/upgrade.md))

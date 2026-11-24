@@ -74,6 +74,8 @@ const BILINGUAL_STRUCTURE_PAIRS = [
   'docs/adr/0004-pluggable-ast-gate-and-fp-governance.md',
   'docs/adr/0005-mcp-surface-outcome-and-config.md',
   'docs/review/v6-refactor-assessment.md',
+  'bench/agentic/DESIGN.md',
+  'bench/agentic/results/SUMMARY.md',
   'skills/ai-test-workbench/references/mcp-server-protocol.md',
   'skills/ai-test-workbench/references/healer-governance.md',
 ];

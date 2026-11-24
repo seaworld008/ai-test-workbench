@@ -26,6 +26,7 @@ import { SCHEMA_VERSIONS, WORKBENCH_VERSION } from './core/version.mjs';
 import {
   listChangedFilesUnderDir,
   resolveGitTreeSha,
+  resolveT1HmacKey,
   verifyPayloadT1,
 } from './kernel/gate-kernel.mjs';
 
@@ -157,6 +158,21 @@ export function buildPrVerdictMarkdown(verdict, lang = 'zh') {
 }
 
 /**
+ * Canonicalizes a filesystem path via `realpathSync.native` so Windows 8.3 short paths (`RUNNER~1`)
+ * and macOS `/var` symlinks match `git rev-parse --show-toplevel` output cleanly.
+ * @param {string} p
+ * @returns {string}
+ */
+function canonicalizeFsPath(p) {
+  const resolved = path.resolve(p);
+  try {
+    return typeof fs.realpathSync.native === 'function' ? fs.realpathSync.native(resolved) : fs.realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+/**
  * Checks `.aitest/heals/*.json` against modified specs in the current diff (`T-07`):
  * If an active/unclosed B/C/D heal session exists AND its spec file was edited, block the verdict!
  * Also detects tampered heal session files via T1 HMAC.
@@ -174,14 +190,16 @@ export function checkHealSessionConflicts(qaDir, baseResolution) {
   const changedInsideQa = new Set();
 
   if (baseResolution.isGitRepo && baseResolution.gitRoot && baseResolution.resolved) {
-    const ch = listChangedFilesUnderDir(baseResolution.gitRoot, baseResolution.resolved, qaDir);
+    const realQaDir = canonicalizeFsPath(qaDir);
+    const realGitRoot = canonicalizeFsPath(baseResolution.gitRoot);
+    const ch = listChangedFilesUnderDir(realGitRoot, baseResolution.resolved, realQaDir);
     if (ch.ok) {
       for (const item of ch.changed) {
-        const rel = path.relative(qaDir, path.join(baseResolution.gitRoot, item.path)).replace(/\\/g, '/');
+        const rel = path.relative(realQaDir, path.join(realGitRoot, item.path)).replace(/\\/g, '/');
         changedInsideQa.add(rel);
       }
       for (const u of ch.untracked) {
-        const rel = path.relative(qaDir, path.join(baseResolution.gitRoot, u)).replace(/\\/g, '/');
+        const rel = path.relative(realQaDir, path.join(realGitRoot, u)).replace(/\\/g, '/');
         changedInsideQa.add(rel);
       }
     }
@@ -250,6 +268,7 @@ export async function verifyChangeCore(options = {}) {
   const baseResolution = resolveDefaultDiffBase(repoDir, options.base || null);
 
   // Step 1: Pre-flight Layer 0 Governance Lock Integrity (Fail-Closed!)
+  const hadT1KeyBeforeRun = resolveT1HmacKey({ createIfMissing: false, qaDir, repoDir }).ok;
   const govPre = verifyGovernanceLockInQaDir(qaDir);
   if (!govPre.ok) {
     return {
@@ -376,6 +395,7 @@ export async function verifyChangeCore(options = {}) {
     expectedRunId: runOut.runId,
     diffBase: baseResolution.resolved,
     requireDiff: !allowNonGit,
+    allowForeignLockMac: !hadT1KeyBeforeRun,
   });
 
   // Step 4b: Check Heal Session Conflicts (`T-07`)

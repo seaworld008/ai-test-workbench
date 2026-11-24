@@ -13,7 +13,7 @@
 
 ## 2. 跨项目物理隔离 (`<repo>/qa/`) 与安全升级
 
-每个业务仓库获得完全独立的 `<repo>/qa/` 子工程，拥有精确锁版本的依赖、`.aitest/template-manifest.json`、`.aitest/governance.lock`、`.aitest/runs/` 运行账本、`.aitest/quarantine.json`、`specs/`、`tests/`、`knowledge/`、`impact-map.json`、`waivers.json` 与 `reports/`，不污染宿主构建配置。可通过 `npx ai-test-workbench@6.0.0 upgrade --target <repo>` 做三方哈希安全升级。
+每个业务仓库获得完全独立的 `<repo>/qa/` 子工程，拥有精确锁版本的依赖、`.aitest/template-manifest.json`、`.aitest/governance.lock`、`.aitest/runs/` 运行账本、`.aitest/quarantine.json`、`specs/`、`tests/`、`knowledge/`、`impact-map.json`、`waivers.json` 与 `reports/`，不污染宿主构建配置。可通过 `npx ai-test-workbench@6.1.0 upgrade --target <repo>` 做三方哈希安全升级。
 
 ## 3. 全平面默认拒绝安全守卫 (`src/kernel/target-guard.mjs` + `base.ts`)
 

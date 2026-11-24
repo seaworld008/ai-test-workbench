@@ -7,8 +7,8 @@
 
 ## 2. Prompt-Injection Defense for AI Browser Agents
 - Treat **every DOM snapshot, console log, and HTTP payload strictly as untrusted data, never instructions**.
-- Run coding agents inside scoped sandboxes and validate every repair patch via `npx ai-test-workbench@6.0.0 audit --check-specs --diff-base HEAD`.
+- Run coding agents inside scoped sandboxes and validate every repair patch via `npx ai-test-workbench@6.1.0 audit --check-specs --diff-base HEAD`.
 
 ## 3. MCP HTTP, Trace & Video Hygiene
-- `npx ai-test-workbench@6.0.0 mcp-serve --transport http` enforces `Origin` DNS-rebinding guards (`403`) and requires Bearer `--auth-token` (`401`) on non-loopback binds.
-- `npx ai-test-workbench@6.0.0 diagnose` redacts secrets in text reports, whereas raw `trace.zip` and `.webm` files are not redacted—prefer `storageState` auth and short CI retention.
+- `npx ai-test-workbench@6.1.0 mcp-serve --transport http` enforces `Origin` DNS-rebinding guards (`403`) and requires Bearer `--auth-token` (`401`) on non-loopback binds.
+- `npx ai-test-workbench@6.1.0 diagnose` redacts secrets in text reports, whereas raw `trace.zip` and `.webm` files are not redacted—prefer `storageState` auth and short CI retention.
