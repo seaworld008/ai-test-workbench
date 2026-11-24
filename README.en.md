@@ -77,7 +77,7 @@ flowchart TB
 
 ## 30-Second AI Agent Setup (Zero Runtime Dependencies)
 
-> **Supply-Chain Note**: Until published to npm, prefer running from a local clone (`node tools/aitest.mjs mcp-serve`). When using `npx`, always pin the exact version (`--package=ai-test-workbench@5.0.0`) rather than unpinned `-y`.
+> **CLI & Supply-Chain Security**: Run pinned `npx ai-test-workbench@5.1.0 <cmd>`, global short alias `aitw <cmd>` (after `npm i -g ai-test-workbench@5.1.0`), or local source `node tools/aitest.mjs <cmd>`. Always pin an exact version rather than unpinned `npx -y`.
 
 - **Claude Code**:
   ```bash
@@ -87,7 +87,7 @@ flowchart TB
   ```toml
   [mcp_servers.ai-test-workbench]
   command = "npx"
-  args = ["--package=ai-test-workbench@5.0.0", "ai-test-workbench", "mcp-serve"]
+  args = ["--package=ai-test-workbench@5.1.0", "ai-test-workbench", "mcp-serve"]
   ```
 - **Cursor / Windsurf / Antigravity / Gemini CLI** (`.mcp.json`):
   ```json
@@ -95,7 +95,7 @@ flowchart TB
     "mcpServers": {
       "ai-test-workbench": {
         "command": "npx",
-        "args": ["--package=ai-test-workbench@5.0.0", "ai-test-workbench", "mcp-serve"]
+        "args": ["--package=ai-test-workbench@5.1.0", "ai-test-workbench", "mcp-serve"]
       }
     }
   }
@@ -113,9 +113,9 @@ Requires **Node.js `>= 22.12.0`** (`24 LTS` or `26 LTS` recommended).
 
 ```bash
 # Project onboarding & one-call change verdict
-npx ai-test-workbench doctor
-npx ai-test-workbench init --name my-app --target "/path/to/your-repo" --loop codex
-npx ai-test-workbench verify-change --target "/path/to/your-repo" --base origin/main
+npx ai-test-workbench@5.1.0 doctor
+npx ai-test-workbench@5.1.0 init --name my-app --target "/path/to/your-repo" --loop codex
+npx ai-test-workbench@5.1.0 verify-change --target "/path/to/your-repo" --base origin/main
 
 # Clone & reproduce all v5.0 unit tests, live demo, and seeded-defect benchmark locally
 git clone https://github.com/seaworld008/ai-test-workbench.git

@@ -22,6 +22,7 @@ import { runSkillInstallCommand } from './skill-install.mjs';
 import { runTraceMatrixCommand } from './traceability.mjs';
 import { runAttestCommand } from './trust.mjs';
 import { runVerifyChangeCommand } from './verdict.mjs';
+import { WORKBENCH_VERSION } from './version.mjs';
 
 const CLI_OPTION_DEFS = {
   help: { type: /** @type {'boolean'} */ ('boolean'), short: 'h' },
@@ -149,6 +150,7 @@ function printHelp(lang) {
     'flaky',
     'trace-matrix',
     'governance',
+    'attest',
     'report',
     'update-agents',
     'skill-install',
@@ -156,8 +158,9 @@ function printHelp(lang) {
 
   console.log(`\n${t(lang, 'appTitle')}\n`);
   console.log(`${t(lang, 'usageHeader')}:`);
-  console.log('  npx ai-test-workbench <command> [options]');
-  console.log('  node tools/aitest.mjs <command> [options]\n');
+  console.log(`  npx ai-test-workbench@${WORKBENCH_VERSION} <command> [options]`);
+  console.log('  aitw <command> [options]                  # after global install');
+  console.log('  node tools/aitest.mjs <command> [options] # local repository checkout\n');
   console.log(`${t(lang, 'commandsHeader')}:`);
   for (const cmd of commands) {
     console.log(`  ${cmd.padEnd(16)} ${t(lang, 'helpSummary')[cmd] || ''}`);

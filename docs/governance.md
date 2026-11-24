@@ -8,7 +8,7 @@
 
 ## 1. 四层可信防假绿门禁内核 (`support/gate-kernel.mjs`)
 
-每次执行 `aitest audit`、`aitest run --audit` 或一键判决 `aitest verify-change` 时，都会依次通过以下四道硬门禁：
+每次执行 `npx ai-test-workbench@5.1.0 audit`、`npx ai-test-workbench@5.1.0 run --audit` 或一键判决 `npx ai-test-workbench@5.1.0 verify-change` 时，都会依次通过以下四道硬门禁：
 
 | 层级 | 门禁名称 | 核心校验内容 | 阻断典型作弊手段 |
 |---|---|---|---|
@@ -19,16 +19,16 @@
 
 ---
 
-## 2. 人类专属治理审批协议 (`aitest governance`)
+## 2. 人类专属治理审批协议 (`npx ai-test-workbench@5.1.0 governance`)
 
 受保护治理文件默认锁定在 `<repo>/qa/.aitest/governance.lock`，配套只追加审计日志 `.aitest/governance-audit.jsonl`：
 
 ```bash
 # 查看受保护治理文件哈希状态（Agent 与人工均可只读执行）
-npx ai-test-workbench governance status --target "/path/to/repo"
+npx ai-test-workbench@5.1.0 governance status --target "/path/to/repo"
 
 # 人工修改受保护配置或新增合规豁免后，由人类在本地终端重签治理锁
-npx ai-test-workbench governance approve --target "/path/to/repo" --approver "alice@team" --reason "更新 staging 性能预算基线"
+npx ai-test-workbench@5.1.0 governance approve --target "/path/to/repo" --approver "alice@team" --reason "更新 staging 性能预算基线"
 ```
 
 > [!IMPORTANT]
@@ -36,7 +36,7 @@ npx ai-test-workbench governance approve --target "/path/to/repo" --approver "al
 
 ---
 
-## 3. 有状态自愈会话状态机 (`aitest heal` / `aitest_heal_*`)
+## 3. 有状态自愈会话状态机 (`npx ai-test-workbench@5.1.0 heal` / `aitest_heal_*`)
 
 取代无记忆的自由改码循环，所有失败修复必须通过状态机推进：
 
@@ -57,7 +57,7 @@ npx ai-test-workbench governance approve --target "/path/to/repo" --approver "al
 
 ---
 
-## 5. 一键可信变更判决 (`aitest verify-change` / `aitest_verify_change`)
+## 5. 一键可信变更判决 (`npx ai-test-workbench@5.1.0 verify-change` / `aitest_verify_change`)
 
 在代码提交或 PR 合并前，只需一次调用即可串联完整闭环：
 `governance verify` → `Import-Graph Impact v2` → `Playwright Run (Run Ledger)` → `4-Layer Gate Audit` → `Diagnose & Trace Matrix`，自动产出：

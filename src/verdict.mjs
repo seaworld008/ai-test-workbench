@@ -238,7 +238,7 @@ export async function verifyChangeCore(options = {}) {
       gateErrors: govPre.errors,
       failures: [],
       ai: { llmCalls: 0, models: [], promptHashes: [] },
-      nextActions: [{ action: 'human-cli', command: 'npx ai-test-workbench governance approve --target <repo> --by <human> --reason <why>' }],
+      nextActions: [{ action: 'human-cli', command: `npx ai-test-workbench@${WORKBENCH_VERSION} governance approve --target <repo> --by <human> --reason <why>` }],
     };
   }
 

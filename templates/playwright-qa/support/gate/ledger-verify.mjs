@@ -285,7 +285,7 @@ export function verifyLedgerBindingInQaDir(qaDir, resultsPath, rawResultsObj, op
         resultsDigest: null,
         ledgerMac: null,
         errors: [
-          `[Run Ledger Blocked] Missing .aitest/runs/latest.json in initialized QA workspace (${qaDir}). Deleting Run Ledger is fail-closed; execute tests via "npx ai-test-workbench run".`,
+          `[Run Ledger Blocked] Missing .aitest/runs/latest.json in initialized QA workspace (${qaDir}). Deleting Run Ledger is fail-closed; execute tests via "npx ai-test-workbench@5.1.0 run".`,
         ],
         warnings: [],
       };
@@ -333,7 +333,7 @@ export function verifyLedgerBindingInQaDir(qaDir, resultsPath, rawResultsObj, op
       runId: runId || null,
       resultsDigest: null,
       ledgerMac: null,
-      errors: [`[Run Ledger Blocked] Missing run manifest for runId="${runId}". Re-run "npx ai-test-workbench run".`],
+      errors: [`[Run Ledger Blocked] Missing run manifest for runId="${runId}". Re-run "npx ai-test-workbench@5.1.0 run".`],
       warnings,
     };
   }
@@ -408,7 +408,7 @@ export function verifyLedgerBindingInQaDir(qaDir, resultsPath, rawResultsObj, op
     );
   } else if (typeof options.currentWorktreeHash === 'string' && options.currentWorktreeHash !== manifest.worktreeHash) {
     errors.push(
-      `[Stale Results Blocked] Workspace source/spec files changed since runId=${manifest.runId} completed (worktreeHash mismatch). Re-run "npx ai-test-workbench run" so green results match current code.`
+      `[Stale Results Blocked] Workspace source/spec files changed since runId=${manifest.runId} completed (worktreeHash mismatch). Re-run "npx ai-test-workbench@5.1.0 run" so green results match current code.`
     );
   }
 

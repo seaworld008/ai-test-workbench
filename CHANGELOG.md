@@ -4,6 +4,16 @@
 
 本日志遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 与 [语义化版本 (SemVer)](https://semver.org/spec/v2.0.0.html) 规范。
 
+## [5.1.0] - 2026-11-24
+
+### 破坏性变更 / 移除 (Removed / Breaking)
+- **移除 `aitest` CLI 命令别名，新增 `aitw` 短命令**：原 `bin.aitest` 与 npm 上既有无关第三方包 `aitest`（同样注册了 `aitest` 命令）重名；鉴于本包此前从未发布到 npm，现正式从 `package.json` 的 `bin` 中移除 `aitest`，统一使用锁版本 `npx ai-test-workbench@5.1.0 <cmd>` 或全局安装后的 `aitw <cmd>`（本地仓库开发继续保留 `node tools/aitest.mjs <cmd>`）。为保持已有客户端兼容，`tools/aitest.mjs` 文件路径、MCP 工具名 `aitest_*`、`.aitest/` 目录、`AITEST-G*` 规则码与 `AITEST_*` 环境变量前缀均保持不变。
+
+### 新增与加固 (Added & Hardened)
+- **npm 供应链发布就绪**：`package.json` 补充 `publishConfig: { "access": "public", "provenance": true }`，新增标签触发的 [.github/workflows/release.yml](./.github/workflows/release.yml)（全量 Action 锁定至完整 Commit SHA，发布前强制执行全部 7 条验证门禁，支持首次发布后切换 npm Trusted Publisher）。
+- **`lint:docs` 文档命令与版本防漂移门禁**：自动阻断文档中裸 `npx -y ai-test-workbench`、已移除的 `aitest <cmd>` CLI 命令以及与 `package.json` 版本不一致的 `@x.y.z` 示例。
+- **模块化 AST 门禁内核 v3、T1 工作区外 HMAC、结构化先解析后脱敏与模块化 MCP 服务端**：4 层 fail-closed 三态门禁拦截 `24/24` 红队留出集（`FGER-holdout = 0.0%`）且良性重构 `FPR = 0.0%`，修复 MCP 自愈 `sessionId` 脱敏阻断与真实 Playwright 堆栈 `C→A` 误判。
+
 ## [5.0.0] - 2026-11-24
 
 ### 新增 (Added)

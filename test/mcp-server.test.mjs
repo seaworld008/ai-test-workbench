@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { WORKBENCH_VERSION } from '../src/version.mjs';
 import {
   SUPPORTED_MCP_VERSIONS,
   createMcpHttpServer,
@@ -26,7 +27,7 @@ test('MCP server negotiates all supported protocol versions (2024-11-05 .. 2025-
       params: { protocolVersion: ver, clientInfo: { name: 'unit-test', version: '1.0' } },
     });
     assert.equal(res.result.protocolVersion, ver);
-    assert.equal(res.result.serverInfo.version, '5.0.0');
+    assert.equal(res.result.serverInfo.version, WORKBENCH_VERSION);
     assert.ok(res.result.capabilities.tools);
     assert.ok(res.result.capabilities.resources);
     assert.ok(res.result.capabilities.prompts);

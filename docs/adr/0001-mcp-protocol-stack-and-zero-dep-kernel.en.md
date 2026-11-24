@@ -24,7 +24,7 @@ For `v5.0`, we evaluated whether to **adopt `@modelcontextprotocol/sdk` + `zod` 
 
 | Dimension | Option A: Adopt `@modelcontextprotocol/sdk` + `zod` | Option B (Accepted): Zero-Dependency Multi-Protocol Kernel v2 + Child-Process Job Runner (`src/jobs.mjs`) |
 |---|---|---|
-| **`npx -y ai-test-workbench` Cold Start** | Downloads dozens of transitive packages; slower cold start and fragile in air-gapped CI | **Instant startup**; `0` runtime `dependencies` in root `package.json` |
+| **`npx ai-test-workbench@5.1.0` Cold Start** | Downloads dozens of transitive packages; slower cold start and fragile in air-gapped CI | **Instant startup**; `0` runtime `dependencies` in root `package.json` |
 | **Supply-Chain Surface** | Larger transitive dependency graph | **Zero runtime third-party packages** (Playwright & ESLint stay isolated and exact-pinned inside `<repo>/qa`) |
 | **Protocol Compatibility (`2024-11-05` .. `2025-11-25`)** | Varies across SDK major versions for Legacy SSE vs Streamable HTTP | Exact support for `stdio`, `Streamable HTTP (/mcp)`, and `Legacy SSE (/sse)`, including protocol-version-aware batch rejection on `>= 2025-06-18` |
 | **Subprocess Isolation & Process-Tree Kill** | Still requires custom Playwright child-process & `taskkill /T` management | `src/jobs.mjs` runs heavy tools in isolated child processes (`AITEST_MCP_CHILD=1`), eliminating console hijacking and enabling clean process-tree termination |
@@ -46,7 +46,7 @@ We adopt **Option B: Zero-Dependency Multi-Protocol Kernel v2 (`src/mcp-server.m
    - Read-only tools execute concurrently with zero global lock; mutating tools acquire a normalized cross-process per-workspace lock (`withWorkspaceWriteLock`) strictly bounded by the `--workspace-root` ceiling intersected with client roots.
 4. **Hardened Streamable HTTP & Privilege Separation**:
    - Only `initialize` creates sessions; unknown/expired `Mcp-Session-Id` returns `404 Not Found`; sessions enforce idle TTL and `maxSessions` eviction; Bearer auth uses `crypto.timingSafeEqual`.
-   - Human-only `aitest governance approve` is **never** exposed over MCP and hard-fails if `AITEST_MCP_CHILD=1`.
+   - Human-only `npx ai-test-workbench@5.1.0 governance approve` is **never** exposed over MCP and hard-fails if `AITEST_MCP_CHILD=1`.
 
 ---
 

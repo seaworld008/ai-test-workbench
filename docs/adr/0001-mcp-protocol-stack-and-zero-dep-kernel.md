@@ -24,7 +24,7 @@
 
 | 评估维度 | 方案 A：迁移至 `@modelcontextprotocol/sdk` + `zod` | 方案 B（采纳）：零依赖多协议内核 v2 + 子进程 Job Runner (`src/jobs.mjs`) |
 |---|---|---|
-| **`npx -y ai-test-workbench` 冷启动延迟** | 需下载解析数十个传递依赖包，首次冷启动显著变慢，离线内网环境易失败 | **毫秒级启动**，根包 `dependencies` 保持 `0`，内网/离线 CI 零额外拉包 |
+| **`npx ai-test-workbench@5.1.0` 冷启动延迟** | 需下载解析数十个传递依赖包，首次冷启动显著变慢，离线内网环境易失败 | **毫秒级启动**，根包 `dependencies` 保持 `0`，内网/离线 CI 零额外拉包 |
 | **供应链攻击面** | 引入外部传递依赖树与锁文件漂移风险 | **零运行时第三方依赖**（`templates/playwright-qa` 测试依赖严格精确锁版本隔离） |
 | **多协议向后兼容 (`2024-11-05` .. `2025-11-25`)** | SDK 新旧版本对 Legacy SSE 与批处理行为存在差异 | 同一内核原生精确兼容 `stdio`、`Streamable HTTP (/mcp)`、`Legacy SSE (/sse)` 四代协议协商（含 `2025-06-18+` 禁批处理规范） |
 | **子进程隔离与跨平台强杀 (`taskkill /T`)** | SDK 不自带 Playwright 子进程树管理，仍需自建 Job 层 | `src/jobs.mjs` 原生把长任务隔离在独立 Node 子进程（`AITEST_MCP_CHILD=1`），完全消除 `console` 劫持并支持进程树级取消 |
@@ -47,7 +47,7 @@
    - 写工具按 `target` 规范化路径加细粒度跨进程工作区互斥锁（`withWorkspaceWriteLock`），并基于服务端 `--workspace-root` 上限与客户端 `roots` 交集强制拦截越界路径访问。
 4. **硬化 Streamable HTTP 与安全鉴权**：
    - 仅 `initialize` 创建 `Mcp-Session-Id`；未知或过期会话严格返回 `404 Not Found`；内置会话空闲 TTL 与 `maxSessions` 上限淘汰；使用 `crypto.timingSafeEqual` 校验 Bearer Token；在 `2025-06-18` 及更新协议版本下拒绝 JSON-RPC 数组批处理。
-   - **安全隔离铁律**：人工治理命令 `aitest governance approve` 永不注册为 MCP 工具，且在 `AITEST_MCP_CHILD=1` 环境下硬阻断执行。
+   - **安全隔离铁律**：人工治理命令 `npx ai-test-workbench@5.1.0 governance approve` 永不注册为 MCP 工具，且在 `AITEST_MCP_CHILD=1` 环境下硬阻断执行。
 
 ---
 

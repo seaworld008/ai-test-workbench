@@ -6,6 +6,7 @@ import { inspectBrowserCache } from './doctor.mjs';
 import { ensureInitialGovernanceLock } from './governance.mjs';
 import { runNpm, runPlaywright, runProcess } from './proc.mjs';
 import { syncOfficialAgents } from './agents.mjs';
+import { WORKBENCH_VERSION } from './version.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKBENCH_ROOT = path.resolve(__dirname, '..');
@@ -426,7 +427,7 @@ export async function runInit(options = {}) {
   }
 
   console.log(`\n${lang === 'zh' ? '推荐下一步（默认在 qa/ 目录启动 Agent）' : 'Next steps (start coding agent inside qa/ by default)'}:`);
-  console.log(`  1) npx ai-test-workbench run --target "${target}" --suite smoke --audit`);
+  console.log(`  1) npx ai-test-workbench@${WORKBENCH_VERSION} run --target "${target}" --suite smoke --audit`);
   console.log(`  2) cd "${qaDir}" && codex`);
   return 0;
 }

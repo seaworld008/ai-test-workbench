@@ -79,7 +79,7 @@ flowchart TB
 
 ### 方式一：一键注册原生 MCP Server（锁版本或本地源码直连）
 
-> **安全提示**：在 npm 正式发布前请优先通过本地仓库 `node tools/aitest.mjs mcp-serve` 启动；发布后请始终锁定精确版本号（`--package=ai-test-workbench@5.0.0`），避免无锁版本拉取。
+> **CLI 命令与供应链安全**：可使用锁版本 `npx ai-test-workbench@5.1.0 <cmd>`、全局安装后的短命令 `aitw <cmd>`（`npm i -g ai-test-workbench@5.1.0`），或本地源码直连 `node tools/aitest.mjs <cmd>`；请始终锁定精确版本号，避免无锁版本拉取。
 
 - **Claude Code**：
   ```bash
@@ -89,7 +89,7 @@ flowchart TB
   ```toml
   [mcp_servers.ai-test-workbench]
   command = "npx"
-  args = ["--package=ai-test-workbench@5.0.0", "ai-test-workbench", "mcp-serve"]
+  args = ["--package=ai-test-workbench@5.1.0", "ai-test-workbench", "mcp-serve"]
   ```
 - **Cursor / Windsurf / Antigravity / Gemini CLI**（`.mcp.json`）：
   ```json
@@ -97,7 +97,7 @@ flowchart TB
     "mcpServers": {
       "ai-test-workbench": {
         "command": "npx",
-        "args": ["--package=ai-test-workbench@5.0.0", "ai-test-workbench", "mcp-serve"]
+        "args": ["--package=ai-test-workbench@5.1.0", "ai-test-workbench", "mcp-serve"]
       }
     }
   }
@@ -129,18 +129,18 @@ flowchart TB
 
 ```bash
 # 1. 体检与幂等初始化（自动创建 <repo>/qa/.aitest/governance.lock）
-npx ai-test-workbench doctor
-npx ai-test-workbench init --name my-app --target "/path/to/your-repo" --loop codex
+npx ai-test-workbench@5.1.0 doctor
+npx ai-test-workbench@5.1.0 init --name my-app --target "/path/to/your-repo" --loop codex
 
 # 2. 登录态捕获 -> 0→1 默认禁写探索 -> 活体代码地图 v4 -> 锁版本全链路 MCP
-npx ai-test-workbench auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
-npx ai-test-workbench explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
-npx ai-test-workbench map --target "/path/to/your-repo"
-npx ai-test-workbench mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench mcp doctor --target "/path/to/your-repo" --lock
+npx ai-test-workbench@5.1.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
+npx ai-test-workbench@5.1.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
+npx ai-test-workbench@5.1.0 map --target "/path/to/your-repo"
+npx ai-test-workbench@5.1.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@5.1.0 mcp doctor --target "/path/to/your-repo" --lock
 
 # 3. 性能 SLO 评测与提交前一键可信变更判决（产出 attestation + SARIF）
-npx ai-test-workbench perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
-npx ai-test-workbench verify-change --target "/path/to/your-repo" --base origin/main
+npx ai-test-workbench@5.1.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
+npx ai-test-workbench@5.1.0 verify-change --target "/path/to/your-repo" --base origin/main
 ```
 
 ### 本机全量自检与公开基准复现（零外部服务器）

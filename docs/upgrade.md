@@ -12,8 +12,8 @@
    ```
 4. 预览并同步官方 Test Agents 定义：
    ```bash
-   npx ai-test-workbench update-agents --target /path/to/repo --loop codex,claude --dry-run
-   npx ai-test-workbench update-agents --target /path/to/repo --loop codex,claude
+   npx ai-test-workbench@5.1.0 update-agents --target /path/to/repo --loop codex,claude --dry-run
+   npx ai-test-workbench@5.1.0 update-agents --target /path/to/repo --loop codex,claude
    ```
 5. **冲突文件处理 (`*.aitest-new`)**：
    - `ai-test-workbench` 通过 `qa/.aitest/agents-manifest.json` 跟踪官方 Agent 文件的 SHA-256 哈希。

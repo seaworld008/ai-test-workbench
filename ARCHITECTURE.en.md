@@ -9,9 +9,9 @@
 1. **Governed Agent Layer (MCP Execution Model v2: `src/mcp-server.mjs` + `src/jobs.mjs`)**:
    - Native zero-dependency support for `stdio`, **Streamable HTTP (`/mcp`)**, and **Legacy HTTP+SSE (`/sse`)** across MCP `2024-11-05`..`2025-11-25+` (see [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md)).
    - Exposes **21 strongly typed MCP tools**. Read-only tools run concurrently with zero global mutex; mutating and long-running tools execute in isolated child processes (`AITEST_MCP_CHILD=1`) under per-workspace write locks with `_meta.progressToken` heartbeats, `notifications/cancelled` process-tree termination, and `syncBudgetMs` async backgrounding.
-   - **Privilege Isolation**: Human-only `aitest governance approve` is never registered on MCP and hard-fails inside MCP child processes.
+   - **Privilege Isolation**: Human-only `npx ai-test-workbench@5.1.0 governance approve` is never registered on MCP and hard-fails inside MCP child processes.
 2. **Deterministic Regression & One-Call Verdict Layer (`verifyChangeCore`)**:
-   - Local pre-push hooks, PR checks, and CI execute compiled TypeScript suites and `aitest verify-change` with **zero LLM calls**, producing ULID-bound `attestation.json` and `verdict.sarif.json`.
+   - Local pre-push hooks, PR checks, and CI execute compiled TypeScript suites and `npx ai-test-workbench@5.1.0 verify-change` with **zero LLM calls**, producing ULID-bound `attestation.json` and `verdict.sarif.json`.
 
 ## 2. Multi-Project Isolation (`<repo>/qa/`)
 

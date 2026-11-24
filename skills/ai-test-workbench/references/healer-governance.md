@@ -4,7 +4,7 @@
 
 > **工具强执覆盖条款**：Playwright 官方默认 Healer 提示词包含“若持续失败则改标 `test.fixme()`”。在 `ai-test-workbench v5.0` 中，不仅 `test.fixme()` / `test.skip()` 被阻断，**任何降低断言强度、篡改配置文件、添加 `test.fail()` / `expect.soft()` 或对 B/C/D 类故障修改测试的行为均由工具状态机直接拦截（`FGER = 0.0%`）**。
 
-## 1. 有状态自愈会话强制工作流 (`aitest heal` / `aitest_heal_*`)
+## 1. 有状态自愈会话强制工作流 (`npx ai-test-workbench@5.1.0 heal` / `aitest_heal_*`)
 
 修改任何 `tests/**` 文件前，必须先启动受控自愈会话：
 

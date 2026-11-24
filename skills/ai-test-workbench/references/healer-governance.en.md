@@ -4,7 +4,7 @@
 
 > **Tool-Enforced Override**: Playwright's default healer prompt suggests marking persistent failures with `test.fixme()`. In `ai-test-workbench v5.0`, **weakening assertion strength, editing protected configs, adding `test.fail()` / `expect.soft()`, or editing tests on Class B/C/D failures are hard-blocked by the tool state machine (`FGER = 0.0%`)**.
 
-## 1. Mandatory Stateful Healer Workflow (`aitest heal` / `aitest_heal_*`)
+## 1. Mandatory Stateful Healer Workflow (`npx ai-test-workbench@5.1.0 heal` / `aitest_heal_*`)
 
 | Class | Root Cause | `aitest_heal_begin` Verdict | Allowed Action | Tool-Blocked Forbidden Action |
 |---|---|---|---|---|
@@ -17,4 +17,4 @@
 
 Every `aitest_heal_attempt` and `aitest_audit --diff-base HEAD` inspects the entire `qa/` workspace (including untracked files and protected governance files):
 - **`S5` exact value assertions** (`toHaveText('exact')`, `toEqual`, `toBe(200)`) cannot be downgraded to **`S3` partial**, **`S2` visibility (`toBeVisible()`)**, **`S1` truthy**, or **`S0` tautologies (`expect(true).toBe(true)`)**.
-- Protected files sealed in `.aitest/governance.lock` cannot be altered without human `aitest governance approve`.
+- Protected files sealed in `.aitest/governance.lock` cannot be altered without human `npx ai-test-workbench@5.1.0 governance approve`.

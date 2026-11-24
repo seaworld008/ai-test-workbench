@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { TOOL_REGISTRY } from '../src/mcp/registry.mjs';
+import { WORKBENCH_VERSION } from '../src/version.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_REPO_ROOT = path.resolve(__dirname, '..');
@@ -174,12 +175,65 @@ function validateScorecardFileRefs(rootDir, relPath, mdText, errors) {
   }
 }
 
+const CLI_SUBCOMMANDS_RE =
+  /(?:^|[\s`"'(\[])aitest\s+(?:doctor|init|auth-login|explore|map|mcp|mcp-serve|perf|run|impact|audit|diagnose|verify-change|heal|flaky|trace-matrix|governance|report|update-agents|skill-install|attest|--help|--version|<cmd>|<command>)(?=[\s`"'.,;:)\]]|$)/m;
+const UNPINNED_NPX_RE = /\bnpx\s+(?:-y|--yes)\s+ai-test-workbench(?![@\d])/i;
+const PINNED_PKG_VER_RE = /ai-test-workbench@(\d+\.\d+\.\d+)/g;
+
+function readExpectedPackageVersion(rootDir) {
+  const pkgPath = path.join(rootDir, 'package.json');
+  if (fs.existsSync(pkgPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      if (parsed.version) return String(parsed.version);
+    } catch {
+      // fall back
+    }
+  }
+  return WORKBENCH_VERSION;
+}
+
+/**
+ * Enforces Stage 1 release hygiene across active docs:
+ * 1. Bans unpinned `npx -y ai-test-workbench` (must pin `@<version>`).
+ * 2. Bans removed `aitest <cmd>` CLI binary in examples (use `npx ai-test-workbench@<ver>`, `aitw`, or `node tools/aitest.mjs`).
+ * 3. Ensures every `ai-test-workbench@<x.y.z>` version pin matches `package.json` `version`.
+ */
+function validateCliCommandAndVersionConsistency(relPath, mdText, expectedVersion, errors) {
+  const norm = relPath.replace(/\\/g, '/');
+  if (norm.startsWith('docs/review/') || norm === 'CHANGELOG.md' || norm === 'CHANGELOG.en.md') {
+    return;
+  }
+  if (UNPINNED_NPX_RE.test(mdText)) {
+    errors.push(
+      `[Unpinned npx in Docs] ${relPath} uses bare \`npx -y ai-test-workbench\`; pin an exact version (\`npx ai-test-workbench@${expectedVersion}\`).`
+    );
+  }
+  const removedBin = CLI_SUBCOMMANDS_RE.exec(mdText);
+  if (removedBin) {
+    errors.push(
+      `[Removed CLI Bin in Docs] ${relPath} references removed \`aitest\` CLI command ("${removedBin[0].trim()}"); use \`npx ai-test-workbench@${expectedVersion}\`, \`aitw\`, or \`node tools/aitest.mjs\`.`
+    );
+  }
+  const seenMismatch = new Set();
+  for (const m of mdText.matchAll(PINNED_PKG_VER_RE)) {
+    const foundVer = m[1];
+    if (foundVer !== expectedVersion && !seenMismatch.has(foundVer)) {
+      seenMismatch.add(foundVer);
+      errors.push(
+        `[Doc Version Mismatch] ${relPath} pins \`ai-test-workbench@${foundVer}\`, which does not match package.json version \`${expectedVersion}\`.`
+      );
+    }
+  }
+}
+
 export function checkDocsAndHygiene(rootDir = DEFAULT_REPO_ROOT) {
   const files = listRepoFiles(rootDir);
   const errors = [];
   const checkedMd = [];
   let hygieneScanned = 0;
   const externalBlocklist = loadOptionalExternalBlocklist();
+  const expectedPkgVersion = readExpectedPackageVersion(rootDir);
 
   for (const rawRel of files) {
     const rel = rawRel.replace(/\\/g, '/');
@@ -219,6 +273,7 @@ export function checkDocsAndHygiene(rootDir = DEFAULT_REPO_ROOT) {
       if (rel.endsWith('.md')) {
         checkedMd.push(rel);
         validateRelativeLinks(rootDir, rel, content, errors);
+        validateCliCommandAndVersionConsistency(rel, content, expectedPkgVersion, errors);
 
         if (ACTIVE_MCP_TOOL_DOCS.has(rel)) {
           validateDocumentedMcpToolNames(rel, content, errors);

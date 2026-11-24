@@ -253,7 +253,7 @@ export function verifyGovernanceLockInQaDir(qaDir, options = {}) {
   if (!fs.existsSync(lockPath)) {
     if (isInitializedQaWorkspace(qaDir)) {
       errors.push(
-        `[Governance Tamper Blocked] Missing .aitest/governance.lock in initialized QA workspace (${qaDir}). Fail-closed: restore from Git or have a human run "npx ai-test-workbench governance approve".`
+        `[Governance Tamper Blocked] Missing .aitest/governance.lock in initialized QA workspace (${qaDir}). Fail-closed: restore from Git or have a human run "npx ai-test-workbench@5.1.0 governance approve".`
       );
       return {
         ok: false,
@@ -322,11 +322,11 @@ export function verifyGovernanceLockInQaDir(qaDir, options = {}) {
     const actualHash = currentHashes[rel];
     if (!actualHash) {
       errors.push(
-        `[Governance Tamper Blocked] Protected governance file "${rel}" was deleted. Human approval required via "npx ai-test-workbench governance approve".`
+        `[Governance Tamper Blocked] Protected governance file "${rel}" was deleted. Human approval required via "npx ai-test-workbench@5.1.0 governance approve".`
       );
     } else if (actualHash !== expectedHash) {
       errors.push(
-        `[Governance Tamper Blocked] Protected governance file "${rel}" was modified (${actualHash.slice(0, 19)} != ${String(expectedHash).slice(0, 19)}). Agents may NOT edit governance configs/waivers; a human must run "npx ai-test-workbench governance approve --target <repo> --by <name> --reason <why>".`
+        `[Governance Tamper Blocked] Protected governance file "${rel}" was modified (${actualHash.slice(0, 19)} != ${String(expectedHash).slice(0, 19)}). Agents may NOT edit governance configs/waivers; a human must run "npx ai-test-workbench@5.1.0 governance approve --target <repo> --by <name> --reason <why>".`
       );
     }
   }
@@ -334,7 +334,7 @@ export function verifyGovernanceLockInQaDir(qaDir, options = {}) {
   for (const rel of Object.keys(currentHashes)) {
     if (!(rel in lockedFiles)) {
       errors.push(
-        `[Governance Tamper Blocked] Unapproved protected file "${rel}" added without updating .aitest/governance.lock. Human approval required via "npx ai-test-workbench governance approve".`
+        `[Governance Tamper Blocked] Unapproved protected file "${rel}" added without updating .aitest/governance.lock. Human approval required via "npx ai-test-workbench@5.1.0 governance approve".`
       );
     }
   }

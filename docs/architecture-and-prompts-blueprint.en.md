@@ -12,8 +12,8 @@
 | Release | Core Capability | Problems Solved |
 |---|---|---|
 | **v1.0 → v2.0** | `<repo>/qa/` isolation, SHA-256 `init-agents` manifest protection, Diff-Impact selection, 3-layer gate, 4-layer base fixtures, local demo server | Stopped CI LLM dependence, prevented Playwright default Healer `test.fixme()` drift, eliminated Windows `.cmd` `spawn EINVAL`, and blocked production targets |
-| **v2.1** | `aitest auth-login` + `aitest explore` zero-to-one crawler | Handled SMS/SSO manual session capture and read-only multi-portal SaaS discovery before authoring tests |
-| **v3.0** | Self-evolving Living Code Map (`aitest map`), 6-pillar read-only MCP Hub (`aitest mcp`), CDP/API Perf engine (`aitest perf`), distributed Trace-ID RCA | Connected frontend routes, backend controllers, DB tables, logs, metrics, and runtime tests across full systems |
+| **v2.1** | `npx ai-test-workbench@5.1.0 auth-login` + `npx ai-test-workbench@5.1.0 explore` zero-to-one crawler | Handled SMS/SSO manual session capture and read-only multi-portal SaaS discovery before authoring tests |
+| **v3.0** | Self-evolving Living Code Map (`npx ai-test-workbench@5.1.0 map`), 6-pillar read-only MCP Hub (`npx ai-test-workbench@5.1.0 mcp`), CDP/API Perf engine (`npx ai-test-workbench@5.1.0 perf`), distributed Trace-ID RCA | Connected frontend routes, backend controllers, DB tables, logs, metrics, and runtime tests across full systems |
 | **v4.0** | **Native zero-dependency multi-protocol MCP Server (`mcp-serve`) + 7th `orchestrator` pillar + AI discovery (`AGENTS.md`/`llms.txt`/first-time prompts) + Chinese-default / paired English docs & automated hygiene CI gate** | **Eliminated shell-parsing fragility for AI agents via typed MCP `structuredContent` across `stdio`, Streamable HTTP (`/mcp`), and Legacy SSE (`/sse`), while ensuring full bilingual parity and zero secret/path leakage** |
 
 ### Key Issues Found & Fixed During v4.0 Independent Review
@@ -28,7 +28,7 @@
 
 - **Protocol Versions Supported**: `2025-11-25` (latest negotiated fallback), `2025-06-18`, `2025-03-26`, `2024-11-05`.
 - **Transports**:
-  - `stdio`: `node tools/aitest.mjs mcp-serve` (or pinned `npx --package=ai-test-workbench@5.0.0 ai-test-workbench mcp-serve`)
+  - `stdio`: `node tools/aitest.mjs mcp-serve` (or pinned `npx --package=ai-test-workbench@5.1.0 ai-test-workbench mcp-serve`)
   - **Streamable HTTP** (`/mcp`): `POST` (single + JSON-RPC batch, `application/json` or `text/event-stream` per `Accept`, `Mcp-Session-Id` & `MCP-Protocol-Version` headers), `GET` (SSE stream), `DELETE` (close session)
   - **Legacy HTTP+SSE** (`GET /sse` + `POST /messages?sessionId=...`) + `GET /health`
 - **Capabilities**:

@@ -4,6 +4,16 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.0] - 2026-11-24
+
+### Removed / Breaking
+- **Removed `aitest` CLI bin alias; added `aitw`**: The `aitest` binary name collided with an existing unrelated package on npm that also registers `aitest`. Because `ai-test-workbench` had not previously been published to npm, `bin.aitest` has been removed from `package.json`. Use pinned `npx ai-test-workbench@5.1.0 <cmd>`, global `aitw <cmd>`, or local `node tools/aitest.mjs <cmd>`. For backwards compatibility with existing clients, `tools/aitest.mjs`, MCP tool names (`aitest_*`), `.aitest/`, `AITEST-G*` rule codes, and `AITEST_*` environment variables remain unchanged.
+
+### Added & Hardened
+- **npm Provenance Release Workflow**: Added `publishConfig: { "access": "public", "provenance": true }` to `package.json` and tag-triggered [.github/workflows/release.yml](./.github/workflows/release.yml) (all Actions pinned to full commit SHAs, running all 7 verification gates prior to `npm publish --provenance --access public`, with Trusted Publisher migration guidance).
+- **`lint:docs` CLI & Version Drift Enforcement**: Fails on unpinned `npx -y ai-test-workbench`, removed `aitest <cmd>` CLI examples, or version tags drifting from `package.json`.
+- **Modular AST Gate Kernel v3, T1 Out-of-Workspace HMAC, Structured Redaction & Modular MCP Server**: Fail-closed 3-state gate blocks `24/24` red-team holdout cheats (`FGER-holdout = 0.0%`) at `0.0%` benign refactoring FPR, preserves typed `heal_*` `sessionId` across MCP calls, and eliminates real Playwright stack `C->A` misclassification.
+
 ## [5.0.0] - 2026-11-24
 
 ### Added
