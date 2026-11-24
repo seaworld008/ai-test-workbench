@@ -394,10 +394,20 @@ export async function runUpdateAgents(options = {}) {
 
 export function resolveQaDirectory(targetPath, explicitQaDir) {
   const abs = path.resolve(targetPath);
+  if (explicitQaDir) {
+    const explicitResolved = path.resolve(abs, explicitQaDir);
+    if (
+      fs.existsSync(path.join(explicitResolved, 'playwright.config.ts')) ||
+      fs.existsSync(path.join(explicitResolved, 'playwright.config.js')) ||
+      fs.existsSync(path.join(explicitResolved, 'package.json'))
+    ) {
+      return explicitResolved;
+    }
+  }
   if (fs.existsSync(path.join(abs, 'playwright.config.ts')) || fs.existsSync(path.join(abs, 'playwright.config.js'))) {
     return abs;
   }
-  const sub = path.join(abs, explicitQaDir || 'qa');
+  const sub = path.resolve(abs, explicitQaDir || 'qa');
   if (
     fs.existsSync(path.join(sub, 'playwright.config.ts')) ||
     fs.existsSync(path.join(sub, 'playwright.config.js')) ||

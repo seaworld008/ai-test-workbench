@@ -187,6 +187,9 @@ jobs:
             fs.appendFileSync(outFile, 'predicate-path=' + predRel + '\n');
             fs.appendFileSync(outFile, 'sarif-path=' + sarifRel + '\n');
             fs.appendFileSync(outFile, 'summary-path=' + mdRel + '\n');
+            if ((parsed.verdict || 'blocked') !== 'pass' || process.argv[2] !== '0') {
+              console.error('[verify-change output]', raw.slice(0, 2000));
+            }
           " "$OUT_JSON" "$VERIFY_EXIT"
 
       - name: Attest passing verdict with GitHub Artifact Attestations (T2 Sigstore)

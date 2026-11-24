@@ -1408,9 +1408,17 @@ export function runGitDiffGuard(qaDir, diffBase, options = {}) {
     ...changedInfo.untracked.map((p) => ({ rel: p, status: 'U', oldRel: null })),
   ];
 
+  const realQaDir = (() => {
+    try {
+      return typeof fs.realpathSync.native === 'function' ? fs.realpathSync.native(qaDir) : fs.realpathSync(qaDir);
+    } catch {
+      return path.resolve(qaDir);
+    }
+  })();
+
   for (const item of allChangedRelFromGitRoot) {
     const absPath = path.join(gitRoot, item.rel);
-    const relInsideQa = path.relative(qaDir, absPath).replace(/\\/g, '/');
+    const relInsideQa = path.relative(realQaDir, absPath).replace(/\\/g, '/');
     if (/^(reports|playwright-report|test-results|knowledge|\.aitest\/runs|\.aitest\/heals|\.aitest\/jobs|node_modules)\//.test(relInsideQa)) {
       continue;
     }

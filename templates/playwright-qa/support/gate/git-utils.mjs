@@ -139,9 +139,19 @@ export function parseGitDiffHeaderPath(headerLine) {
   return candidate.replace(/^[ab]\//, '').replace(/\\/g, '/') || 'unknown';
 }
 
+function canonicalPath(p) {
+  const resolved = path.resolve(p);
+  try {
+    return typeof fs.realpathSync.native === 'function' ? fs.realpathSync.native(resolved) : fs.realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
 /**
  * Resolves the authoritative Git repository top-level root via `git rev-parse --show-toplevel`.
  * Works inside monorepo subdirectories and Git worktrees (where `.git` is a file or in a parent dir).
+ * Canonicalizes via realpath to prevent Windows 8.3 short-path (`RUNNER~1`) and macOS `/var` mismatches.
  * @param {string} dir
  * @returns {string | null}
  */
@@ -149,7 +159,7 @@ export function resolveGitRoot(dir) {
   if (!dir || !fs.existsSync(dir)) return null;
   const res = execGitSync(dir, ['rev-parse', '--show-toplevel'], { timeoutMs: 5000 });
   if (res.status === 0 && res.stdout.trim()) {
-    return path.resolve(res.stdout.trim());
+    return canonicalPath(res.stdout.trim());
   }
   return null;
 }
@@ -338,7 +348,9 @@ export function getFileAtGitRef(gitRoot, ref, relPosixFromGitRoot) {
  * @param {string} targetDir
  */
 export function listChangedFilesUnderDir(gitRoot, diffBase, targetDir) {
-  const relSub = path.relative(gitRoot, path.resolve(targetDir)).replace(/\\/g, '/') || '.';
+  const realRoot = canonicalPath(gitRoot);
+  const realTarget = canonicalPath(targetDir);
+  const relSub = path.relative(realRoot, realTarget).replace(/\\/g, '/') || '.';
 
   const diffRes = execGitSync(gitRoot, ['diff', '--name-status', '-z', diffBase, '--', relSub]);
   if (diffRes.status !== 0) {
