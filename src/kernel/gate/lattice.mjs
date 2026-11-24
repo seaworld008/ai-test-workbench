@@ -35,18 +35,21 @@ export const S3_PARTIAL_MATCHERS = new Set([
   'toHaveProperty',
 ]);
 
+export const S3_WEB_FIRST_STATE_MATCHERS = new Set([
+  'toBeFocused',
+  'toBeChecked',
+  'toBeDisabled',
+  'toBeEnabled',
+  'toBeEditable',
+  'toBeEmpty',
+  'toBeHidden',
+  'toBeOK',
+]);
+
 export const S2_STATE_MATCHERS = new Set([
   'toBeVisible',
-  'toBeHidden',
-  'toBeEnabled',
-  'toBeDisabled',
-  'toBeChecked',
-  'toBeEditable',
   'toBeAttached',
   'toBeInViewport',
-  'toBeEmpty',
-  'toBeFocused',
-  'toBeOK',
 ]);
 
 export const S1_WEAK_MATCHERS = new Set([
@@ -235,6 +238,13 @@ export function classifyExpectChainAst(ts, sf, chain, rawText) {
     ) {
       baseTier = 2;
       label = 'S2-boolean-check';
+    } else if (
+      matcher === 'toBe' &&
+      /\bevaluate\s*\(/.test(actualExpr) &&
+      /\b(?:activeElement|nodeName|tagName|checked|disabled|hidden|focused)\b/.test(actualExpr)
+    ) {
+      baseTier = 3;
+      label = 'S3-dom-eval-probe';
     } else {
       baseTier = 5;
       label = 'S5-exact';
@@ -250,6 +260,9 @@ export function classifyExpectChainAst(ts, sf, chain, rawText) {
   } else if (S3_PARTIAL_MATCHERS.has(matcher)) {
     baseTier = 3;
     label = 'S3-partial';
+  } else if (S3_WEB_FIRST_STATE_MATCHERS.has(matcher)) {
+    baseTier = 3;
+    label = 'S3-web-first-state';
   } else if (S2_STATE_MATCHERS.has(matcher)) {
     baseTier = 2;
     label = 'S2-state';
@@ -338,7 +351,7 @@ export function classifyAssertionStatement(stmt, qaDir) {
     ? 5
     : S4_STRUCTURAL_MATCHERS.has(matcher)
       ? 4
-      : S3_PARTIAL_MATCHERS.has(matcher)
+      : S3_PARTIAL_MATCHERS.has(matcher) || S3_WEB_FIRST_STATE_MATCHERS.has(matcher)
         ? 3
         : S2_STATE_MATCHERS.has(matcher)
           ? 2

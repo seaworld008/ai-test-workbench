@@ -22,7 +22,7 @@ export const BROWSER_EVAL_METHODS = new Set([
 ]);
 
 export const RUNTIME_CAPABILITY_RE =
-  /\b(?:globalThis|process\.platform|process\.env|process\.versions|browserName|isWindows|isMac|isLinux|isMobile|headless|WebSocket|SharedArrayBuffer|Worker|Notification|Clipboard)\b/;
+  /\b(?:globalThis|process\.platform|process\.versions|browserName|isWindows|isMac|isLinux|isMobile|headless|WebSocket|SharedArrayBuffer|Worker|Notification|Clipboard)\b/;
 
 export function hasThrowStatement(ts, node) {
   return subtreeContainsKind(ts, node, (n) => ts.isThrowStatement(n));

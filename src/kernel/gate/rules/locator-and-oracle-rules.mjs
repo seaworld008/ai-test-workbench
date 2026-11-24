@@ -76,6 +76,8 @@ export const ruleG112 = {
 
 /**
  * AITEST-G114: Mocking backend responses via `page.route(... fulfill(...))` in specs.
+ * Allows legitimate fault injection (`status >= 400`) and security honeypot traps
+ * (handler records hit into a trap variable and the test explicitly asserts zero/false hits).
  */
 export const ruleG114 = {
   code: 'AITEST-G114',
@@ -86,8 +88,26 @@ export const ruleG114 = {
   evaluate(ctx) {
     const { file, baseSum, headSum, canWaive } = ctx;
     const findings = [];
+    const headAssertions = headSum?.assertions || [];
+
     for (const ev of diffEventSnippets(baseSum?.events?.routeFulfills, headSum?.events?.routeFulfills)) {
       if (canWaive(ev.snippet) || canWaive('AITEST-G114')) continue;
+      // Fault injection (4xx/5xx error responses) tests error resilience, not fake-green 200 mocks
+      if (ev.isFaultInjection) continue;
+      // Security honeypot trap: route callback sets an external flag/array and the test asserts it stayed false / empty / 0
+      if (ev.setsExternalTrapVar) {
+        const scopedAssertions = ev.testTitle
+          ? headAssertions.filter((a) => a.testTitle === ev.testTitle)
+          : headAssertions;
+        const hasZeroOrFalseTrapAssertion = scopedAssertions.some(
+          (a) =>
+            (a.matcher === 'toBe' && (a.expectedArg === 'false' || a.expectedArg === '0')) ||
+            (a.matcher === 'toHaveLength' && a.expectedArg === '0') ||
+            (a.matcher === 'toEqual' && a.expectedArg === '[]') ||
+            a.matcher === 'toBeFalsy'
+        );
+        if (hasZeroOrFalseTrapAssertion) continue;
+      }
       findings.push({
         code: 'AITEST-G114',
         severity: 'error',

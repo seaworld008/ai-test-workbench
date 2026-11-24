@@ -1,0 +1,299 @@
+{
+  "schemaVersion": "1.0.0",
+  "generatedAt": "2026-11-24T08:30:06.792Z",
+  "gateKernelVersion": "5.1.1",
+  "preregistrationDoc": "bench/real-world/PREREGISTRATION.md",
+  "samplingSeed": 20261125,
+  "mode": "pilot",
+  "evaluationScope": "offline-static-ast-only (Layer 3 AST Semantic Diff + Differential Layer 2 Static Checks; zero target code execution; zero target site network access)",
+  "formalEvaluation200Status": "pending",
+  "counts": {
+    "totalCommits": 50,
+    "passed": 43,
+    "flagged": 7,
+    "adjudicatedFP": 0,
+    "adjudicatedTP": 0,
+    "unreviewedFlagged": 7,
+    "normalCommits": 50
+  },
+  "metrics": {
+    "rawAlertRate": {
+      "k": 7,
+      "n": 50,
+      "rate": 0.14,
+      "lower": 0.069508,
+      "upper": 0.261862,
+      "percent": "14.0%",
+      "ci95Percent": "[7.0%, 26.2%]"
+    },
+    "adjudicatedFprOnNormal": {
+      "k": 0,
+      "n": 50,
+      "rate": 0,
+      "lower": 0,
+      "upper": 0.071348,
+      "percent": "0.0%",
+      "ci95Percent": "[0.0%, 7.1%]"
+    },
+    "adjudicatedFprOnAll": {
+      "k": 0,
+      "n": 50,
+      "rate": 0,
+      "lower": 0,
+      "upper": 0.071348,
+      "percent": "0.0%",
+      "ci95Percent": "[0.0%, 7.1%]"
+    }
+  },
+  "violationsByRule": {
+    "AITEST-G110": 3,
+    "AITEST-G102": 3,
+    "AITEST-G103": 3,
+    "STATIC-WAIT-FOR-TIMEOUT": 1,
+    "AITEST-G105": 1
+  },
+  "byRepository": {
+    "actualbudget/actual": {
+      "license": "MIT",
+      "total": 11,
+      "passed": 9,
+      "flagged": 2,
+      "fp": 0,
+      "tp": 0,
+      "unreviewed": 2
+    },
+    "microsoft/playwright-mcp": {
+      "license": "Apache-2.0",
+      "total": 11,
+      "passed": 9,
+      "flagged": 2,
+      "fp": 0,
+      "tp": 0,
+      "unreviewed": 2
+    },
+    "sveltejs/kit": {
+      "license": "MIT",
+      "total": 11,
+      "passed": 10,
+      "flagged": 1,
+      "fp": 0,
+      "tp": 0,
+      "unreviewed": 1
+    },
+    "vuejs/vitepress": {
+      "license": "MIT",
+      "total": 7,
+      "passed": 7,
+      "flagged": 0,
+      "fp": 0,
+      "tp": 0,
+      "unreviewed": 0
+    },
+    "vitejs/vite": {
+      "license": "MIT",
+      "total": 10,
+      "passed": 8,
+      "flagged": 2,
+      "fp": 0,
+      "tp": 0,
+      "unreviewed": 2
+    }
+  },
+  "flaggedCommits": [
+    {
+      "id": "vitejs/vite@278dc80436919b09473581ab45913c006779c54c",
+      "repo": "vitejs/vite",
+      "sha": "278dc80436919b09473581ab45913c006779c54c",
+      "commitUrl": "https://github.com/vitejs/vite/commit/278dc80436919b09473581ab45913c006779c54c",
+      "testPaths": [
+        "playground/dynamic-import/__tests__/dynamic-import.spec.ts",
+        "playground/env/__tests__/env.spec.ts",
+        "playground/environment-react-ssr/__tests__/environment-react-ssr.spec.ts",
+        "playground/json/__tests__/csr/json-csr.spec.ts",
+        "playground/legacy/__tests__/legacy.spec.ts",
+        "playground/module-graph/__tests__/module-graph.spec.ts",
+        "playground/resolve/__tests__/resolve.spec.ts",
+        "playground/tsconfig-json-load-error/__tests__/tsconfig-json-load-error.spec.ts",
+        "playground/wasm/__tests__/wasm.spec.ts"
+      ],
+      "ruleCodes": [
+        "AITEST-G110"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G110] playground/env/__tests__/env.spec.ts: wrapping expect() inside conditional if-block is forbidden."
+      ],
+      "adjudication": {
+        "label": "UNREVIEWED",
+        "reviewedAt": null,
+        "rationale": "Flagged by offline gate; awaiting manual diff adjudication."
+      }
+    },
+    {
+      "id": "vitejs/vite@16944824fd5fae014101737ec0029ab6a58e774b",
+      "repo": "vitejs/vite",
+      "sha": "16944824fd5fae014101737ec0029ab6a58e774b",
+      "commitUrl": "https://github.com/vitejs/vite/commit/16944824fd5fae014101737ec0029ab6a58e774b",
+      "testPaths": [
+        "playground/hmr/__tests__/hmr.spec.ts"
+      ],
+      "ruleCodes": [
+        "AITEST-G110"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G110] playground/hmr/__tests__/hmr.spec.ts: wrapping expect() inside conditional if-block is forbidden."
+      ],
+      "adjudication": {
+        "label": "UNREVIEWED",
+        "reviewedAt": null,
+        "rationale": "Flagged by offline gate; awaiting manual diff adjudication."
+      }
+    },
+    {
+      "id": "sveltejs/kit@ccbbea64660dcf407bc700be1c2e9fc9accda982",
+      "repo": "sveltejs/kit",
+      "sha": "ccbbea64660dcf407bc700be1c2e9fc9accda982",
+      "commitUrl": "https://github.com/sveltejs/kit/commit/ccbbea64660dcf407bc700be1c2e9fc9accda982",
+      "testPaths": [
+        "packages/kit/test/apps/async/test/client.test.js",
+        "packages/kit/test/apps/basics/test/client.test.js"
+      ],
+      "ruleCodes": [
+        "AITEST-G102",
+        "AITEST-G103"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G102] packages/kit/test/apps/basics/test/client.test.js: net assertion reduction detected (base 436 -> head 435).",
+        "[Healer Diff Guard][AITEST-G103] packages/kit/test/apps/basics/test/client.test.js: assertion strength downgraded (max tier S5 -> S5, total strength 1910 -> 1903)."
+      ],
+      "adjudication": {
+        "label": "UNREVIEWED",
+        "reviewedAt": null,
+        "rationale": "Flagged by offline gate; awaiting manual diff adjudication."
+      }
+    },
+    {
+      "id": "actualbudget/actual@935d2b5064e0e83a347df88f5b73030ebb42ed52",
+      "repo": "actualbudget/actual",
+      "sha": "935d2b5064e0e83a347df88f5b73030ebb42ed52",
+      "commitUrl": "https://github.com/actualbudget/actual/commit/935d2b5064e0e83a347df88f5b73030ebb42ed52",
+      "testPaths": [
+        "packages/desktop-client/e2e/transactions.test.ts"
+      ],
+      "ruleCodes": [
+        "STATIC-WAIT-FOR-TIMEOUT"
+      ],
+      "violations": [
+        "[Static Check][STATIC-WAIT-FOR-TIMEOUT] packages/desktop-client/e2e/transactions.test.ts: newly introduced waitForTimeout() (0 -> 1)."
+      ],
+      "adjudication": {
+        "label": "UNREVIEWED",
+        "reviewedAt": null,
+        "rationale": "Flagged by offline gate; awaiting manual diff adjudication."
+      }
+    },
+    {
+      "id": "microsoft/playwright-mcp@4df162aff5849cecb15ffd7635506dfa58ca6b4f",
+      "repo": "microsoft/playwright-mcp",
+      "sha": "4df162aff5849cecb15ffd7635506dfa58ca6b4f",
+      "commitUrl": "https://github.com/microsoft/playwright-mcp/commit/4df162aff5849cecb15ffd7635506dfa58ca6b4f",
+      "testPaths": [
+        "tests/cdp.spec.ts",
+        "tests/click.spec.ts",
+        "tests/config.spec.ts",
+        "tests/console.spec.ts",
+        "tests/core.spec.ts",
+        "tests/device.spec.ts",
+        "tests/dialogs.spec.ts",
+        "tests/evaluate.spec.ts",
+        "tests/files.spec.ts",
+        "tests/headed.spec.ts",
+        "tests/iframes.spec.ts",
+        "tests/install.spec.ts",
+        "tests/launch.spec.ts",
+        "tests/network.spec.ts",
+        "tests/pdf.spec.ts",
+        "tests/screenshot.spec.ts",
+        "tests/tabs.spec.ts",
+        "tests/trace.spec.ts",
+        "tests/type.spec.ts",
+        "tests/wait.spec.ts",
+        "tests/webdriver.spec.ts"
+      ],
+      "ruleCodes": [
+        "AITEST-G102",
+        "AITEST-G103"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G102] tests/click.spec.ts: net assertion reduction detected (base 4 -> head 3).",
+        "[Healer Diff Guard][AITEST-G103] tests/click.spec.ts: assertion strength downgraded (max tier S3 -> S3, total strength 12 -> 9).",
+        "[Healer Diff Guard][AITEST-G102] tests/dialogs.spec.ts: net assertion reduction detected (base 22 -> head 20).",
+        "[Healer Diff Guard][AITEST-G102] tests/headed.spec.ts: net assertion reduction detected (base 3 -> head 1).",
+        "[Healer Diff Guard][AITEST-G103] tests/headed.spec.ts: assertion strength downgraded (max tier S3 -> S3, total strength 7 -> 3).",
+        "[Healer Diff Guard][AITEST-G102] tests/tabs.spec.ts: net assertion reduction detected (base 12 -> head 8).",
+        "[Healer Diff Guard][AITEST-G103] tests/tabs.spec.ts: assertion strength downgraded (max tier S5 -> S5, total strength 40 -> 28).",
+        "[Healer Diff Guard][AITEST-G102] tests/type.spec.ts: net assertion reduction detected (base 12 -> head 9).",
+        "[Healer Diff Guard][AITEST-G103] tests/type.spec.ts: assertion strength downgraded (max tier S3 -> S3, total strength 34 -> 27)."
+      ],
+      "adjudication": {
+        "label": "UNREVIEWED",
+        "reviewedAt": null,
+        "rationale": "Flagged by offline gate; awaiting manual diff adjudication."
+      }
+    },
+    {
+      "id": "actualbudget/actual@b396629f7ebeeb87b25c13b93f0f78374d4c7057",
+      "repo": "actualbudget/actual",
+      "sha": "b396629f7ebeeb87b25c13b93f0f78374d4c7057",
+      "commitUrl": "https://github.com/actualbudget/actual/commit/b396629f7ebeeb87b25c13b93f0f78374d4c7057",
+      "testPaths": [
+        "packages/desktop-client/e2e/api-keys.test.ts"
+      ],
+      "ruleCodes": [
+        "AITEST-G110"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G110] packages/desktop-client/e2e/api-keys.test.ts: wrapping expect() inside conditional if-block is forbidden."
+      ],
+      "adjudication": {
+        "label": "UNREVIEWED",
+        "reviewedAt": null,
+        "rationale": "Flagged by offline gate; awaiting manual diff adjudication."
+      }
+    },
+    {
+      "id": "microsoft/playwright-mcp@601a74305c2a81582bb99114858003bac3601c52",
+      "repo": "microsoft/playwright-mcp",
+      "sha": "601a74305c2a81582bb99114858003bac3601c52",
+      "commitUrl": "https://github.com/microsoft/playwright-mcp/commit/601a74305c2a81582bb99114858003bac3601c52",
+      "testPaths": [
+        "tests/cdp.spec.ts",
+        "tests/console.spec.ts",
+        "tests/dialogs.spec.ts",
+        "tests/evaluate.spec.ts",
+        "tests/files.spec.ts",
+        "tests/install.spec.ts",
+        "tests/launch.spec.ts",
+        "tests/network.spec.ts",
+        "tests/pdf.spec.ts",
+        "tests/screenshot.spec.ts",
+        "tests/tabs.spec.ts"
+      ],
+      "ruleCodes": [
+        "AITEST-G102",
+        "AITEST-G103",
+        "AITEST-G105"
+      ],
+      "violations": [
+        "[Healer Diff Guard][AITEST-G102] tests/dialogs.spec.ts: net assertion reduction detected (base 23 -> head 22).",
+        "[Healer Diff Guard][AITEST-G103] tests/dialogs.spec.ts: assertion strength downgraded (max tier S3 -> S3, total strength 61 -> 58).",
+        "[Healer Diff Guard][AITEST-G105] tests/files.spec.ts: added skip/fixme/only (\"test.skip(mcpBrowser !== 'chromium', 'This test is racy')\").",
+        "[Healer Diff Guard][AITEST-G103] tests/pdf.spec.ts: assertion strength downgraded (max tier S5 -> S3, total strength 24 -> 22)."
+      ],
+      "adjudication": {
+        "label": "UNREVIEWED",
+        "reviewedAt": null,
+        "rationale": "Flagged by offline gate; awaiting manual diff adjudication."
+      }
+    }
+  ]
+}

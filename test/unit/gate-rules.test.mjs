@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   ALL_GATE_RULES,
   analyzeSourceAst,
+  compareChangesetAst,
   compareSpecSourcesAst,
   getGateRuleByCode,
   isRuleEnabled,
@@ -212,3 +213,133 @@ for (const fx of RULE_FIXTURES) {
     );
   });
 }
+
+test('WU-05 Systemic FP Fixes: cross-file split pooling, scope awareness, capability skip, web-first lattice, fault/honeypot route', () => {
+  // 1. Cross-file test split pooling allows relocating tests to a sibling spec without losing commit-wide assertions
+  const splitOk = compareChangesetAst([
+    {
+      filePath: 'tests/core.spec.ts',
+      baseSource:
+        "test('a', async ({ page }) => { await expect(page).toHaveTitle('A'); });\ntest('b', async ({ page }) => { await expect(page).toHaveURL('/b'); });",
+      headSource: "test('a', async ({ page }) => { await expect(page).toHaveTitle('A'); });",
+    },
+    {
+      filePath: 'tests/b.spec.ts',
+      baseSource: '',
+      headSource: "test('b', async ({ page }) => { await expect(page).toHaveURL('/b'); });",
+    },
+  ]);
+  assert.equal(splitOk.ok, true, `Relocating test to sibling spec should pass, got: ${JSON.stringify(splitOk.violations)}`);
+
+  // Anti-cheat: if sibling doesn't compensate net assertion loss, G102 STILL blocks!
+  const splitCheat = compareChangesetAst([
+    {
+      filePath: 'tests/core.spec.ts',
+      baseSource:
+        "test('a', async ({ page }) => { await expect(page).toHaveTitle('A'); await expect(page).toHaveURL('/a'); });",
+      headSource: "test('a', async ({ page }) => { await expect(page).toHaveTitle('A'); });",
+    },
+    {
+      filePath: 'tests/other.spec.ts',
+      baseSource: '',
+      headSource: "test('empty', async ({ page }) => { await page.goto('/'); });",
+    },
+  ]);
+  assert.equal(splitCheat.ok, false);
+  assert.ok(splitCheat.findings.some((f) => f.code === 'AITEST-G102'));
+
+  // 2a. File-level `if (!isBuild) { test(...) }` is allowed, whereas in-test `if (cond) { expect(...) }` is still blocked
+  const fileLevelIf = compareSpecSourcesAst(
+    'tests/hmr.spec.ts',
+    "if (!isBuild) { test('a', async ({ page }) => { await expect(page).toHaveTitle('A'); }); }",
+    "if (!isBuild) { test('a', async ({ page }) => { await expect(page).toHaveTitle('A'); }); test('b', async ({ page }) => { await expect(page).toHaveURL('/b'); }); }"
+  );
+  assert.equal(fileLevelIf.ok, true, `File-level if(!isBuild) should pass, got: ${JSON.stringify(fileLevelIf.violations)}`);
+
+  const inTestIf = compareSpecSourcesAst(
+    'tests/hmr.spec.ts',
+    "test('a', async ({ page }) => { await expect(page).toHaveTitle('A'); });",
+    "test('a', async ({ page }) => { if (maybe) { await expect(page).toHaveTitle('A'); } });"
+  );
+  assert.equal(inTestIf.ok, false);
+  assert.ok(inTestIf.findings.some((f) => f.code === 'AITEST-G110'));
+
+  // 2b. Browser-context `page.evaluate(() => { try {} catch {} })` and negative error-assert try/catch are allowed
+  const browserCatch = compareSpecSourcesAst(
+    'tests/rtl.spec.ts',
+    "test('rtl', async ({ page }) => { await expect(page).toHaveTitle('RTL'); });",
+    "test('rtl', async ({ page }) => { await page.evaluate(() => { try { document.getAnimations().forEach(a => a.finish()); } catch {} }); await expect(page).toHaveTitle('RTL'); });"
+  );
+  assert.equal(browserCatch.ok, true);
+
+  const negativeErrCatch = compareSpecSourcesAst(
+    'tests/err.spec.ts',
+    "test('err', async ({ page }) => { await expect(page).toHaveTitle('Err'); });",
+    "test('err', async ({ page }) => { await expect(page).toHaveTitle('Err'); try { await page.click('#invalid'); } catch (e) { expect(String(e)).toContain('invalid'); } });"
+  );
+  assert.equal(negativeErrCatch.ok, true);
+
+  // Anti-cheat: try { expect(...) } catch { expect(true)... } or empty catch STILL blocked!
+  const swallowedExpect = compareSpecSourcesAst(
+    'tests/err.spec.ts',
+    "test('err', async ({ page }) => { await expect(page).toHaveTitle('Err'); });",
+    "test('err', async ({ page }) => { try { await expect(page).toHaveTitle('Err'); } catch (e) { expect(e).toBeDefined(); } });"
+  );
+  assert.equal(swallowedExpect.ok, false);
+  assert.ok(swallowedExpect.findings.some((f) => f.code === 'AITEST-G107'));
+
+  // 3. Runtime capability guard `test.skip(!globalThis.WebSocket, ...)` & rewriting existing skip guard are allowed
+  const capSkip = compareSpecSourcesAst(
+    'tests/ws.spec.ts',
+    "test('a', async ({ page }) => { await expect(page).toHaveURL('/a'); });",
+    "test('a', async ({ page }) => { test.skip(!globalThis.WebSocket, 'No WS'); await expect(page).toHaveURL('/a'); });"
+  );
+  assert.equal(capSkip.ok, true);
+
+  const rewrittenSkip = compareSpecSourcesAst(
+    'tests/env.spec.ts',
+    "test('a', async ({ page }) => { test.skip(!oldFlag); await expect(page).toHaveURL('/a'); });",
+    "test('a', async ({ page }) => { test.skip(variant !== 'x'); await expect(page).toHaveURL('/a'); });"
+  );
+  assert.equal(rewrittenSkip.ok, true);
+
+  // Anti-cheat: arbitrary env skip or brand-new test.skip() STILL blocked!
+  const bogusEnvSkip = compareSpecSourcesAst(
+    'tests/env.spec.ts',
+    "test('a', async ({ page }) => { await expect(page).toHaveURL('/a'); });",
+    "test('a', async ({ page }) => { test.skip(!process.env.NEVER_SET); await expect(page).toHaveURL('/a'); });"
+  );
+  assert.equal(bogusEnvSkip.ok, false);
+  assert.ok(bogusEnvSkip.findings.some((f) => f.code === 'AITEST-G105'));
+
+  // 4. Web-first focus upgrade (`evaluate(activeElement.nodeName) -> toBeFocused()`) allowed; `toHaveText -> toBeVisible` still blocked
+  const focusUpgrade = compareSpecSourcesAst(
+    'tests/focus.spec.ts',
+    "test('f', async ({ page }) => { expect(await page.evaluate(() => document.activeElement.nodeName)).toBe('BODY'); });",
+    "test('f', async ({ page }) => { await expect(page.locator('body')).toBeFocused(); });"
+  );
+  assert.equal(focusUpgrade.ok, true);
+
+  // 5. Fault injection (status >= 400) & security honeypot route.fulfill allowed; 200 mock STILL blocked!
+  const faultRoute = compareSpecSourcesAst(
+    'tests/err.spec.ts',
+    "test('e', async ({ page }) => { await expect(page).toHaveURL('/e'); });",
+    "test('e', async ({ page }) => { await page.route('**/api/x', r => r.fulfill({ status: 503, body: 'err' })); await expect(page).toHaveURL('/e'); });"
+  );
+  assert.equal(faultRoute.ok, true);
+
+  const honeypotRoute = compareSpecSourcesAst(
+    'tests/sec.spec.ts',
+    "test('sec', async ({ page }) => { await expect(page).toHaveURL('/s'); });",
+    "test('sec', async ({ page }) => { let hit = false; await page.route('**://evil.example/**', r => { hit = true; return r.fulfill({ status: 200, body: 'x' }); }); await expect(page).toHaveURL('/s'); expect(hit).toBe(false); });"
+  );
+  assert.equal(honeypotRoute.ok, true);
+
+  const fake200Route = compareSpecSourcesAst(
+    'tests/pay.spec.ts',
+    "test('p', async ({ page }) => { await expect(page).toHaveURL('/p'); });",
+    "test('p', async ({ page }) => { await page.route('**/api/pay', r => r.fulfill({ status: 200, body: '{\"paid\":true}' })); await expect(page).toHaveURL('/p'); });"
+  );
+  assert.equal(fake200Route.ok, false);
+  assert.ok(fake200Route.findings.some((f) => f.code === 'AITEST-G114'));
+});

@@ -1,7 +1,23 @@
 import { diffEventSnippets } from './governance-rules.mjs';
 
 /**
+ * Counts events per lexical scope key (`testTitle || '<top-level>'`).
+ */
+function countByScope(events, predicate) {
+  const counts = new Map();
+  for (const ev of events || []) {
+    if (predicate && !predicate(ev)) continue;
+    const key = ev.testTitle || '<top-level>';
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return counts;
+}
+
+/**
  * AITEST-G105: Added `test.skip`, `test.fixme`, `test.only`, `test.fail`, or `testInfo.skip`.
+ * Distinguishes newly added skips from rewriting the condition of an ALREADY-existing
+ * standalone `test.skip(cond)` in the same scope, and allows runtime capability guards
+ * (`!globalThis.WebSocket`, `process.platform`, `browserName`).
  */
 export const ruleG105 = {
   code: 'AITEST-G105',
@@ -12,8 +28,26 @@ export const ruleG105 = {
   evaluate(ctx) {
     const { file, baseSum, headSum, canWaive } = ctx;
     const findings = [];
+    const baseStandaloneByScope = countByScope(
+      baseSum?.events?.skips,
+      (e) => e.kind === 'skip' && e.isStandaloneGuard
+    );
+    const headStandaloneByScope = countByScope(
+      headSum?.events?.skips,
+      (e) => e.kind === 'skip' && e.isStandaloneGuard
+    );
+
     for (const ev of diffEventSnippets(baseSum?.events?.skips, headSum?.events?.skips)) {
       if (canWaive(ev.snippet) || canWaive('AITEST-G105')) continue;
+      // Runtime capability guard (`test.skip(!globalThis.WebSocket, ...)`) is not test disabling
+      if (ev.kind === 'skip' && ev.isStandaloneGuard && ev.isCapabilityGuard) continue;
+      // Rewriting an already-existing standalone skip guard condition in the same scope without increasing skip count
+      if (ev.kind === 'skip' && ev.isStandaloneGuard) {
+        const scopeKey = ev.testTitle || '<top-level>';
+        const baseCnt = baseStandaloneByScope.get(scopeKey) || 0;
+        const headCnt = headStandaloneByScope.get(scopeKey) || 0;
+        if (baseCnt > 0 && headCnt <= baseCnt) continue;
+      }
       findings.push({
         code: 'AITEST-G105',
         severity: 'error',
@@ -58,6 +92,8 @@ export const ruleG106 = {
 
 /**
  * AITEST-G107: Swallowed exceptions in `try/catch`, `return` in `finally`, or non-rethrowing `.catch()`.
+ * Scope-aware: ignores browser-context `try/catch` inside `page.evaluate()`/`addInitScript()` and
+ * negative error-assertion blocks (`try { await invalidOp(); } catch (err) { expect(err)... }`).
  */
 export const ruleG107 = {
   code: 'AITEST-G107',
@@ -70,6 +106,10 @@ export const ruleG107 = {
     const findings = [];
     for (const ev of diffEventSnippets(baseSum?.events?.swallowedCatches, headSum?.events?.swallowedCatches)) {
       if (canWaive(ev.snippet) || canWaive('AITEST-G107')) continue;
+      // Browser-executed helper code inside page.evaluate() cannot swallow Node-side Playwright assertions
+      if (ev.insideBrowserEvaluate) continue;
+      // Negative error-assertion pattern: try invokes action under test (no expect inside try), catch asserts on error
+      if (ev.kind === 'try-catch' && ev.hasAssertionInCatch && !ev.tryContainsAssert) continue;
       findings.push({
         code: 'AITEST-G107',
         severity: 'error',
@@ -142,6 +182,9 @@ export const ruleG109 = {
 
 /**
  * AITEST-G110: Conditional assertions (`if (...) { expect(...) }`, ternary `expect()`, early conditional `return`).
+ * Scope-aware: distinguishes file/describe-level conditional test registration (`if (!isBuild) { test(...) }`)
+ * from in-test conditional assertion wrapping, and distinguishes rewriting an already-existing early-return guard
+ * in the same scope from introducing a new early-return bypass.
  */
 export const ruleG110 = {
   code: 'AITEST-G110',
@@ -152,8 +195,20 @@ export const ruleG110 = {
   evaluate(ctx) {
     const { file, baseSum, headSum, canWaive } = ctx;
     const findings = [];
+    const baseEarlyByScope = countByScope(baseSum?.events?.conditionalAssertions, (e) => e.kind === 'early-return');
+    const headEarlyByScope = countByScope(headSum?.events?.conditionalAssertions, (e) => e.kind === 'early-return');
+
     for (const ev of diffEventSnippets(baseSum?.events?.conditionalAssertions, headSum?.events?.conditionalAssertions)) {
       if (canWaive(ev.snippet) || canWaive('AITEST-G110')) continue;
+      // File/describe-level conditional test registration (`if (!isBuild) { test(...) }`) is NOT an in-test conditional expect
+      if (ev.kind === 'if-wrap' && ev.insideIfInTest === false) continue;
+      // Rewriting an already-existing early-return condition in the same scope without adding new early returns
+      if (ev.kind === 'early-return') {
+        const scopeKey = ev.testTitle || '<top-level>';
+        const baseCnt = baseEarlyByScope.get(scopeKey) || 0;
+        const headCnt = headEarlyByScope.get(scopeKey) || 0;
+        if (baseCnt > 0 && headCnt <= baseCnt) continue;
+      }
       findings.push({
         code: 'AITEST-G110',
         severity: 'error',

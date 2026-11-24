@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compareSpecSourcesAst, resolveTypeScriptCompiler } from '../src/kernel/gate/ast-analyzer.mjs';
+import { compareChangesetAst, resolveTypeScriptCompiler } from '../src/kernel/gate/ast-analyzer.mjs';
 import { GATE_KERNEL_VERSION } from '../src/kernel/gate/engine.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -144,10 +144,26 @@ function extractRuleCodes(violations) {
   return [...codes].sort();
 }
 
+function listSiblingAddedSpecPaths(repoDir, entry) {
+  if (Array.isArray(entry.addedTestPaths)) return entry.addedTestPaths;
+  const diffRes = runGit(['diff-tree', '--no-commit-id', '--name-status', '-r', entry.parentSha, entry.sha], repoDir);
+  if (diffRes.status !== 0) return [];
+  const added = [];
+  for (const row of diffRes.stdout.split(/\r?\n/)) {
+    const cols = row.trim().split('\t');
+    if (cols[0] === 'A' && cols[1] && /\.(?:spec|test)\.[jt]sx?$/.test(cols[1])) {
+      added.push(cols[1]);
+    }
+  }
+  return added;
+}
+
 function evaluateCommitOffline(repoDir, entry, adjudicationsMap) {
   const key = `${entry.repo}@${entry.sha}`;
   const fileResults = [];
   const allViolations = [];
+  const changesetItems = [];
+  const loadedBlobs = new Map();
 
   for (const testPath of entry.testPaths) {
     const baseSource = readGitBlob(repoDir, entry.parentSha, testPath);
@@ -161,12 +177,37 @@ function evaluateCommitOffline(repoDir, entry, adjudicationsMap) {
       allViolations.push(`[STATIC-MISSING-BLOB] Unable to load blob for ${testPath}`);
       continue;
     }
+    loadedBlobs.set(testPath, { baseSource, headSource });
+    changesetItems.push({ filePath: testPath, baseSource, headSource });
+  }
 
-    // Layer 3: Full-file TypeScript AST Semantic Diff Guard (AITEST-G101..G115)
-    const astCmp = compareSpecSourcesAst(testPath, baseSource, headSource, {
-      qaDir: TEMPLATE_QA_DIR,
-    });
-    const violations = [...astCmp.violations];
+  // Include sibling added spec files in the same commit so commit-level cross-file test splits are pooled accurately
+  const siblingAdded = listSiblingAddedSpecPaths(repoDir, entry);
+  for (const addedPath of siblingAdded) {
+    if (loadedBlobs.has(addedPath)) continue;
+    const headSource = readGitBlob(repoDir, entry.sha, addedPath);
+    if (headSource !== null) {
+      changesetItems.push({ filePath: addedPath, baseSource: '', headSource });
+    }
+  }
+
+  // Layer 3: Commit-level Full-File TypeScript AST Semantic Diff Guard (AITEST-G101..G115)
+  const changesetCmp =
+    changesetItems.length > 0
+      ? compareChangesetAst(changesetItems, { qaDir: TEMPLATE_QA_DIR })
+      : { ok: true, findings: [], violations: [] };
+
+  const findingsByFile = new Map();
+  for (const f of changesetCmp.findings || []) {
+    if (!findingsByFile.has(f.file)) findingsByFile.set(f.file, []);
+    findingsByFile.get(f.file).push(`[Healer Diff Guard][${f.code}] ${f.message}`);
+  }
+
+  for (const testPath of entry.testPaths) {
+    const blob = loadedBlobs.get(testPath);
+    if (!blob) continue;
+    const { baseSource, headSource } = blob;
+    const violations = [...(findingsByFile.get(testPath) || [])];
 
     // Differential Layer 2 static anti-patterns (newly introduced only, never blaming legacy lines)
     const baseWait = countPattern(baseSource, /\bwaitForTimeout\s*\(/g);
