@@ -235,21 +235,30 @@ function applyRootMcpBridge(targetRoot, qaFolderName, { dryRun = false, force = 
 
 export async function runInit(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
+  const asJson = Boolean(options.json);
+  const emitJsonError = (exitCode, message) => {
+    if (asJson) {
+      console.log(JSON.stringify({ ok: false, exitCode, error: message }, null, 2));
+    } else {
+      console.error(message);
+    }
+    return exitCode;
+  };
   const target = options.target ? path.resolve(options.target) : null;
   if (!target) {
-    console.error(lang === 'zh' ? '缺少必填参数 --target <业务仓库路径>' : 'Missing required --target <repo-path>');
-    return 1;
+    return emitJsonError(
+      1,
+      lang === 'zh' ? '缺少必填参数 --target <业务仓库路径>' : 'Missing required --target <repo-path>'
+    );
   }
 
   if (!fs.existsSync(TEMPLATE_DIR)) {
-    console.error(`Template directory missing: ${TEMPLATE_DIR}`);
-    return 1;
+    return emitJsonError(1, `Template directory missing: ${TEMPLATE_DIR}`);
   }
 
   const preset = (options.preset || 'generic').toLowerCase();
   if (!['generic', 'demo-campus'].includes(preset)) {
-    console.error(`Unsupported --preset "${preset}". Allowed: generic, demo-campus`);
-    return 1;
+    return emitJsonError(1, `Unsupported --preset "${preset}". Allowed: generic, demo-campus`);
   }
 
   const qaFolderName = options.qaDir || 'qa';
@@ -267,12 +276,12 @@ export async function runInit(options = {}) {
   const rootPwTs = path.join(target, 'playwright.config.ts');
   const rootPwJs = path.join(target, 'playwright.config.js');
   if (fs.existsSync(rootPwTs) || fs.existsSync(rootPwJs)) {
-    console.error(
+    return emitJsonError(
+      2,
       lang === 'zh'
         ? `检测到目标仓库根目录已存在 Playwright 配置 (${fs.existsSync(rootPwTs) ? rootPwTs : rootPwJs})。为保护现有工程，请复用现有配置或通过 --qa-dir 指定独立子目录。`
         : `Existing Playwright config detected at target root. Reuse it or specify an explicit --qa-dir.`
     );
-    return 2;
   }
 
   const qaDir = path.join(target, qaFolderName);
@@ -285,12 +294,12 @@ export async function runInit(options = {}) {
         fs.readFileSync(path.join(qaDir, 'package.json'), 'utf8').includes('@playwright/test'));
 
     if (existingEntries.length > 0 && !looksLikePlaywright) {
-      console.error(
+      return emitJsonError(
+        2,
         lang === 'zh'
           ? `冲突阻断：目标目录 ${qaDir} 已存在且包含非 Playwright 文件 (${existingEntries.slice(0, 5).join(', ')})。请先检查或改用 --qa-dir e2e-qa。`
           : `Conflict: ${qaDir} already exists with non-Playwright files. Use --qa-dir <other-dir> instead.`
       );
-      return 2;
     }
   }
 
@@ -298,19 +307,21 @@ export async function runInit(options = {}) {
   const gitInfo = fs.existsSync(target) ? await inspectGitStatus(target) : { isGit: false, dirtyFiles: [] };
   const hostAdvisories = fs.existsSync(target) ? inspectHostIsolation(target, qaFolderName) : [];
 
-  console.log(`\n=== ${lang === 'zh' ? '初始化 AI 测试工作台' : 'Initialize AI Test Workbench'}${dryRun ? ' [DRY-RUN]' : ''} ===`);
-  console.log(`${lang === 'zh' ? '项目名称' : 'Project'}: ${projectName}`);
-  console.log(`${lang === 'zh' ? '目标仓库' : 'Target Repo'}: ${target}`);
-  console.log(`${lang === 'zh' ? 'QA 子目录' : 'QA Directory'}: ${qaDir}`);
-  console.log(`${lang === 'zh' ? '预设模板' : 'Preset'}: ${preset}`);
-  console.log(`${lang === 'zh' ? '识别技术栈' : 'Detected Stack'}: ${stacks.join(', ')}`);
-  if (gitInfo.isGit && gitInfo.dirtyFiles.length > 0) {
-    console.log(
-      `[WARN] ${lang === 'zh' ? '目标仓库存在未提交 Git 改动（不会覆盖已有文件）' : 'Target has uncommitted git changes (existing files protected)'}: ${gitInfo.dirtyFiles.length} file(s)`
-    );
-  }
-  for (const adv of hostAdvisories) {
-    console.log(`[HOST-ISOLATION] ${adv}`);
+  if (!asJson) {
+    console.log(`\n=== ${lang === 'zh' ? '初始化 AI 测试工作台' : 'Initialize AI Test Workbench'}${dryRun ? ' [DRY-RUN]' : ''} ===`);
+    console.log(`${lang === 'zh' ? '项目名称' : 'Project'}: ${projectName}`);
+    console.log(`${lang === 'zh' ? '目标仓库' : 'Target Repo'}: ${target}`);
+    console.log(`${lang === 'zh' ? 'QA 子目录' : 'QA Directory'}: ${qaDir}`);
+    console.log(`${lang === 'zh' ? '预设模板' : 'Preset'}: ${preset}`);
+    console.log(`${lang === 'zh' ? '识别技术栈' : 'Detected Stack'}: ${stacks.join(', ')}`);
+    if (gitInfo.isGit && gitInfo.dirtyFiles.length > 0) {
+      console.log(
+        `[WARN] ${lang === 'zh' ? '目标仓库存在未提交 Git 改动（不会覆盖已有文件）' : 'Target has uncommitted git changes (existing files protected)'}: ${gitInfo.dirtyFiles.length} file(s)`
+      );
+    }
+    for (const adv of hostAdvisories) {
+      console.log(`[HOST-ISOLATION] ${adv}`);
+    }
   }
 
   const templateFiles = collectFilesRecursive(TEMPLATE_DIR, TEMPLATE_DIR, { mapGitignore: true });
@@ -348,19 +359,46 @@ export async function runInit(options = {}) {
     }
   }
 
-  for (const step of plan) {
-    console.log(`  [${step.action}] ${path.join(qaFolderName, step.rel)}`);
+  if (!asJson) {
+    for (const step of plan) {
+      console.log(`  [${step.action}] ${path.join(qaFolderName, step.rel)}`);
+    }
   }
 
+  let bridgePreview = null;
   if (bridgeRoot) {
-    const preview = applyRootMcpBridge(target, qaFolderName, { dryRun: true, force });
-    console.log(`  [BRIDGE_ROOT:${preview.status}] ${preview.file}`);
+    bridgePreview = applyRootMcpBridge(target, qaFolderName, { dryRun: true, force });
+    if (!asJson) {
+      console.log(`  [BRIDGE_ROOT:${bridgePreview.status}] ${bridgePreview.file}`);
+    }
   }
 
   if (dryRun) {
-    console.log(
-      `\n[DRY-RUN] ${lang === 'zh' ? '未写入磁盘。正式执行请去掉 --dry-run。' : 'No files written. Re-run without --dry-run to apply.'}`
-    );
+    if (asJson) {
+      console.log(
+        JSON.stringify(
+          {
+            ok: true,
+            exitCode: 0,
+            dryRun: true,
+            projectName,
+            target,
+            qaDir,
+            preset,
+            stacks,
+            hostAdvisories,
+            bridgeRoot: bridgePreview,
+            plan: plan.map((s) => ({ action: s.action, file: s.rel })),
+          },
+          null,
+          2
+        )
+      );
+    } else {
+      console.log(
+        `\n[DRY-RUN] ${lang === 'zh' ? '未写入磁盘。正式执行请去掉 --dry-run。' : 'No files written. Re-run without --dry-run to apply.'}`
+      );
+    }
     return 0;
   }
 
@@ -387,15 +425,18 @@ export async function runInit(options = {}) {
 
   if (!skipInstall && !hasNodeModules) {
     const npmArgs = hasLock ? ['ci', '--no-audit', '--no-fund'] : ['install', '--no-audit', '--no-fund'];
-    console.log(`\n${lang === 'zh' ? '正在独立安装 QA 依赖' : 'Installing isolated QA dependencies'}: npm ${npmArgs.join(' ')} ...`);
-    const npmRes = await runNpm(npmArgs, { cwd: qaDir, inheritStdio: true });
+    if (!asJson) {
+      console.log(`\n${lang === 'zh' ? '正在独立安装 QA 依赖' : 'Installing isolated QA dependencies'}: npm ${npmArgs.join(' ')} ...`);
+    }
+    const npmRes = await runNpm(npmArgs, { cwd: qaDir, inheritStdio: !asJson });
     if (npmRes.code !== 0) {
-      console.error(lang === 'zh' ? 'QA 依赖安装失败。' : 'Failed to install QA dependencies.');
-      return npmRes.code || 1;
+      return emitJsonError(npmRes.code || 1, lang === 'zh' ? 'QA 依赖安装失败。' : 'Failed to install QA dependencies.');
     }
   } else if (skipInstall) {
-    console.log(`\n[SKIP] ${lang === 'zh' ? '按 --skip-install 跳过 npm 依赖安装。' : 'Skipped npm install per --skip-install.'}`);
-  } else {
+    if (!asJson) {
+      console.log(`\n[SKIP] ${lang === 'zh' ? '按 --skip-install 跳过 npm 依赖安装。' : 'Skipped npm install per --skip-install.'}`);
+    }
+  } else if (!asJson) {
     console.log(`\n[OK] ${lang === 'zh' ? '检测到已有 @playwright/test 依赖，保持幂等。' : 'Existing @playwright/test dependency preserved.'}`);
   }
 
@@ -403,18 +444,22 @@ export async function runInit(options = {}) {
 
   if (pwReady && !skipInstall && !skipBrowser) {
     const cacheInfo = inspectBrowserCache();
-    console.log(
-      `\n${lang === 'zh' ? '校验/安装 Chromium 浏览器' : 'Verifying/installing Chromium browser'} (cache: ${cacheInfo.dir || 'default'})...`
-    );
-    const brRes = await runPlaywright(qaDir, ['install', 'chromium'], { inheritStdio: true });
+    if (!asJson) {
+      console.log(
+        `\n${lang === 'zh' ? '校验/安装 Chromium 浏览器' : 'Verifying/installing Chromium browser'} (cache: ${cacheInfo.dir || 'default'})...`
+      );
+    }
+    const brRes = await runPlaywright(qaDir, ['install', 'chromium'], { inheritStdio: !asJson });
     if (brRes.code !== 0) {
-      console.error(lang === 'zh' ? 'Chromium 安装失败。' : 'Chromium installation failed.');
-      return brRes.code || 1;
+      return emitJsonError(brRes.code || 1, lang === 'zh' ? 'Chromium 安装失败。' : 'Chromium installation failed.');
     }
   }
 
+  let agentSyncResults = null;
   if (loops.length > 0 && pwReady) {
-    console.log(`\n${lang === 'zh' ? '初始化官方 Playwright Test Agents' : 'Initializing official Playwright Test Agents'}: ${loops.join(', ')}`);
+    if (!asJson) {
+      console.log(`\n${lang === 'zh' ? '初始化官方 Playwright Test Agents' : 'Initializing official Playwright Test Agents'}: ${loops.join(', ')}`);
+    }
     const { results } = await syncOfficialAgents(qaDir, {
       loops,
       dryRun: false,
@@ -422,12 +467,39 @@ export async function runInit(options = {}) {
       lang,
       preserveSeed: true,
     });
-    for (const r of results) {
-      console.log(`  Loop "${r.loop}":`);
-      for (const act of r.actions) {
-        console.log(`    [${act.status}] ${act.file}${act.sidecar ? ` -> ${act.sidecar}` : ''}`);
+    agentSyncResults = results;
+    if (!asJson) {
+      for (const r of results) {
+        console.log(`  Loop "${r.loop}":`);
+        for (const act of r.actions) {
+          console.log(`    [${act.status}] ${act.file}${act.sidecar ? ` -> ${act.sidecar}` : ''}`);
+        }
       }
     }
+  }
+
+  if (asJson) {
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          exitCode: 0,
+          dryRun: false,
+          projectName,
+          target,
+          qaDir,
+          preset,
+          stacks,
+          hostAdvisories,
+          bridgeRoot: bridgePreview,
+          plan: plan.map((s) => ({ action: s.action, file: s.rel })),
+          agentsSynced: agentSyncResults,
+        },
+        null,
+        2
+      )
+    );
+    return 0;
   }
 
   console.log(`\n${lang === 'zh' ? '推荐下一步（默认在 qa/ 目录启动 Agent）' : 'Next steps (start coding agent inside qa/ by default)'}:`);

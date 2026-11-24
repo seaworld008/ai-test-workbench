@@ -72,10 +72,12 @@ export async function runAuditCommand(options = {}) {
   const res = runAuditForQaDir(qaDir, {
     resultsPath: options.results,
     waiversPath: options.waivers,
+    expectedRunId: options.expectedRunId,
     checkSpecs: Boolean(options.checkSpecs),
     requireE2e: Boolean(options.requireE2e),
     staticOnly: Boolean(options.staticOnly),
     allowUnboundResults: allowUnbound,
+    ...(options.requireCompilers !== undefined ? { requireCompilers: Boolean(options.requireCompilers) } : {}),
     maxFlaky: options.maxFlaky,
     maxSkipped: options.maxSkipped,
     diffBase: options.diffBase,

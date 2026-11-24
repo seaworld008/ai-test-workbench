@@ -4,11 +4,14 @@ import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
 import { runAuditForQaDir } from './audit.mjs';
 import { syncLivingCodeMap } from './codemap.mjs';
+import { outcomeToExitCode } from './core/outcome.mjs';
+import { resolvePlaywrightCli } from './core/playwright-resolve.mjs';
+import { runPlaywright } from './core/proc.mjs';
+import { redactSecrets } from './core/redact.mjs';
 import { syncQuarantineFromLedger } from './flaky.mjs';
 import { computeImpact } from './impact.mjs';
 import { beginRunLedger, finalizeRunLedger } from './ledger.mjs';
 import { evaluateTargetSafety, loadMergedQaEnv } from './origin-guard.mjs';
-import { redactSecrets, resolvePlaywrightCli, runPlaywright } from './proc.mjs';
 
 export function buildSuitePlaywrightArgs(suite, options = {}) {
   const s = (suite || 'smoke').toLowerCase();
@@ -209,7 +212,13 @@ export async function executeSuiteCore(options = {}) {
     options.onProgress({ progress: 100, total: 100, message: 'Completed suite execution & gates' });
   }
 
-  const finalCode = pwRes.code !== 0 ? pwRes.code : auditOut && !auditOut.ok ? 1 : 0;
+  const finalCode =
+    pwRes.code !== 0
+      ? pwRes.code
+      : auditOut && !auditOut.ok
+        ? outcomeToExitCode(auditOut.outcome)
+        : 0;
+  const outcome = auditOut?.outcome || (finalCode === 0 ? 'pass' : finalCode === 2 ? 'blocked' : 'fail');
   const failedSpecs = (ledgerFinal?.tests || [])
     .filter((t) => t.status === 'unexpected' || t.status === 'flaky')
     .slice(0, 15)
@@ -225,6 +234,7 @@ export async function executeSuiteCore(options = {}) {
   return {
     ok: finalCode === 0,
     exitCode: finalCode,
+    outcome,
     runId: ledgerBegin.runId,
     qaDir,
     suite,
@@ -235,6 +245,8 @@ export async function executeSuiteCore(options = {}) {
     audit: auditOut
       ? {
           ok: auditOut.ok,
+          outcome: auditOut.outcome,
+          trustTier: auditOut.trustTier,
           gates: auditOut.gates,
           errors: auditOut.errors,
           warnings: auditOut.warnings,

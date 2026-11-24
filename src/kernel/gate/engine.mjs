@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { mergeOutcomes } from '../../core/outcome.mjs';
 import { WORKBENCH_VERSION } from '../../core/version.mjs';
 import { runGitDiffGuard, runStaticSpecChecks } from './ast-analyzer.mjs';
 import { computeWorkspaceInputHash } from './git-utils.mjs';
@@ -59,18 +60,26 @@ export function runAuditForQaDir(qaDir, options = {}) {
   let govTrustTier = 'T0';
   let ledgerTrustTier = 'T0';
 
-  // Layer 0: Governance Integrity (Fail-Closed on missing lock!)
+  // Layer 0: Governance Integrity + Config Schema (Fail-Closed on malformed config or missing lock!)
   /** @type {'pass' | 'fail' | 'blocked' | 'skipped'} */
   let governanceStatus = 'skipped';
+  if (cfg._configError) {
+    allErrors.push(`[Config Blocked] Invalid aitest.config.json: ${cfg._configError}`);
+    governanceStatus = 'blocked';
+  }
   if (options.skipGovernanceCheck !== true) {
-    const govRes = verifyGovernanceLockInQaDir(qaDir, { requireT1Mac: Boolean(options.requireT1Mac) });
+    const govRes = verifyGovernanceLockInQaDir(qaDir, {
+      requireT1Mac: Boolean(options.requireT1Mac),
+      allowUninitialized: Boolean(options.allowUninitialized),
+    });
     lockDigest = govRes.lockDigest || null;
     govTrustTier = govRes.trustTier || 'T0';
     if (govRes.enforced) {
-      governanceStatus = /** @type {any} */ (govRes.status || (govRes.ok ? 'pass' : 'fail'));
+      const nextGov = /** @type {any} */ (govRes.status || (govRes.ok ? 'pass' : 'fail'));
+      governanceStatus = governanceStatus === 'blocked' ? 'blocked' : nextGov;
       allErrors.push(...govRes.errors);
       allWarnings.push(...govRes.warnings);
-    } else {
+    } else if (governanceStatus !== 'blocked') {
       governanceStatus = 'pass';
     }
   }
@@ -147,7 +156,8 @@ export function runAuditForQaDir(qaDir, options = {}) {
   if (checkSpecs) {
     const staticRes = runStaticSpecChecks(qaDir, {
       activeWaivers: waiverCheck.activeWaivers,
-      requireCompilers: Boolean(options.requireCompilers),
+      ...(options.requireCompilers !== undefined ? { requireCompilers: Boolean(options.requireCompilers) } : {}),
+      ...(options.env ? { env: options.env } : {}),
     });
     staticStatus = /** @type {any} */ (staticRes.status);
     allErrors.push(...staticRes.errors);
@@ -165,11 +175,7 @@ export function runAuditForQaDir(qaDir, options = {}) {
     allErrors.push('[Healer Diff Guard Blocked] Layer 3 Semantic Diff Guard requires a valid Git diffBase; fail-closed.');
   }
 
-  const gateStatuses = [governanceStatus, runtimeStatus, staticStatus, diffStatus];
-  const anyBlocked = gateStatuses.includes('blocked');
-  const anyFailed = gateStatuses.includes('fail') || allErrors.length > 0;
-  /** @type {'pass' | 'fail' | 'blocked'} */
-  const outcome = anyBlocked ? 'blocked' : anyFailed ? 'fail' : 'pass';
+  const outcome = mergeOutcomes([governanceStatus, runtimeStatus, staticStatus, diffStatus], allErrors.length > 0);
 
   const trustTier =
     outcome === 'pass' && govTrustTier === 'T1' && (staticOnly || ledgerTrustTier === 'T1')

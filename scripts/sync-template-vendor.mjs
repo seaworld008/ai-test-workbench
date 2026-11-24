@@ -19,7 +19,7 @@ const CORE_SRC_DIR = path.join(REPO_ROOT, 'src', 'core');
 const TEMPLATE_QA_DIR = path.join(REPO_ROOT, 'templates', 'playwright-qa');
 const TEMPLATE_SUPPORT_DIR = path.join(TEMPLATE_QA_DIR, 'support');
 
-const VENDORED_CORE_FILES = ['glob.mjs', 'playwright-results.mjs'];
+const VENDORED_CORE_FILES = ['glob.mjs', 'outcome.mjs', 'config.mjs', 'playwright-results.mjs'];
 
 /**
  * @param {string} content

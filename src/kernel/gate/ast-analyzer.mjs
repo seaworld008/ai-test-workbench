@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isCiEnvironment } from '../../core/outcome.mjs';
 import {
   getFileAtGitRef,
   listChangedFilesUnderDir,
@@ -751,10 +752,11 @@ function hasExpectOrAssertCall(ts, sf, node, isCustomAssertName) {
 export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
   const assertFunctionNames = options.assertFunctionNames || ['expect*', 'assert*', 'verify*'];
   const isCustomAssertName = buildCustomAssertNameMatcher(assertFunctionNames);
-  const ts = resolveTypeScriptCompiler(options.qaDir);
+  const ts = 'tsCompiler' in options ? options.tsCompiler : resolveTypeScriptCompiler(options.qaDir);
 
   /** @type {{
    *   usedAst: boolean,
+   *   compilerUnavailable: boolean,
    *   assertions: Array<any>,
    *   customAssertCalls: number,
    *   semanticLocators: number,
@@ -766,6 +768,7 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
    * }} */
   const summary = {
     usedAst: false,
+    compilerUnavailable: false,
     assertions: [],
     customAssertCalls: 0,
     semanticLocators: 0,
@@ -776,7 +779,13 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
     violations: [],
   };
 
-  if (!sourceText || !sourceText.trim() || !ts) {
+  if (!ts) {
+    summary.compilerUnavailable = true;
+    return summary;
+  }
+
+  if (!sourceText || !sourceText.trim()) {
+    summary.usedAst = true;
     return summary;
   }
 
@@ -1208,14 +1217,32 @@ export function compareSpecSourcesAst(filePath, baseSource, headSource, options 
     );
   }
 
-  const baseSum = analyzeSourceAst(filePath, baseSource || '', { assertFunctionNames, qaDir, wrapInAsyncFn: false });
-  const headSum = analyzeSourceAst(filePath, headSource || '', { assertFunctionNames, qaDir, wrapInAsyncFn: false });
+  const astOpts = {
+    assertFunctionNames,
+    qaDir,
+    wrapInAsyncFn: false,
+    ...('tsCompiler' in options ? { tsCompiler: options.tsCompiler } : {}),
+  };
+  const baseSum = analyzeSourceAst(filePath, baseSource || '', astOpts);
+  const headSum = analyzeSourceAst(filePath, headSource || '', astOpts);
+
+  if (baseSum.compilerUnavailable || headSum.compilerUnavailable) {
+    violations.push(
+      `[Healer Diff Guard Blocked] ${filePath}: TypeScript compiler unavailable; fail-closed instead of skipping AST semantic diff guard.`
+    );
+    return { ok: false, blocked: true, outcome: 'blocked', violations: [...new Set(violations)] };
+  }
 
   if (baseSum.usedAst || headSum.usedAst) {
     violations.push(...compareAstSummaries(filePath, baseSum, headSum, canWaive));
   }
 
-  return { ok: violations.length === 0, violations: [...new Set(violations)] };
+  return {
+    ok: violations.length === 0,
+    blocked: false,
+    outcome: violations.length === 0 ? 'pass' : 'fail',
+    violations: [...new Set(violations)],
+  };
 }
 
 /**
@@ -1404,6 +1431,7 @@ export function runGitDiffGuard(qaDir, diffBase, options = {}) {
   const cfg = loadAitestConfig(qaDir);
   const activeWaivers = options.activeWaivers || [];
   const violations = [...validateAssertFunctionNames(cfg.assertFunctionNames)];
+  let blocked = false;
 
   const allChangedRelFromGitRoot = [
     ...changedInfo.changed.map((c) => ({ rel: c.path, status: c.status, oldRel: c.oldPath || c.path })),
@@ -1448,15 +1476,17 @@ export function runGitDiffGuard(qaDir, diffBase, options = {}) {
         assertFunctionNames: cfg.assertFunctionNames,
         activeWaivers,
         qaDir,
+        ...('tsCompiler' in options ? { tsCompiler: options.tsCompiler } : {}),
       });
+      if (cmp.blocked) blocked = true;
       violations.push(...cmp.violations);
     }
   }
 
   const unique = [...new Set(violations)];
   return {
-    ok: unique.length === 0,
-    status: unique.length === 0 ? 'pass' : 'fail',
+    ok: !blocked && unique.length === 0,
+    status: blocked ? 'blocked' : unique.length === 0 ? 'pass' : 'fail',
     violations: unique,
   };
 }
@@ -1547,6 +1577,8 @@ export function scanSpecFilesFallback(testsDir, options = {}) {
 export function runStaticSpecChecks(qaDir, options = {}) {
   const cfg = loadAitestConfig(qaDir);
   const activeWaivers = options.activeWaivers || [];
+  const requireCompilers =
+    options.requireCompilers !== undefined ? Boolean(options.requireCompilers) : isCiEnvironment(options.env);
   const errors = [...validateAssertFunctionNames(cfg.assertFunctionNames)];
   const warnings = [];
   let blocked = false;
@@ -1559,9 +1591,9 @@ export function runStaticSpecChecks(qaDir, options = {}) {
       const msg = (tscRes.stdout || tscRes.stderr || '').trim();
       errors.push(`[TypeCheck] tsc --noEmit failed:\n${msg}`);
     }
-  } else if (options.requireCompilers) {
+  } else if (requireCompilers) {
     blocked = true;
-    errors.push('[TypeCheck Blocked] typescript compiler not installed locally; fail-closed.');
+    errors.push('[TypeCheck Blocked] typescript compiler not installed locally; fail-closed in CI/strict mode.');
   } else {
     warnings.push('[TypeCheck] typescript compiler not installed locally; skipped tsc --noEmit.');
   }
@@ -1585,9 +1617,9 @@ export function runStaticSpecChecks(qaDir, options = {}) {
       if (!errors.includes(e)) errors.push(e);
     }
   } else {
-    if (options.requireCompilers) {
+    if (requireCompilers) {
       blocked = true;
-      errors.push('[Static Check Blocked] eslint not found in node_modules; fail-closed.');
+      errors.push('[Static Check Blocked] eslint not found in node_modules; fail-closed in CI/strict mode.');
     } else {
       warnings.push('[Static Check] eslint not found in node_modules; running built-in AST/semantic spec scanner.');
     }

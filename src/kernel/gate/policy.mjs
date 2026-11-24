@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { loadAndValidateAitestConfigFile } from '../../core/config.mjs';
 import { compileGlob } from '../../core/glob.mjs';
 import { computeFlakyStats } from '../../core/playwright-results.mjs';
 import { WORKBENCH_VERSION } from '../../core/version.mjs';
@@ -113,36 +114,7 @@ export function isProtectedDiffPath(filePath, extraGlobs = []) {
 }
 
 export function loadAitestConfig(qaDir) {
-  const cfgPath = path.join(qaDir, 'aitest.config.json');
-  const defaults = {
-    assertFunctionNames: ['expect*', 'assert*', 'verify*'],
-    criticalTags: ['@critical', '@smoke'],
-    maxFlaky: 0,
-    maxSkipped: 0,
-    maxWaivers: 5,
-    maxWaiverDays: 14,
-    governance: {
-      protected: [...DEFAULT_PROTECTED_GLOBS],
-    },
-  };
-  if (!fs.existsSync(cfgPath)) return defaults;
-  try {
-    const parsed = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-    const rawNames = Array.isArray(parsed.assertFunctionNames)
-      ? parsed.assertFunctionNames
-      : defaults.assertFunctionNames;
-    const customProtected = Array.isArray(parsed?.governance?.protected) ? parsed.governance.protected : [];
-    return {
-      ...defaults,
-      ...parsed,
-      assertFunctionNames: rawNames,
-      governance: {
-        protected: [...new Set([...DEFAULT_PROTECTED_GLOBS, ...customProtected])],
-      },
-    };
-  } catch {
-    return defaults;
-  }
+  return loadAndValidateAitestConfigFile(qaDir).config;
 }
 
 export function validateAssertFunctionNames(assertFunctionNames = []) {
@@ -229,7 +201,7 @@ export function isInitializedQaWorkspace(qaDir) {
  * - Missing `.aitest/governance.lock` in an initialized QA workspace returns `ok: false, status: 'blocked'`.
  * - Verifies schema, non-bot approver, protected file hashes, and T1 HMAC when present.
  * @param {string} qaDir
- * @param {{ requireT1Mac?: boolean }} [options]
+ * @param {{ requireT1Mac?: boolean, allowUninitialized?: boolean }} [options]
  */
 export function verifyGovernanceLockInQaDir(qaDir, options = {}) {
   const aitestDir = path.join(qaDir, '.aitest');
@@ -252,10 +224,24 @@ export function verifyGovernanceLockInQaDir(qaDir, options = {}) {
         warnings,
       };
     }
+    if (options.allowUninitialized === true) {
+      return {
+        ok: true,
+        status: 'pass',
+        enforced: false,
+        trustTier: 'T0',
+        lockPath,
+        errors,
+        warnings: ['Uninitialized QA workspace allowed by explicit allowUninitialized flag (T0 advisory).'],
+      };
+    }
+    errors.push(
+      `[Governance Blocked] Uninitialized QA workspace (${qaDir}) is missing playwright.config.* / aitest.config.json and .aitest/governance.lock. Fail-closed: run "npx ai-test-workbench@${WORKBENCH_VERSION} init" first.`
+    );
     return {
-      ok: true,
-      status: 'pass',
-      enforced: false,
+      ok: false,
+      status: 'blocked',
+      enforced: true,
       trustTier: 'T0',
       lockPath,
       errors,

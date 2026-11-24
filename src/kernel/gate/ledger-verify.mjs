@@ -258,14 +258,16 @@ export function verifyLedgerBindingInQaDir(qaDir, resultsPath, rawResultsObj, op
       };
     }
     return {
-      ok: true,
-      status: 'pass',
-      enforced: false,
+      ok: false,
+      status: 'blocked',
+      enforced: true,
       trustTier: 'T0',
       runId: null,
       resultsDigest: null,
       ledgerMac: null,
-      errors: [],
+      errors: [
+        `[Run Ledger Blocked] Uninitialized QA workspace (${qaDir}) has no Run Ledger (.aitest/runs/latest.json). Fail-closed: initialize via "npx ai-test-workbench@${WORKBENCH_VERSION} init" and execute via "npx ai-test-workbench@${WORKBENCH_VERSION} run".`,
+      ],
       warnings: [],
     };
   }
@@ -325,15 +327,17 @@ export function verifyLedgerBindingInQaDir(qaDir, resultsPath, rawResultsObj, op
   const resolvedDefaultResults = path.resolve(qaDir, 'reports', 'results.json');
   if (path.resolve(resultsPath) !== resolvedDefaultResults && !options.expectedRunId) {
     return {
-      ok: true,
-      status: 'pass',
-      enforced: false,
+      ok: false,
+      status: 'blocked',
+      enforced: true,
       trustTier: 'T0',
       runId: manifest.runId,
       resultsDigest: null,
       ledgerMac: manifest.mac || null,
-      errors,
-      warnings: ['Auditing non-default custom results file without expectedRunId (T0 advisory).'],
+      errors: [
+        `[Run Ledger Blocked] Auditing custom results file "${resultsPath}" without expectedRunId is fail-closed; pass --expected-run-id <runId> (or human-only --allow-unbound-results for T0 advisory).`,
+      ],
+      warnings,
     };
   }
 

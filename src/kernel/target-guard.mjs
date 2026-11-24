@@ -307,11 +307,20 @@ function getVersionStrippedPathCandidates(normPathname) {
  */
 export function checkOutgoingRequestSafety(method, rawUrl, options = {}) {
   const upperMethod = (method || 'GET').toUpperCase();
+  if (typeof rawUrl !== 'string' || !rawUrl.trim()) {
+    return {
+      blocked: true,
+      reason: `Blocked empty or non-string outgoing request URL (${upperMethod}) [fail-closed]`,
+    };
+  }
   let parsed;
   try {
     parsed = new URL(rawUrl, options.baseURL || 'http://localhost');
   } catch {
-    return { blocked: false, reason: null };
+    return {
+      blocked: true,
+      reason: `Blocked malformed outgoing request URL "${rawUrl}" (${upperMethod}) [fail-closed]`,
+    };
   }
 
   const isHttp = parsed.protocol === 'http:' || parsed.protocol === 'https:';
