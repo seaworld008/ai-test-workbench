@@ -9,8 +9,8 @@
 3. Run `npm install` inside `qa/` and `npx playwright install chromium`.
 4. Preview & apply Test Agents sync:
    ```bash
-   npx ai-test-workbench@5.1.0 update-agents --target /path/to/repo --loop codex,claude --dry-run
-   npx ai-test-workbench@5.1.0 update-agents --target /path/to/repo --loop codex,claude
+   npx ai-test-workbench@5.1.1 update-agents --target /path/to/repo --loop codex,claude --dry-run
+   npx ai-test-workbench@5.1.1 update-agents --target /path/to/repo --loop codex,claude
    ```
 5. Custom agent edits are preserved via `qa/.aitest/agents-manifest.json`; review generated `*.aitest-new` files or pass `--force`.
 6. Verify with `npm run typecheck`, `npm run lint`, offline `smoke`, and online `e2e`/`api`.

@@ -53,7 +53,7 @@
 ```yaml
 jobs:
   aitest-t2-verdict:
-    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v5.1.0
+    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v5.1.1
     permissions:
       id-token: write
       attestations: write
@@ -69,7 +69,7 @@ jobs:
 离线校验 T2 证书身份与防篡改（默认 fail-closed，缺签名 / 仅 T1 / 身份不符 / 改 1 字节一律非 0 退出且 `trustLevel <= T1`）：
 
 ```bash
-npx ai-test-workbench@5.1.0 attest verify \
+npx ai-test-workbench@5.1.1 attest verify \
   --file attestation.json \
   --bundle attestation.sigstore.json \
   --expect-repo owner/repo \
@@ -119,7 +119,7 @@ flowchart TB
 
 ### 方式一：一键注册原生 MCP Server（锁版本或本地源码直连）
 
-> **CLI 命令与供应链安全**：可使用锁版本 `npx ai-test-workbench@5.1.0 <cmd>`、全局安装后的短命令 `aitw <cmd>`（`npm i -g ai-test-workbench@5.1.0`），或本地源码直连 `node tools/aitest.mjs <cmd>`；请始终锁定精确版本号，避免无锁版本拉取。
+> **CLI 命令与供应链安全**：可使用锁版本 `npx ai-test-workbench@5.1.1 <cmd>`、全局安装后的短命令 `aitw <cmd>`（`npm i -g ai-test-workbench@5.1.1`），或本地源码直连 `node tools/aitest.mjs <cmd>`；请始终锁定精确版本号，避免无锁版本拉取。
 
 - **Claude Code**：
   ```bash
@@ -129,7 +129,7 @@ flowchart TB
   ```toml
   [mcp_servers.ai-test-workbench]
   command = "npx"
-  args = ["--package=ai-test-workbench@5.1.0", "ai-test-workbench", "mcp-serve"]
+  args = ["--package=ai-test-workbench@5.1.1", "ai-test-workbench", "mcp-serve"]
   ```
 - **Cursor / Windsurf / Antigravity / Gemini CLI**（`.mcp.json`）：
   ```json
@@ -137,7 +137,7 @@ flowchart TB
     "mcpServers": {
       "ai-test-workbench": {
         "command": "npx",
-        "args": ["--package=ai-test-workbench@5.1.0", "ai-test-workbench", "mcp-serve"]
+        "args": ["--package=ai-test-workbench@5.1.1", "ai-test-workbench", "mcp-serve"]
       }
     }
   }
@@ -177,18 +177,18 @@ flowchart TB
 
 ```bash
 # 1. 体检与幂等初始化（自动创建 <repo>/qa/.aitest/governance.lock）
-npx ai-test-workbench@5.1.0 doctor
-npx ai-test-workbench@5.1.0 init --name my-app --target "/path/to/your-repo" --loop codex
+npx ai-test-workbench@5.1.1 doctor
+npx ai-test-workbench@5.1.1 init --name my-app --target "/path/to/your-repo" --loop codex
 
 # 2. 登录态捕获 -> 0→1 默认禁写探索 -> 活体代码地图 v4 -> 锁版本全链路 MCP
-npx ai-test-workbench@5.1.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
-npx ai-test-workbench@5.1.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
-npx ai-test-workbench@5.1.0 map --target "/path/to/your-repo"
-npx ai-test-workbench@5.1.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@5.1.0 mcp doctor --target "/path/to/your-repo" --lock
+npx ai-test-workbench@5.1.1 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
+npx ai-test-workbench@5.1.1 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
+npx ai-test-workbench@5.1.1 map --target "/path/to/your-repo"
+npx ai-test-workbench@5.1.1 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@5.1.1 mcp doctor --target "/path/to/your-repo" --lock
 
 # 3. 性能 SLO 评测与提交前一键可信变更判决（产出 attestation + SARIF）
-npx ai-test-workbench@5.1.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
-npx ai-test-workbench@5.1.0 verify-change --target "/path/to/your-repo" --base origin/main
+npx ai-test-workbench@5.1.1 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
+npx ai-test-workbench@5.1.1 verify-change --target "/path/to/your-repo" --base origin/main
 ```
 
 ### 本机全量自检与公开基准复现（零外部服务器）

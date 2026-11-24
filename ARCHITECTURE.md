@@ -9,9 +9,9 @@
 1. **创作与受控治理层（MCP 执行模型 v2：`src/mcp-server.mjs` + `src/jobs.mjs`）**：
    - 原生支持 `stdio`、`Streamable HTTP (/mcp)` 与 `Legacy HTTP+SSE (/sse)`，兼容 MCP `2024-11-05` 至 `2025-11-25+`，根包保持**零外部运行时依赖**（详见 [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md)）。
    - 暴露 **21 个强类型 MCP 工具**。只读工具全并发无锁；写操作与长任务在独立子进程（`AITEST_MCP_CHILD=1`）中按工作区互斥锁运行，支持 `_meta.progressToken` 进度通知、`notifications/cancelled` 进程树级强杀与 `syncBudgetMs` 异步后台作业切换。
-   - **特权物理隔离**：重签治理锁的 `npx ai-test-workbench@5.1.0 governance approve` 仅限人类在本地终端调用，永不注册为 MCP 工具且拒绝 MCP 子进程调用。
+   - **特权物理隔离**：重签治理锁的 `npx ai-test-workbench@5.1.1 governance approve` 仅限人类在本地终端调用，永不注册为 MCP 工具且拒绝 MCP 子进程调用。
 2. **确定性回归与一键终审层（Deterministic Runner + `verifyChangeCore`）**：
-   - 本地提交前、PR 与 CI 直接运行静态 TypeScript 测试与 `npx ai-test-workbench@5.1.0 verify-change`，**零大模型调用、零模型 API 密钥依赖**，产出绑定 ULID `runId` 的 `attestation.json` 与 `verdict.sarif.json`。
+   - 本地提交前、PR 与 CI 直接运行静态 TypeScript 测试与 `npx ai-test-workbench@5.1.1 verify-change`，**零大模型调用、零模型 API 密钥依赖**，产出绑定 ULID `runId` 的 `attestation.json` 与 `verdict.sarif.json`。
 
 ## 2. 跨项目物理隔离 (`<repo>/qa/`)
 

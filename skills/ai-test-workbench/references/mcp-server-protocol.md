@@ -6,7 +6,7 @@
 
 - **支持协议版本**：`2025-11-25`（最新）、`2025-06-18`、`2025-03-26`、`2024-11-05`（根包零运行时依赖）。
 - **三大传输方式**：
-  1. `stdio`：`node tools/aitest.mjs mcp-serve`（或锁版本 `npx --package=ai-test-workbench@5.1.0 ai-test-workbench mcp-serve`；逐行 NDJSON JSON-RPC，长任务运行于独立子进程 `AITEST_MCP_CHILD=1`，零 `globalThis.console` 劫持）。
+  1. `stdio`：`node tools/aitest.mjs mcp-serve`（或锁版本 `npx --package=ai-test-workbench@5.1.1 ai-test-workbench mcp-serve`；逐行 NDJSON JSON-RPC，长任务运行于独立子进程 `AITEST_MCP_CHILD=1`，零 `globalThis.console` 劫持）。
   2. `Streamable HTTP`：`POST / GET / DELETE /mcp`（仅 `initialize` 分配 `Mcp-Session-Id`；未知或过期会话返回 `404 Not Found`；支持空闲 TTL 与 `maxSessions` 淘汰；`2025-06-18+` 拒绝 JSON-RPC Batch）。
   3. `Legacy HTTP+SSE`：`GET /sse` + `POST /messages`（兼容 `2024-11-05`）。
 - **进度流、取消与异步作业（`src/jobs.mjs`）**：

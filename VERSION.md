@@ -1,6 +1,6 @@
 # 版本与兼容性矩阵 (v5.0)
 
-> [English Version](./VERSION.en.md) · [简体中文主文档](./README.md) · **工作台与门禁内核版本**：`5.1.0`（单一真源：`src/version.mjs`） · **核验日期**：`2026-11-24`
+> [English Version](./VERSION.en.md) · [简体中文主文档](./README.md) · **工作台与门禁内核版本**：`5.1.1`（单一真源：`src/version.mjs`） · **核验日期**：`2026-11-24`
 
 ## 1. 运行时与工具链要求
 
@@ -17,7 +17,7 @@
 
 | 工件类型 | 当前 Schema 版本 | 对应模块 |
 |---|---|---|
-| **Gate Kernel** | `5.1.0` | `templates/playwright-qa/support/gate-kernel.mjs`（`doctor` 自动检测模板漂移） |
+| **Gate Kernel** | `5.1.1` | `templates/playwright-qa/support/gate-kernel.mjs`（`doctor` 自动检测模板漂移） |
 | **Governance Lock** | `v1` | `src/governance.mjs`（`.aitest/governance.lock`） |
 | **Run Ledger & Attestation** | `v1` | `src/ledger.mjs` / `src/verdict.mjs`（`.aitest/runs/<runId>/manifest.json` & `attestation.json`） |
 | **Living Code Map** | `v4` | `src/codemap.mjs`（`knowledge/code-map.json`） |

@@ -4,6 +4,11 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.1] - 2026-11-24
+
+### Changed & Hardened
+- **Tokenless Native npm Trusted Publishing (OIDC) Activation**: Upgraded [.github/workflows/release.yml](./.github/workflows/release.yml) to **Node.js 24** (bundled `npm >= 11.5.1`), removed `registry-url` and `NODE_AUTH_TOKEN` to publish directly via GitHub Actions OIDC (`id-token: write`) with SLSA v1 Sigstore Provenance; updated reusable `aitest-verify.yml` default version and pinned CLI examples to `5.1.1`.
+
 ## [5.1.0] - 2026-11-24
 
 ### Removed / Breaking

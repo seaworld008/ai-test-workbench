@@ -10,6 +10,6 @@
 3. **严格只读**调用系统 MCP 联动排查：
    - **Loki / Grafana MCP**：按 `{env=~"staging|test"} |= "<traceId>"` 在故障时间窗检索后端链路日志；
    - **Sentry MCP**：查看同时间窗内未解决的前后端异常堆栈；
-   - **Prometheus / `aitest_perf`**：执行 `npx ai-test-workbench@5.1.0 perf --target . --routes <route> --concurrency 4 --iterations 12 --enforce-budget`，检查 TTFB/LCP/CLS、重复请求瀑布、接口 P95 与连接池水位；
+   - **Prometheus / `aitest_perf`**：执行 `npx ai-test-workbench@5.1.1 perf --target . --routes <route> --concurrency 4 --iterations 12 --enforce-budget`，检查 TTFB/LCP/CLS、重复请求瀑布、接口 P95 与连接池水位；
    - **PostgreSQL / MySQL / Redis MCP**：仅用 `SELECT` / `GET` 验证业务状态是否一致（**严禁** `INSERT`、`UPDATE`、`DELETE`、`FLUSH`）。
-4. 明确归类 **A / B / C / D**：仅允许对 A 类定位器问题执行最多 3 轮修复，修完跑 `npx ai-test-workbench@5.1.0 run --suite all --audit` 与 `npx ai-test-workbench@5.1.0 map` 更新活体知识地图。
+4. 明确归类 **A / B / C / D**：仅允许对 A 类定位器问题执行最多 3 轮修复，修完跑 `npx ai-test-workbench@5.1.1 run --suite all --audit` 与 `npx ai-test-workbench@5.1.1 map` 更新活体知识地图。

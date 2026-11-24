@@ -1,5 +1,5 @@
 /**
- * Authoritative 4-Layer Anti-Fake-Green Gate Kernel (v5.1.0) — Public Facade.
+ * Authoritative 4-Layer Anti-Fake-Green Gate Kernel (v5.1.1) — Public Facade.
  *
  * Refactored from first principles into cohesive, single-responsibility modules under `support/gate/`:
  * - `trust-hmac.mjs`    — T1 out-of-workspace HMAC-SHA256 tamper-evidence

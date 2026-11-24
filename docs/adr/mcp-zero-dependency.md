@@ -33,7 +33,7 @@
 
 ## 3. 决策依据（Rationale）
 
-- **零依赖交付与供应链最小化**：`ai-test-workbench` 的核心定位是“可信验证内核”。零运行时依赖意味着用户通过 `npx ai-test-workbench@5.1.0 ...` 或在 CI runner 中运行时，无需拉取数十个传递依赖，大幅降低供应链投毒风险与冷启动时间。
+- **零依赖交付与供应链最小化**：`ai-test-workbench` 的核心定位是“可信验证内核”。零运行时依赖意味着用户通过 `npx ai-test-workbench@5.1.1 ...` 或在 CI runner 中运行时，无需拉取数十个传递依赖，大幅降低供应链投毒风险与冷启动时间。
 - **能力边界高度清晰**：本工作台当前仅使用 MCP 的核心稳定子集——`initialize` 版本协商（`2024-11-05` 至 `2025-11-25`）、`ping`、`logging/setLevel`、`tools/list`、`tools/call`（含 `structuredContent`）、`resources/*`、`prompts/*`、`notifications/progress` 与 `notifications/cancelled`。该子集规范清晰，且由模块化代码（`protocol.mjs`、`registry.mjs`、`resources.mjs`、`security.mjs`、`transport-http.mjs`、`transport-stdio.mjs`）清晰分层。
 - **避免维护双轨分叉**：维护独立的 SDK 封装包会带来双份工具注册表、安全边界（Workspace Root 交集、DNS Rebinding 防护、常量时间 Bearer 校验、子进程进程树取消）与文档同步成本。
 - **可证伪的互操作保障**：过去仅靠自研单测容易陷入“自写自测”盲区；引入官方 `@modelcontextprotocol/conformance` 与官方 `@modelcontextprotocol/sdk` 客户端后，协议合规性由上游规范测试而非主观判断决定。

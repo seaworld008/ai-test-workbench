@@ -53,7 +53,7 @@ Adopt T2 verification in one job via [examples/workflows/use-aitest-verify.yml](
 ```yaml
 jobs:
   aitest-t2-verdict:
-    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v5.1.0
+    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v5.1.1
     permissions:
       id-token: write
       attestations: write
@@ -69,7 +69,7 @@ jobs:
 Verify a T2 bundle offline (fail-closed by default: missing signature, T1-only MAC, digest tamper, or workflow identity mismatch always returns non-zero with `trustLevel <= T1`):
 
 ```bash
-npx ai-test-workbench@5.1.0 attest verify \
+npx ai-test-workbench@5.1.1 attest verify \
   --file attestation.json \
   --bundle attestation.sigstore.json \
   --expect-repo owner/repo \
@@ -117,7 +117,7 @@ flowchart TB
 
 ## 30-Second AI Agent Setup (Zero Runtime Dependencies)
 
-> **CLI & Supply-Chain Security**: Run pinned `npx ai-test-workbench@5.1.0 <cmd>`, global short alias `aitw <cmd>` (after `npm i -g ai-test-workbench@5.1.0`), or local source `node tools/aitest.mjs <cmd>`. Always pin an exact version rather than unpinned `npx -y`.
+> **CLI & Supply-Chain Security**: Run pinned `npx ai-test-workbench@5.1.1 <cmd>`, global short alias `aitw <cmd>` (after `npm i -g ai-test-workbench@5.1.1`), or local source `node tools/aitest.mjs <cmd>`. Always pin an exact version rather than unpinned `npx -y`.
 
 - **Claude Code**:
   ```bash
@@ -127,7 +127,7 @@ flowchart TB
   ```toml
   [mcp_servers.ai-test-workbench]
   command = "npx"
-  args = ["--package=ai-test-workbench@5.1.0", "ai-test-workbench", "mcp-serve"]
+  args = ["--package=ai-test-workbench@5.1.1", "ai-test-workbench", "mcp-serve"]
   ```
 - **Cursor / Windsurf / Antigravity / Gemini CLI** (`.mcp.json`):
   ```json
@@ -135,7 +135,7 @@ flowchart TB
     "mcpServers": {
       "ai-test-workbench": {
         "command": "npx",
-        "args": ["--package=ai-test-workbench@5.1.0", "ai-test-workbench", "mcp-serve"]
+        "args": ["--package=ai-test-workbench@5.1.1", "ai-test-workbench", "mcp-serve"]
       }
     }
   }
@@ -161,9 +161,9 @@ Requires **Node.js `>= 22.12.0`** (`24 LTS` or `26 LTS` recommended).
 
 ```bash
 # Project onboarding & one-call change verdict
-npx ai-test-workbench@5.1.0 doctor
-npx ai-test-workbench@5.1.0 init --name my-app --target "/path/to/your-repo" --loop codex
-npx ai-test-workbench@5.1.0 verify-change --target "/path/to/your-repo" --base origin/main
+npx ai-test-workbench@5.1.1 doctor
+npx ai-test-workbench@5.1.1 init --name my-app --target "/path/to/your-repo" --loop codex
+npx ai-test-workbench@5.1.1 verify-change --target "/path/to/your-repo" --base origin/main
 
 # Clone & reproduce all v5.0 unit tests, live demo, and seeded-defect benchmark locally
 git clone https://github.com/seaworld008/ai-test-workbench.git

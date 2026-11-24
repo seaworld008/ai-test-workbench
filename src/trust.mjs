@@ -886,7 +886,7 @@ export function verifyAttestationFile(attestationPath, options = {}) {
 
 /**
  * CLI command:
- * `npx ai-test-workbench@5.1.0 attest verify --file <attestation.json> --bundle <bundle.sigstore.json> --expect-repo <owner/repo> --expect-workflow <path> --expect-ref <ref>`
+ * `npx ai-test-workbench@5.1.1 attest verify --file <attestation.json> --bundle <bundle.sigstore.json> --expect-repo <owner/repo> --expect-workflow <path> --expect-ref <ref>`
  */
 export async function runAttestCommand(options = {}) {
   const action = String(options.action || 'verify').toLowerCase();

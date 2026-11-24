@@ -33,7 +33,7 @@ During the v5 architecture review, two paths were evaluated for the MCP protocol
 
 ## 3. Rationale
 
-- **Minimal supply-chain footprint**: As a trustworthy verification kernel executed via `npx ai-test-workbench@5.1.0 ...` and CI runners, zero runtime dependencies eliminate transitive dependency drift, shrink install latency, and minimize supply-chain exposure.
+- **Minimal supply-chain footprint**: As a trustworthy verification kernel executed via `npx ai-test-workbench@5.1.1 ...` and CI runners, zero runtime dependencies eliminate transitive dependency drift, shrink install latency, and minimize supply-chain exposure.
 - **Bounded protocol surface**: The workbench currently relies on a well-defined, stable core of MCP — `initialize` version negotiation (`2024-11-05` through `2025-11-25`), `ping`, `logging/setLevel`, `tools/list`, `tools/call` (including `structuredContent`), `resources/*`, `prompts/*`, `notifications/progress`, and `notifications/cancelled`. This surface is cleanly separated across `protocol.mjs`, `registry.mjs`, `resources.mjs`, `security.mjs`, `transport-http.mjs`, and `transport-stdio.mjs`.
 - **Avoid dual-track drift**: Publishing a parallel SDK wrapper would duplicate security invariants (workspace root intersection, DNS rebinding protection, constant-time Bearer checks, process-tree job cancellation) and double maintenance cost.
 - **Falsifiable compliance**: Relying solely on self-authored unit tests risks blind spots. Running both the official `@modelcontextprotocol/conformance` suite and the official `@modelcontextprotocol/sdk` client provides independent specification verification.

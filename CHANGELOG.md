@@ -4,6 +4,11 @@
 
 本日志遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 与 [语义化版本 (SemVer)](https://semver.org/spec/v2.0.0.html) 规范。
 
+## [5.1.1] - 2026-11-24
+
+### 变更与发布流水线加固 (Changed & Hardened)
+- **原生零密钥 npm Trusted Publishing (OIDC) 激活**：[.github/workflows/release.yml](./.github/workflows/release.yml) 升级至 **Node.js 24**（内置 `npm >= 11.5.1`），移除 `registry-url` 与 `NODE_AUTH_TOKEN`，完全通过 GitHub Actions OIDC（`id-token: write`）免密钥发布并附带 SLSA v1 Sigstore Provenance；同步将可复用工作流 `aitest-verify.yml` 默认版本、全仓锁版本示例更新至 `5.1.1`。
+
 ## [5.1.0] - 2026-11-24
 
 ### 破坏性变更 / 移除 (Removed / Breaking)

@@ -14,7 +14,7 @@ import {
   verifyGovernanceLockInQaDir,
 } from './policy.mjs';
 
-export const GATE_KERNEL_VERSION = '5.1.0';
+export const GATE_KERNEL_VERSION = '5.1.1';
 
 /**
  * Unified 3-State Quality Gate Engine (`pass | fail | blocked`, `X-5` / `A-1`).

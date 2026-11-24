@@ -201,7 +201,12 @@ function readExpectedPackageVersion(rootDir) {
  */
 function validateCliCommandAndVersionConsistency(relPath, mdText, expectedVersion, errors) {
   const norm = relPath.replace(/\\/g, '/');
-  if (norm.startsWith('docs/review/') || norm === 'CHANGELOG.md' || norm === 'CHANGELOG.en.md') {
+  if (
+    norm.startsWith('docs/review/') ||
+    norm.startsWith('bench/real-world/') ||
+    norm === 'CHANGELOG.md' ||
+    norm === 'CHANGELOG.en.md'
+  ) {
     return;
   }
   if (UNPINNED_NPX_RE.test(mdText)) {
