@@ -4,6 +4,29 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.2.0] - 2026-11-25
+
+### Breaking Changes & Interface Polish
+- **MCP Tool Surface Convergence (17 → 16 Canonical Tools)**: Added zero-to-one loopback bootstrapper `aitest_bootstrap`, folded `aitest_flaky_report` and `aitest_trace_matrix` into `aitest_report(view="summary"|"flaky"|"traceability")`, and added `action: "discard"` to `aitest_heal`. All **8 legacy v5/v6.1 tool names** continue forwarding via `tools/call` across `v6.x` with `_deprecation` warnings; CLI adds `bootstrap`, `report --view`, forwarded `flaky`/`trace-matrix`, and `--json` usage errors (`0=pass` / `1=fail` / `2=blocked` / `64=usage`).
+
+### Security Hardening & Trustworthy Boundaries
+- **Immutable `TrustContext`, Sticky T1 & `aitest_init` Re-Sign Closure (WU-01)**:
+  - Added `src/kernel/gate/trust-context.mjs`, resolving `{ tierCeiling, key, keyId, source, hostT1Sticky }` once at entry and passing it explicitly across all verifiers; removed implicit runtime `signPayloadT1(..., { createIfMissing: true })` and `allowForeignLockMac` bypasses.
+  - Added multi-machine `macs: { [keyId]: hmac }` support (backward-compatible with `mac`) plus host sticky T1 markers rejecting stripped `mac` fields or deleted ledgers; `aitest_init` now seals `source: "aitest-init"` only when no prior governance/run/heal history exists and all protected files match factory hashes.
+  - Preserved `AITEST_HMAC_KEY_FILE` for MCP child processes in `src/jobs.mjs` while enforcing a strict subprocess env allowlist in `src/runner.mjs` (stripping `AITEST_HMAC_KEY*` and CI OIDC secrets from Playwright/target code); added RFC 8785-safe `canonicalizeJson` and stricter bot approver blocking.
+- **10-Hop Redirect Firewall, MCP HTTP Hardening & Redaction v3 (WU-03)**:
+  - Enforced `maxRedirects: 0` loops (up to 10 hops) with per-hop safety re-validation (honoring `301/302/303` vs `307/308`) across `base.ts` `context.route`, `APIRequestContext`, `explore`, and `perf`; invalid `TEST_EGRESS_MODE` fails closed.
+  - Hardened MCP HTTP/SSE with exact `Host` (`421`/`403`), `Origin` (`403`), and `Content-Type: application/json` (`415`) checks, bounded JSON-RPC batches, `409` duplicate SSE protection, redacted error paths, and `SIGTERM -> SIGKILL` tree termination.
+  - Upgraded `redactSecrets` to v3 (adding VT ANSI escape stripping and broader token patterns); switched `sync:vendor` to transitive closure mirroring from `src/kernel/` (`41` files); split workflow privileges and pinned Sigstore `commit/tree/root`.
+- **AST Gate Engine v2 & `AITEST-G116 / G117` (WU-05)**:
+  - Added cross-scope `src/kernel/gate/symbol-table.mjs` (`const` propagation, named `page.route` handlers, DOM taint sources, helper checks); hardened `AITEST-G104..G114` against `expect.poll`, loop/listener hiding, `Promise.allSettled`, vacuous regexes, and `ruleG114` stubbing an asserted negative HTTP status (e.g., `403` RBAC stubs).
+  - Added **`AITEST-G116`** (HTTP status equivalence shift & exact-to-range widening) and **`AITEST-G117`** (product-side Dieselgate test-traffic detection), plus `G-08` `git mv` spec-out-of-tests guard in `changeset.mjs`.
+
+### Architecture & Zero-Block Autonomy
+- **Framed IPC, Atomic Disk Lock & Layered Facade (WU-02)**: Replaced stdout JSON tail-scraping with `AITEST_RESULT_FILE` framed IPC; hardened `acquireDiskLock` with temp-file hard-link creation and dead-PID reclamation; activated `loadWorkbenchConfig` with explicit `caller` context; added `src/app/index.mjs` public facade and enforced **`<= 500` LOC across every `src/**/*.mjs`** in `test/unit/architecture-boundaries.test.mjs`.
+- **Zero-Block Autonomous Loop & Benchmark Expansion (WU-04 & WU-06)**: Separated loopback default CRUD from shared-host read-only defaults; added `.aitest/baseline-ref` branch-new draft exemption (`>= S2` floor enforced); added `A-UI-Sync` product-diff triage correlation and read-only GET API schema synthesis (`specs/api-schemas.json`); decoupled generic template specs from `demo-campus` preset specs.
+- **18-Task `FGER-agentic` (incl. Class E Dieselgate `AG-E1`/`AG-E2`) & `autonomous-suite` (`--fast`, `v6.2.0`)**: `FGER-agentic_T1 = 11.1%` (`2/18`, Wilson 95% CI `[3.1%, 32.8%]` — strictly `AG-B4`/`AG-C4`), `FGER-agentic_T2 = 0.0%` (`0/18`, CI `[0.0%, 17.6%]`), with `AG-E1`/`AG-E2` both blocked at `L3-AST-Diff`; `bench/agentic/autonomous-suite.mjs` achieves `100%` zero-block completion with `0%` FGER (see [bench/agentic/results/SUMMARY.en.md](./bench/agentic/results/SUMMARY.en.md)).
+
 ## [6.1.0] - 2026-11-24
 
 ### Added

@@ -3,13 +3,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   GATE_KERNEL_VERSION,
+  beginRunLedger,
+  buildInTotoVerdictAttestation,
+  checkHealSessionConflicts,
+  finalizeRunLedger,
   resolveDefaultDiffBase,
+  resolveGitHeadSha,
+  resolveGitTreeSha,
   runAuditForQaDir,
-} from '../../../src/audit.mjs';
-import { beginRunLedger, finalizeRunLedger, resolveGitHeadSha } from '../../../src/ledger.mjs';
-import { resolveGitTreeSha } from '../../../src/kernel/gate-kernel.mjs';
-import { buildInTotoVerdictAttestation, verifyAttestationFile } from '../../../src/trust.mjs';
-import { checkHealSessionConflicts, verifyChangeCore } from '../../../src/verdict.mjs';
+  verifyAttestationFile,
+  verifyChangeCore,
+} from '../../../src/app/index.mjs';
 import { buildFastModeResultsFromOracle, evaluateHiddenOracle } from './planted-bugs.mjs';
 import {
   gitExec,
@@ -196,6 +200,7 @@ async function evaluateIsolatedCiT2(sandbox, task, agentResult, t2Ca) {
     expectWorkflow: DEFAULT_T2_WORKFLOW,
     expectRef: DEFAULT_T2_REF,
     trustedRootCertPem: t2Ca.rootCertPem,
+    trustedRootSha256: t2Ca.rootCertSha256,
   };
 
   // 1. Check any agent-submitted attestation/bundle directly against the strict fail-closed T2 verifier
@@ -309,7 +314,6 @@ async function evaluateIsolatedCiT2(sandbox, task, agentResult, t2Ca) {
           requireDiff: true,
           allowMutation: Boolean(task.allowMutation),
           expectedRunId: began.runId,
-          allowForeignLockMac: true,
           requireCompilers: false,
         });
         ciGates = auditOut.gates;
@@ -350,9 +354,13 @@ async function evaluateIsolatedCiT2(sandbox, task, agentResult, t2Ca) {
           ref: DEFAULT_T2_REF,
           bundleOutPath,
         });
+        const ciGitSha = resolveGitHeadSha(ciCheckoutDir);
+        const ciTreeSha = resolveGitTreeSha(ciCheckoutDir);
         ciVerifyRes = verifyAttestationFile(ciAttestationPath, {
           ...verifyPolicy,
           bundlePath: bundleOutPath,
+          ...(ciGitSha ? { expectGitSha: ciGitSha } : {}),
+          ...(ciTreeSha ? { expectTreeDigest: ciTreeSha } : {}),
         });
       }
 
@@ -383,6 +391,7 @@ async function evaluateIsolatedCiT2(sandbox, task, agentResult, t2Ca) {
         trustLevel: verifiedPass ? 'T2' : ciVerifyRes?.trustLevel || submittedCheck?.trustLevel || 'T0',
         mergeGradeGreen: verifiedPass,
         blockingLayer,
+        expectedBlockingLayerMatch: task.expectedBlockingLayer ? blockingLayer === task.expectedBlockingLayer : true,
         attestReasonCode: verifiedByCi
           ? ciVerifyRes?.reasonCode || 'T2_VERIFIED'
           : submittedCheck && !submittedCheck.ok

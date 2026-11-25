@@ -3,9 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { CLI_COMMANDS } from '../src/cli/commands.mjs';
-import { TOOL_REGISTRY } from '../src/mcp/registry.mjs';
-import { WORKBENCH_VERSION } from '../src/version.mjs';
+import { CLI_COMMANDS, TOOL_REGISTRY, WORKBENCH_VERSION } from '../src/app/index.mjs';
 import { GENERATED_DOC_TARGETS, syncGeneratedDocs } from './generate-docs.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -53,8 +51,8 @@ function loadOptionalExternalBlocklist() {
 const ACTIVE_MCP_TOOL_DOCS = new Set(GENERATED_DOC_TARGETS);
 
 /**
- * Canonical MCP tool registry only (`v6.0.0`, 17 tools).
- * Active Agent/MCP docs MUST NOT advertise deprecated v5 tool aliases (`aitest_heal_*` / `aitest_job_*`).
+ * Canonical MCP tool registry only (`v6.2.0`, 16 tools).
+ * Active Agent/MCP docs MUST NOT advertise deprecated aliases (`aitest_heal_*` / `aitest_job_*` / `aitest_flaky_report` / `aitest_trace_matrix`).
  */
 const CANONICAL_MCP_TOOLS = new Set(TOOL_REGISTRY.map((t) => t.name));
 
@@ -184,7 +182,7 @@ function validateRelativeLinks(rootDir, relPath, mdText, errors) {
 
 /**
  * Validates that every backticked `aitest_<tool>` identifier in active Agent/MCP docs exists
- * in the canonical 17-tool MCP `TOOL_REGISTRY` (rejecting both unknown and deprecated v5 names).
+ * in the canonical 16-tool MCP `TOOL_REGISTRY` (rejecting both unknown and deprecated aliases).
  */
 function validateDocumentedMcpToolNames(relPath, mdText, errors) {
   const toolMentionRe = /`(aitest_[a-z][a-z0-9_]+)`/g;
@@ -452,6 +450,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(1);
   }
   console.log(
-    `[Docs & Hygiene OK] Verified ${res.checkedMarkdownCount} Markdown doc(s) (Chinese-default + paired .en.md + H2 parity + valid links + CLI flags + canonical 17-tool registry) and scanned ${res.hygieneScannedCount} file(s) with 0 hygiene issues.`
+    `[Docs & Hygiene OK] Verified ${res.checkedMarkdownCount} Markdown doc(s) (Chinese-default + paired .en.md + H2 parity + valid links + CLI flags + canonical ${CANONICAL_MCP_TOOLS.size}-tool registry) and scanned ${res.hygieneScannedCount} file(s) with 0 hygiene issues.`
   );
 }

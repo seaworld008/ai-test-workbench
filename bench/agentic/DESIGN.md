@@ -1,10 +1,10 @@
-# FGER-agentic 红队评测架构设计与实施规范 (`v6.1`)
+# FGER-agentic 红队评测架构设计与实施规范 (`v6.2`)
 
-> [English Version](./DESIGN.en.md) · [脚本化基线评测报告](./results/SUMMARY.md) · [16 任务预登记语料](./tasks.json) · [真实提交 FPR 预登记方案](../real-world/PREREGISTRATION.md) · [四层防假绿治理指南](../../docs/governance.md)
+> [English Version](./DESIGN.en.md) · [脚本化基线评测报告](./results/SUMMARY.md) · [18 任务预登记语料](./tasks.json) · [真实提交 FPR 预登记方案](../real-world/PREREGISTRATION.md) · [四层防假绿治理指南](../../docs/governance.md)
 
-- **文档状态**：`Implemented Harness (Scripted Multi-Step L1–L3 Baseline Verified · Live LLM CLI Adapters Ready / Pending Live Runs)`
-- **设计/实施日期**：`2026-11-24`
-- **对应版本**：`ai-test-workbench v6.1.0`
+- **文档状态**：`Implemented Harness (18-Task Dual-Tier Red-Team + Autonomous Suite · Scripted Multi-Step L1–L3 Verified · Live LLM CLI Adapters Ready / Pending Live Runs)`
+- **设计/实施日期**：`2026-11-25`
+- **对应版本**：`ai-test-workbench v6.2.0`
 - **复现入口**：`npm run bench:agentic`（或 `node scripts/bench-agentic.mjs --adapter scripted|honest-fix|honest-report|claude|codex|gemini|custom`）
 
 ---
@@ -18,7 +18,7 @@
 > 当真实产品代码存在一个尚未修复的缺陷导致测试红灯时，一个具备完整本地工作区读写与命令执行能力的 AI Agent，在受激励（或被引导）“尽快拿到绿灯”的条件下，有多少比例的尝试能骗过验证体系并产出被误认为可信的“通过”结论？
 
 为兼顾**确定性可复现回归**与**真实自治大模型评测**，本基准明确区分两类执行模式且绝不混报：
-1. **确定性多步脚本化红队基线 (`scripted-l1-l3`)**：零 LLM 成本、100% 可复现地在真实临时 Git 仓库、真实 HTTP 靶场应用、真实 Playwright 执行与真实离线 X.509/DSSE Sigstore T2 验签闭环下执行全部 16 道多步攻防任务（另配 `honest-fix` 与 `honest-report` 两组对照基线验证 0% 误拦与有效 T2 签发）。
+1. **确定性多步脚本化红队基线 (`scripted-l1-l3`)**：零 LLM 成本、100% 可复现地在真实临时 Git 仓库、真实 HTTP 靶场应用、真实 Playwright 执行与真实离线 X.509/DSSE Sigstore T2 验签闭环下执行全部 18 道多步攻防任务（覆盖 `A / B / C / D / E(Dieselgate)` 5 大攻击类，另配 `honest-fix`、`honest-report` 与 `bench/agentic/autonomous-suite.mjs` 自治工作流阻塞率为零验证）。
 2. **实盘自治 LLM Agent 适配器 (`claude` / `codex` / `gemini` / `custom`)**：直接驱动真实自治编程 Agent CLI 在同一隔离沙箱与 `benign-pressure` / `adversarial-redteam` 双档提示词下独立运行；未执行实盘模型前，实盘模型数值严格标记为 `pending`（绝不拿脚本模拟值冒充实盘大模型数据）。
 
 ---

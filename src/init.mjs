@@ -1,282 +1,34 @@
 // @ts-check
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { syncOfficialAgents } from './agents.mjs';
-import { runNpm, runPlaywright, runProcess } from './core/proc.mjs';
+import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
+import { runNpm, runPlaywright } from './core/proc.mjs';
 import { WORKBENCH_VERSION } from './core/version.mjs';
 import { inspectBrowserCache } from './doctor.mjs';
-import { ensureInitialGovernanceLock } from './governance.mjs';
+import { ensureInitialGovernanceLock, hasWorkspaceGovernanceTrace } from './governance.mjs';
+import {
+  computeProtectedFileHashes,
+  isProtectedDiffPath,
+  openTrustContext,
+  resolveDefaultDiffBase,
+  resolveGitHeadSha,
+} from './kernel/gate-kernel.mjs';
 import { writeTemplateManifest } from './upgrade.mjs';
+import {
+  DEMO_PRESET_DIR,
+  TEMPLATE_DIR,
+  applyRootMcpBridge,
+  collectFilesRecursive,
+  detectProjectStack,
+  inspectGitStatus,
+  inspectHostIsolation,
+  mergeGitignoreContent,
+  renderContent,
+} from './init/planner.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const WORKBENCH_ROOT = path.resolve(__dirname, '..');
-const TEMPLATE_DIR = path.join(WORKBENCH_ROOT, 'templates', 'playwright-qa');
-const DEMO_PRESET_DIR = path.join(WORKBENCH_ROOT, 'examples', 'demo-webapp', 'qa-preset');
-
-const SKIP_COPY_NAMES = new Set([
-  'node_modules',
-  'playwright-report',
-  'test-results',
-  'reports',
-  '.aitest',
-  '.env',
-  '.gitignore',
-]);
-
-/**
- * @param {string} repoDir
- * @returns {string[]}
- */
-export function detectProjectStack(repoDir) {
-  const stacks = [];
-  const pkgPath = path.join(repoDir, 'package.json');
-  if (fs.existsSync(pkgPath)) {
-    try {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-      const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
-      if (deps.next) stacks.push('Next.js');
-      else if (deps.nuxt) stacks.push('Nuxt');
-      else if (deps.vue) stacks.push('Vue/H5');
-      else if (deps.react) stacks.push('React');
-      else stacks.push('Node.js');
-      if (deps.vitest) stacks.push('Vitest');
-      if (deps.jest) stacks.push('Jest');
-    } catch {
-      stacks.push('Node.js');
-    }
-  }
-  if (
-    fs.existsSync(path.join(repoDir, 'pom.xml')) ||
-    fs.existsSync(path.join(repoDir, 'build.gradle')) ||
-    fs.existsSync(path.join(repoDir, 'build.gradle.kts'))
-  ) {
-    stacks.push('Java/Spring');
-  }
-  if (fs.existsSync(path.join(repoDir, 'composer.json')) || fs.existsSync(path.join(repoDir, 'think'))) {
-    stacks.push('PHP/ThinkPHP');
-  }
-  if (fs.existsSync(path.join(repoDir, 'go.mod'))) stacks.push('Go');
-  if (fs.existsSync(path.join(repoDir, 'pyproject.toml')) || fs.existsSync(path.join(repoDir, 'requirements.txt'))) {
-    stacks.push('Python');
-  }
-  return stacks.length > 0 ? stacks : ['Generic Web'];
-}
-
-/**
- * Checks whether the host repository's root TypeScript/ESLint/Vitest/Jest configurations
- * would accidentally pick up `<repo>/<qaFolderName>/**` files and advises isolation excludes.
- * @param {string} repoDir
- * @param {string} [qaFolderName]
- * @returns {string[]}
- */
-export function inspectHostIsolation(repoDir, qaFolderName = 'qa') {
-  const advisories = [];
-  const tsconfigPath = path.join(repoDir, 'tsconfig.json');
-  if (fs.existsSync(tsconfigPath)) {
-    try {
-      const raw = fs.readFileSync(tsconfigPath, 'utf8');
-      const parsed = JSON.parse(raw);
-      const includesAllTs =
-        Array.isArray(parsed.include) &&
-        parsed.include.some((/** @type {string} */ p) => p === '**/*.ts' || p === '**/*.tsx');
-      const excludesQa =
-        Array.isArray(parsed.exclude) &&
-        parsed.exclude.some(
-          (/** @type {string} */ p) =>
-            p === qaFolderName || p.startsWith(`${qaFolderName}/`) || p.startsWith(`./${qaFolderName}`)
-        );
-      if (includesAllTs && !excludesQa) {
-        advisories.push(
-          `Host tsconfig.json matches "**/*.ts" without excluding "${qaFolderName}/"; add "${qaFolderName}" to root tsconfig exclude if host typecheck scans it.`
-        );
-      }
-    } catch {
-      // ignore non-JSON tsconfig with comments
-    }
-  }
-
-  for (const eslintName of ['eslint.config.mjs', 'eslint.config.js', 'eslint.config.ts']) {
-    const p = path.join(repoDir, eslintName);
-    if (fs.existsSync(p)) {
-      const raw = fs.readFileSync(p, 'utf8');
-      if (!raw.includes(`${qaFolderName}/`) && !raw.includes(`"${qaFolderName}"`) && !raw.includes(`'${qaFolderName}'`)) {
-        advisories.push(
-          `Host ${eslintName} does not mention "${qaFolderName}/" in ignores; verify root lint ignores "${qaFolderName}/**" so Playwright specs use ${qaFolderName}/eslint.config.mjs.`
-        );
-      }
-      break;
-    }
-  }
-
-  return advisories;
-}
-
-/**
- * @param {string} repoDir
- * @returns {Promise<{ isGit: boolean, dirtyFiles: string[] }>}
- */
-async function inspectGitStatus(repoDir) {
-  if (!fs.existsSync(path.join(repoDir, '.git'))) {
-    return { isGit: false, dirtyFiles: [] };
-  }
-  try {
-    const res = await runProcess('git', ['status', '--porcelain'], { cwd: repoDir, timeoutMs: 5000 });
-    if (res.code !== 0) return { isGit: true, dirtyFiles: [] };
-    const dirtyFiles = res.stdout
-      .split(/\r?\n/)
-      .map((l) => l.trimEnd())
-      .filter(Boolean);
-    return { isGit: true, dirtyFiles };
-  } catch {
-    return { isGit: true, dirtyFiles: [] };
-  }
-}
-
-/**
- * @param {string} dir
- * @param {string} [base]
- * @param {{ mapGitignore?: boolean }} [options]
- * @returns {Array<{ src: string, srcRel: string, rel: string }>}
- */
-function collectFilesRecursive(dir, base = dir, { mapGitignore = false } = {}) {
-  /** @type {Array<{ src: string, srcRel: string, rel: string }>} */
-  const entries = [];
-  if (!fs.existsSync(dir)) return entries;
-  for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (SKIP_COPY_NAMES.has(item.name)) continue;
-    const full = path.join(dir, item.name);
-    const srcRel = path.relative(base, full).replace(/\\/g, '/');
-    if (item.isDirectory()) {
-      entries.push(...collectFilesRecursive(full, base, { mapGitignore }));
-    } else if (item.isFile()) {
-      const destRel = mapGitignore && srcRel === 'gitignore' ? '.gitignore' : srcRel;
-      entries.push({ src: full, srcRel, rel: destRel });
-    }
-  }
-  return entries;
-}
-
-/**
- * @param {string} existing
- * @param {string} templateContent
- * @returns {{ changed: boolean, content: string }}
- */
-function mergeGitignoreContent(existing, templateContent) {
-  const existingLines = new Set(existing.split(/\r?\n/).map((l) => l.trim()));
-  const additions = templateContent
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith('#') && !existingLines.has(l));
-  if (additions.length === 0) return { changed: false, content: existing };
-  return {
-    changed: true,
-    content: `${existing.trimEnd()}\n\n# Added by ai-test-workbench\n${additions.join('\n')}\n`,
-  };
-}
-
-/**
- * @param {string} projectName
- * @returns {string}
- */
-function toSafePackageName(projectName) {
-  const slug = String(projectName || 'project')
-    .toLowerCase()
-    .replace(/[^a-z0-9-_]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return `${slug || 'project'}-qa`;
-}
-
-/**
- * @param {string} raw
- * @param {string} projectName
- * @param {string} relPath
- * @param {string} [preset]
- * @returns {string}
- */
-function renderContent(raw, projectName, relPath, preset = 'generic') {
-  const pkgName = toSafePackageName(projectName);
-
-  if (relPath === 'package.json') {
-    try {
-      const parsed = JSON.parse(raw);
-      parsed.name = pkgName;
-      return JSON.stringify(parsed, null, 2) + '\n';
-    } catch {
-      return raw.replace('"ai-test-workbench-qa"', `"${pkgName}"`);
-    }
-  }
-
-  if (relPath === 'package-lock.json') {
-    try {
-      const parsed = JSON.parse(raw);
-      parsed.name = pkgName;
-      if (parsed.packages && parsed.packages['']) {
-        parsed.packages[''].name = pkgName;
-      }
-      return JSON.stringify(parsed, null, 2) + '\n';
-    } catch {
-      return raw;
-    }
-  }
-
-  let out = raw.replaceAll('__PROJECT_NAME__', projectName);
-  if (preset === 'demo-campus' && relPath === '.env.example') {
-    out = out
-      .replace('E2E_USERNAME=', 'E2E_USERNAME=student_qa_0')
-      .replace('E2E_PASSWORD=', 'E2E_PASSWORD=qa-pass-123');
-  }
-  return out;
-}
-
-/**
- * @param {string} targetRoot
- * @param {string} qaFolderName
- * @param {{ dryRun?: boolean, force?: boolean }} [options]
- * @returns {{ status: string, file: string, sidecar?: string }}
- */
-function applyRootMcpBridge(targetRoot, qaFolderName, { dryRun = false, force = false } = {}) {
-  const rootMcpPath = path.join(targetRoot, '.mcp.json');
-  const cliRel = `${qaFolderName}/node_modules/@playwright/test/cli.js`;
-  const cfgRel = `${qaFolderName}/playwright.config.ts`;
-  const bridgeServer = {
-    command: 'node',
-    args: [cliRel, 'run-test-mcp-server', '--config', cfgRel],
-  };
-
-  if (!fs.existsSync(rootMcpPath)) {
-    const content = JSON.stringify({ mcpServers: { 'playwright-test': bridgeServer } }, null, 2) + '\n';
-    if (!dryRun) {
-      fs.writeFileSync(rootMcpPath, content, 'utf8');
-    }
-    return { status: 'CREATED', file: '.mcp.json' };
-  }
-
-  try {
-    const existing = JSON.parse(fs.readFileSync(rootMcpPath, 'utf8'));
-    existing.mcpServers = existing.mcpServers || {};
-    if (
-      existing.mcpServers['playwright-test'] &&
-      JSON.stringify(existing.mcpServers['playwright-test']) !== JSON.stringify(bridgeServer) &&
-      !force
-    ) {
-      const sidecar = `${rootMcpPath}.aitest-new`;
-      const incoming = { ...existing, mcpServers: { ...existing.mcpServers, 'playwright-test': bridgeServer } };
-      if (!dryRun) {
-        fs.writeFileSync(sidecar, JSON.stringify(incoming, null, 2) + '\n', 'utf8');
-      }
-      return { status: 'CONFLICT', file: '.mcp.json', sidecar: '.mcp.json.aitest-new' };
-    }
-    existing.mcpServers['playwright-test'] = bridgeServer;
-    if (!dryRun) {
-      fs.writeFileSync(rootMcpPath, JSON.stringify(existing, null, 2) + '\n', 'utf8');
-    }
-    return { status: 'MERGED', file: '.mcp.json' };
-  } catch {
-    return { status: 'CONFLICT_INVALID_JSON', file: '.mcp.json' };
-  }
-}
+export { detectProjectStack, inspectHostIsolation };
 
 /**
  * @param {{
@@ -304,12 +56,20 @@ export async function runInit(options = {}) {
    * @returns {number}
    */
   const emitJsonError = (exitCode, message) => {
-    if (asJson) {
-      console.log(JSON.stringify({ ok: false, exitCode, error: message }, null, 2));
-    } else {
+    if (!asJson) {
       console.error(message);
     }
-    return exitCode;
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'init',
+        outcome: exitCode === 2 ? 'blocked' : 'fail',
+        ok: false,
+        exitCode,
+        summary: message,
+        data: { error: message },
+      }),
+      { asJson }
+    );
   };
   const target = options.target ? path.resolve(options.target) : null;
   if (!target) {
@@ -391,11 +151,15 @@ export async function runInit(options = {}) {
     }
   }
 
-  const templateFiles = collectFilesRecursive(TEMPLATE_DIR, TEMPLATE_DIR, { mapGitignore: true });
+  const templateByRel = new Map(
+    collectFilesRecursive(TEMPLATE_DIR, TEMPLATE_DIR, { mapGitignore: true }).map((item) => [item.rel, item])
+  );
   if (preset === 'demo-campus' && fs.existsSync(DEMO_PRESET_DIR)) {
-    const presetFiles = collectFilesRecursive(DEMO_PRESET_DIR, DEMO_PRESET_DIR);
-    templateFiles.push(...presetFiles);
+    for (const presetItem of collectFilesRecursive(DEMO_PRESET_DIR, DEMO_PRESET_DIR)) {
+      templateByRel.set(presetItem.rel, presetItem);
+    }
   }
+  const templateFiles = [...templateByRel.values()];
 
   const plan = [];
 
@@ -405,7 +169,7 @@ export async function runInit(options = {}) {
     const rendered = renderContent(raw, projectName, item.rel, preset);
 
     if (!fs.existsSync(dest)) {
-      plan.push({ action: 'CREATE', rel: item.rel, dest, content: rendered });
+      plan.push({ action: 'CREATE', rel: item.rel, dest, content: rendered, factoryContent: rendered });
     } else if (item.rel === '.gitignore') {
       const existing = fs.readFileSync(dest, 'utf8');
       const merged = mergeGitignoreContent(existing, rendered);
@@ -414,6 +178,7 @@ export async function runInit(options = {}) {
         rel: item.rel,
         dest,
         content: merged.content,
+        factoryContent: rendered,
       });
     } else {
       const existing = fs.readFileSync(dest, 'utf8');
@@ -422,6 +187,7 @@ export async function runInit(options = {}) {
         rel: item.rel,
         dest,
         content: existing,
+        factoryContent: rendered,
       });
     }
   }
@@ -441,32 +207,33 @@ export async function runInit(options = {}) {
   }
 
   if (dryRun) {
-    if (asJson) {
-      console.log(
-        JSON.stringify(
-          {
-            ok: true,
-            exitCode: 0,
-            dryRun: true,
-            projectName,
-            target,
-            qaDir,
-            preset,
-            stacks,
-            hostAdvisories,
-            bridgeRoot: bridgePreview,
-            plan: plan.map((s) => ({ action: s.action, file: s.rel })),
-          },
-          null,
-          2
-        )
-      );
-    } else {
+    const dryPayload = {
+      dryRun: true,
+      projectName,
+      target,
+      qaDir,
+      preset,
+      stacks,
+      hostAdvisories,
+      bridgeRoot: bridgePreview,
+      plan: plan.map((s) => ({ action: s.action, file: s.rel })),
+    };
+    if (!asJson) {
       console.log(
         `\n[DRY-RUN] ${lang === 'zh' ? '未写入磁盘。正式执行请去掉 --dry-run。' : 'No files written. Re-run without --dry-run to apply.'}`
       );
     }
-    return 0;
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'init',
+        outcome: 'pass',
+        ok: true,
+        exitCode: 0,
+        summary: `Dry-run init planned ${plan.length} file(s) in ${qaDir}`,
+        data: dryPayload,
+      }),
+      { asJson }
+    );
   }
 
   fs.mkdirSync(qaDir, { recursive: true });
@@ -477,11 +244,57 @@ export async function runInit(options = {}) {
     }
   }
 
-  // Record per-file template SHA-256 manifest for safe 3-way `aitw upgrade` & accurate `doctor` drift checks
-  writeTemplateManifest(qaDir, plan.map((s) => s.rel));
+  // Compute pristine factory protected file hashes BEFORE creating/verifying initial lock (`WU-01`)
+  /** @type {Record<string, string>} */
+  const factoryProtectedHashes = {};
+  for (const step of plan) {
+    if (isProtectedDiffPath(step.rel)) {
+      const normalized = String(step.factoryContent || '').replace(/\r\n/g, '\n');
+      factoryProtectedHashes[step.rel] = `sha256:${crypto.createHash('sha256').update(normalized, 'utf8').digest('hex')}`;
+    }
+  }
 
-  // Create initial .aitest/governance.lock ONLY if not already present (never overwrites existing human lock!)
-  ensureInitialGovernanceLock(qaDir);
+  // Record per-file template SHA-256 manifest only if lock is absent cleanly (no history, factory-intact)
+  const existingLockPath = path.join(qaDir, '.aitest', 'governance.lock');
+  const trustContext = openTrustContext({ qaDir, repoDir: target, createKeyIfMissing: true });
+  if (!fs.existsSync(existingLockPath)) {
+    if (hasWorkspaceGovernanceTrace(qaDir)) {
+      return emitJsonError(
+        2,
+        '[Governance Tamper Blocked] Refusing to auto-issue aitest-init governance.lock in a workspace with prior governance/run/heal history. A human must run "governance approve".'
+      );
+    }
+    const currentHashes = computeProtectedFileHashes(qaDir);
+    const mismatched = Object.keys(currentHashes).filter((rel) => currentHashes[rel] !== factoryProtectedHashes[rel]);
+    if (mismatched.length > 0) {
+      return emitJsonError(
+        2,
+        `[Governance Tamper Blocked] Protected file(s) [${mismatched.sort().join(', ')}] do not match factory template hashes; refusing aitest-init lock auto-signing.`
+      );
+    }
+    writeTemplateManifest(qaDir, plan.map((s) => s.rel));
+    const initLock = ensureInitialGovernanceLock(qaDir, { trustContext, factoryProtectedHashes });
+    if (initLock.blocked) {
+      return emitJsonError(2, initLock.error || '[Governance Tamper Blocked] Failed to seal initial governance lock.');
+    }
+  } else {
+    writeTemplateManifest(qaDir, plan.map((s) => s.rel));
+  }
+
+  // Record `.aitest/baseline-ref` when inside a Git repository so newly added branch specs are never self-locked (`WU-04`)
+  const baselineRefPath = path.join(qaDir, '.aitest', 'baseline-ref');
+  if (gitInfo.isGit && !fs.existsSync(baselineRefPath)) {
+    const baseInfo = resolveDefaultDiffBase(target);
+    const baselineSha = baseInfo.sha || resolveGitHeadSha(target);
+    if (baselineSha && baselineSha !== 'nogit') {
+      fs.mkdirSync(path.dirname(baselineRefPath), { recursive: true });
+      fs.writeFileSync(
+        baselineRefPath,
+        JSON.stringify({ schemaVersion: 1, baselineRef: baselineSha, strategy: baseInfo.strategy, recordedAt: new Date().toISOString() }, null, 2) + '\n',
+        'utf8'
+      );
+    }
+  }
 
   if (bridgeRoot) {
     applyRootMcpBridge(target, qaFolderName, { dryRun: false, force });
@@ -545,32 +358,31 @@ export async function runInit(options = {}) {
     }
   }
 
-  if (asJson) {
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          exitCode: 0,
-          dryRun: false,
-          projectName,
-          target,
-          qaDir,
-          preset,
-          stacks,
-          hostAdvisories,
-          bridgeRoot: bridgePreview,
-          plan: plan.map((s) => ({ action: s.action, file: s.rel })),
-          agentsSynced: agentSyncResults,
-        },
-        null,
-        2
-      )
-    );
-    return 0;
+  if (!asJson) {
+    console.log(`\n${lang === 'zh' ? '推荐下一步（默认在 qa/ 目录启动 Agent）' : 'Next steps (start coding agent inside qa/ by default)'}:`);
+    console.log(`  1) npx ai-test-workbench@${WORKBENCH_VERSION} run --target "${target}" --suite smoke --audit`);
+    console.log(`  2) cd "${qaDir}" && codex`);
   }
-
-  console.log(`\n${lang === 'zh' ? '推荐下一步（默认在 qa/ 目录启动 Agent）' : 'Next steps (start coding agent inside qa/ by default)'}:`);
-  console.log(`  1) npx ai-test-workbench@${WORKBENCH_VERSION} run --target "${target}" --suite smoke --audit`);
-  console.log(`  2) cd "${qaDir}" && codex`);
-  return 0;
+  return emitCommandResult(
+    buildCommandResult({
+      tool: 'init',
+      outcome: 'pass',
+      ok: true,
+      exitCode: 0,
+      summary: `Initialized QA workspace (${qaDir}, preset=${preset}, ${plan.length} file(s))`,
+      data: {
+        dryRun: false,
+        projectName,
+        target,
+        qaDir,
+        preset,
+        stacks,
+        hostAdvisories,
+        bridgeRoot: bridgePreview,
+        plan: plan.map((s) => ({ action: s.action, file: s.rel })),
+        agentsSynced: agentSyncResults,
+      },
+    }),
+    { asJson }
+  );
 }

@@ -8,8 +8,13 @@ import {
   runAuditForQaDir,
   verifyGovernanceLockInQaDir,
 } from './audit.mjs';
+import { loadWorkbenchConfig } from './core/config.mjs';
+import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
+import { loadRuntimeConfig } from './core/runtime-config.mjs';
+import { SCHEMA_VERSIONS, WORKBENCH_VERSION } from './core/version.mjs';
 import { generateDiagnosticsMarkdown } from './diagnose.mjs';
 import { computeImpact } from './impact.mjs';
+import { openTrustContext, resolveGitTreeSha } from './kernel/gate-kernel.mjs';
 import { resolveGitHeadSha } from './ledger.mjs';
 import { evaluateTargetSafety, loadMergedQaEnv } from './origin-guard.mjs';
 import { resolvePlaywrightCli } from './proc.mjs';
@@ -18,223 +23,13 @@ import { buildRequirementTraceMatrix } from './traceability.mjs';
 import {
   TRUST_LEVEL_DEFINITIONS,
   buildInTotoVerdictAttestation,
-  describeTrustLevel,
   resolveVerdictTrustTier,
   tryCosignKeylessSign,
 } from './trust.mjs';
-import { SCHEMA_VERSIONS, WORKBENCH_VERSION } from './core/version.mjs';
-import {
-  listChangedFilesUnderDir,
-  resolveGitTreeSha,
-  resolveT1HmacKey,
-  verifyPayloadT1,
-} from './kernel/gate-kernel.mjs';
+import { buildBlockedVerdict } from './verdict/blocked.mjs';
+import { buildPrVerdictMarkdown, buildSarifReport, checkHealSessionConflicts } from './verdict/reports.mjs';
 
-/**
- * @param {Record<string, any>} verdictObj
- */
-export function buildSarifReport(verdictObj) {
-  const results = [];
-  for (const errMsg of verdictObj.gateErrors || []) {
-    const codeMatch = /\[(AITEST-G\d+|Governance Tamper Blocked|Stale Results Blocked|Run Ledger Blocked|Heal Governance Blocked|Static Check)\]/.exec(
-      errMsg
-    );
-    results.push({
-      ruleId: codeMatch ? codeMatch[1].replace(/\s+/g, '-') : 'AITEST-GATE-FAILURE',
-      level: 'error',
-      message: { text: errMsg },
-    });
-  }
-  for (const f of verdictObj.failures || []) {
-    results.push({
-      ruleId: `AITEST-TEST-CLASS-${f.categoryCode || 'U'}`,
-      level: 'error',
-      message: { text: `[${f.category}] ${f.title}: ${f.errorSnippet || ''}`.slice(0, 500) },
-      locations: [
-        {
-          physicalLocation: {
-            artifactLocation: { uri: f.file },
-            region: { startLine: Math.max(1, Number(f.line || 1)) },
-          },
-        },
-      ],
-    });
-  }
-
-  const trustLevel = verdictObj.trustLevel || verdictObj.trustTier || 'T0';
-  const trustDef =
-    trustLevel === 'T2'
-      ? TRUST_LEVEL_DEFINITIONS.T2
-      : trustLevel === 'T1'
-        ? TRUST_LEVEL_DEFINITIONS.T1
-        : TRUST_LEVEL_DEFINITIONS.T0;
-
-  return {
-    $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
-    version: '2.1.0',
-    runs: [
-      {
-        tool: {
-          driver: {
-            name: 'ai-test-workbench',
-            version: WORKBENCH_VERSION,
-            informationUri: 'https://github.com/seaworld008/ai-test-workbench',
-          },
-        },
-        properties: {
-          verdict: verdictObj.verdict,
-          trustLevel,
-          mergeGradeGreen: trustDef.mergeGradeGreen && verdictObj.verdict === 'pass',
-          trustLevelDefinition: {
-            zh: trustDef.zh,
-            en: trustDef.en,
-          },
-          acceptanceScope: verdictObj.acceptanceScope,
-          runId: verdictObj.runId || null,
-        },
-        results,
-      },
-    ],
-  };
-}
-
-/**
- * @param {Record<string, any>} verdict
- * @param {'zh' | 'en' | string} [lang]
- * @returns {string}
- */
-export function buildPrVerdictMarkdown(verdict, lang = 'zh') {
-  const isZh = lang === 'zh';
-  const badge =
-    verdict.verdict === 'pass'
-      ? 'PASS'
-      : verdict.verdict === 'blocked'
-        ? 'BLOCKED'
-        : 'FAIL';
-  const trustLevel = verdict.trustLevel || verdict.trustTier || 'T0';
-  const trustLabel = describeTrustLevel(trustLevel, isZh ? 'zh' : 'en');
-  const scopeLabel =
-    verdict.acceptanceScope === 'business-e2e'
-      ? isZh
-        ? '真实业务 E2E 验收'
-        : 'Business E2E Verified'
-      : isZh
-        ? '本机工作台离线验收（非远端业务 E2E）'
-        : 'Local Workbench Verified (Offline Smoke Only)';
-
-  const lines = [
-    isZh
-      ? `## AI Test Workbench 变更验证判决：**${badge}**（\`${trustLevel}\`）`
-      : `## AI Test Workbench Change Verdict: **${badge}** (\`${trustLevel}\`)`,
-    '',
-    `- **Trust Level**: **${trustLabel}**`,
-    `- **合入级绿灯 (` + 'mergeGradeGreen' + `)**: \`${trustLevel === 'T2' && verdict.verdict === 'pass'}\`（${isZh ? '仅 T2 可作为合入级绿灯' : 'Only T2 is a merge-grade green'}）`,
-    `- **Run ID**: \`${verdict.runId || 'none'}\` · **Git SHA**: \`${verdict.gitSha}\` · **Diff Base**: \`${verdict.base?.resolved || 'none'}\` (${verdict.base?.strategy || 'unknown'})`,
-    `- **验收口径 (` + 'acceptanceScope' + `)**: **${scopeLabel}** (\`${verdict.acceptanceScope}\`)`,
-    `- **测试范围**: requested=\`${verdict.scope.requested}\`, actual=\`${verdict.scope.actual}\`${verdict.scope.downgraded ? ' **(DOWNGRADED -> T0)**' : ''}, executed=\`${verdict.counts?.executed ?? 0}\` (passed=\`${verdict.counts?.passed ?? 0}\`, failed=\`${verdict.counts?.failed ?? 0}\`, flaky=\`${verdict.counts?.flaky ?? 0}\`)`,
-    `- **四层门禁**: governance=\`${verdict.gates.governance}\` · static=\`${verdict.gates.static}\` · runtime=\`${verdict.gates.runtime}\` · semanticDiff=\`${verdict.gates.semanticDiff}\``,
-    `- **需求追溯**: \`${verdict.traceability.coveredRequirements}/${verdict.traceability.totalRequirements}\` (${verdict.traceability.coveragePct}%)`,
-    `- **AI-BOM**: llmCalls=\`${verdict.ai?.llmCalls ?? 0}\``,
-    '',
-  ];
-
-  if (verdict.failures.length > 0) {
-    lines.push(isZh ? '### 失败定责与根因证据' : '### Failure Triage & Trace Evidence');
-    for (const f of verdict.failures) {
-      lines.push(
-        `- **[${f.categoryCode}]** \`${f.file}:${f.line}\` — ${f.title} (traceId=\`${f.traceId || 'n/a'}\`, confidence=\`${f.confidence}\`)`
-      );
-    }
-    lines.push('');
-  }
-
-  if (verdict.gateErrors.length > 0) {
-    lines.push(isZh ? '### 门禁拦截明细' : '### Quality Gate Violations');
-    for (const e of verdict.gateErrors) lines.push(`- ${e}`);
-    lines.push('');
-  }
-
-  return lines.join('\n');
-}
-
-/**
- * Canonicalizes a filesystem path via `realpathSync.native` so Windows 8.3 short paths (`RUNNER~1`)
- * and macOS `/var` symlinks match `git rev-parse --show-toplevel` output cleanly.
- * @param {string} p
- * @returns {string}
- */
-function canonicalizeFsPath(p) {
-  const resolved = path.resolve(p);
-  try {
-    return typeof fs.realpathSync.native === 'function' ? fs.realpathSync.native(resolved) : fs.realpathSync(resolved);
-  } catch {
-    return resolved;
-  }
-}
-
-/**
- * Checks `.aitest/heals/*.json` against modified specs in the current diff (`T-07`):
- * If an active/unclosed B/C/D heal session exists AND its spec file was edited, block the verdict!
- * Also detects tampered heal session files via T1 HMAC.
- * @param {string} qaDir
- * @param {{ isGitRepo?: boolean, gitRoot?: string | null, resolved?: string | null }} baseResolution
- * @returns {{ ok: boolean, errors: string[] }}
- */
-export function checkHealSessionConflicts(qaDir, baseResolution) {
-  const healsDir = path.join(qaDir, '.aitest', 'heals');
-  if (!fs.existsSync(healsDir)) return { ok: true, errors: [] };
-
-  /** @type {string[]} */
-  const errors = [];
-  /** @type {Set<string>} */
-  const changedInsideQa = new Set();
-
-  if (baseResolution.isGitRepo && baseResolution.gitRoot && baseResolution.resolved) {
-    const realQaDir = canonicalizeFsPath(qaDir);
-    const realGitRoot = canonicalizeFsPath(baseResolution.gitRoot);
-    const ch = listChangedFilesUnderDir(realGitRoot, baseResolution.resolved, realQaDir);
-    if (ch.ok) {
-      for (const item of ch.changed) {
-        const rel = path.relative(realQaDir, path.join(realGitRoot, item.path)).replace(/\\/g, '/');
-        changedInsideQa.add(rel);
-      }
-      for (const u of ch.untracked) {
-        const rel = path.relative(realQaDir, path.join(realGitRoot, u)).replace(/\\/g, '/');
-        changedInsideQa.add(rel);
-      }
-    }
-  }
-
-  for (const name of fs.readdirSync(healsDir)) {
-    if (!name.endsWith('.json') || name === 'ledger.json') continue;
-    const full = path.join(healsDir, name);
-    try {
-      const session = JSON.parse(fs.readFileSync(full, 'utf8'));
-      const macCheck = verifyPayloadT1('heal.session', session, session.mac, {
-        qaDir,
-        repoDir: path.dirname(qaDir),
-        requireMac: Boolean(session.mac),
-      });
-      if (!macCheck.ok) {
-        errors.push(`[Heal Governance Blocked] Tampered heal session "${session.sessionId || name}": ${macCheck.reason}`);
-        continue;
-      }
-
-      const isNonA = session.categoryCode && session.categoryCode !== 'A';
-      const isOpen = session.state !== 'concluded' && session.state !== 'verified';
-      const specFile = String(session.specFile || '').replace(/\\/g, '/');
-      if (isNonA && isOpen && specFile && changedInsideQa.has(specFile)) {
-        errors.push(
-          `[Heal Governance Blocked] Spec "${specFile}" was modified while non-repairable Class-${session.categoryCode} heal session "${session.sessionId}" is open. Revert spec edit and conclude as defect/escalation.`
-        );
-      }
-    } catch {
-      errors.push(`[Heal Governance Blocked] Corrupted heal session file "${name}".`);
-    }
-  }
-
-  return { ok: errors.length === 0, errors };
-}
+export { buildPrVerdictMarkdown, buildSarifReport, checkHealSessionConflicts };
 
 /**
  * One-Call Agent Change Verification Orchestrator (`T-04`, `T-05`, `T-07`, `I-09`).
@@ -264,121 +59,130 @@ export async function verifyChangeCore(options = {}) {
       : rawMode
     : 'impact';
 
+  const workbenchConfig = loadWorkbenchConfig({ qaDir, repoDir });
+
   // Step 0: Resolve real Git root (monorepo/worktree aware) & safe diff base (`T-05`)
   const baseResolution = resolveDefaultDiffBase(repoDir, options.base || null);
 
   // Step 1: Pre-flight Layer 0 Governance Lock Integrity (Fail-Closed!)
-  const hadT1KeyBeforeRun = resolveT1HmacKey({ createIfMissing: false, qaDir, repoDir }).ok;
-  const govPre = verifyGovernanceLockInQaDir(qaDir);
+  const preTrustContext = openTrustContext({ qaDir, repoDir, createKeyIfMissing: false });
+  const govPre = verifyGovernanceLockInQaDir(qaDir, { trustContext: preTrustContext });
   if (!govPre.ok) {
-    return {
-      schemaVersion: SCHEMA_VERSIONS.verdict,
-      ok: false,
-      exitCode: 2,
-      verdict: 'blocked',
-      trustTier: 'T0',
-      confidence: { level: 'high', reasons: ['governance-tamper-detected'] },
-      runId: null,
+    return buildBlockedVerdict({
+      reasonCode: 'governance-tamper-detected',
       gitSha: resolveGitHeadSha(repoDir),
       base: baseResolution,
-      acceptanceScope: 'local-workbench',
-      scope: { requested: requestedMode, actual: 'none', downgraded: true, mode: requestedMode, selected: 0, total: 0, why: [] },
+      requestedMode,
       gates: { governance: govPre.status || 'blocked', static: 'skipped', runtime: 'skipped', semanticDiff: 'skipped' },
       gateErrors: govPre.errors,
-      failures: [],
-      ai: { llmCalls: 0, models: [], promptHashes: [] },
       nextActions: [{ action: 'human-cli', command: `npx ai-test-workbench@${WORKBENCH_VERSION} governance approve --target <repo> --by <human> --reason <why>` }],
-    };
+    });
   }
 
   // Step 1b: Fail-closed if Git diff base cannot be resolved (unless explicit CLI-only allowNonGit for T0 advisory)
-  const allowNonGit = process.env.AITEST_MCP_CHILD !== '1' && Boolean(options.allowNonGit);
+  const allowNonGit = workbenchConfig.caller !== 'mcp-child' && Boolean(options.allowNonGit);
   if ((!baseResolution.isGitRepo || !baseResolution.resolved) && !allowNonGit) {
-    return {
-      schemaVersion: SCHEMA_VERSIONS.verdict,
-      ok: false,
-      exitCode: 2,
-      verdict: 'blocked',
-      trustTier: 'T0',
-      confidence: { level: 'high', reasons: ['semantic-diff-base-unresolved'] },
-      runId: null,
+    return buildBlockedVerdict({
+      reasonCode: 'semantic-diff-base-unresolved',
       gitSha: resolveGitHeadSha(repoDir),
       base: baseResolution,
-      acceptanceScope: 'local-workbench',
-      scope: { requested: requestedMode, actual: 'none', downgraded: true, mode: requestedMode, selected: 0, total: 0, why: [] },
+      requestedMode,
       gates: { governance: govPre.status || 'pass', static: 'skipped', runtime: 'skipped', semanticDiff: 'blocked' },
       gateErrors: [
         `[Verify Change Blocked] ${baseResolution.error || 'Unable to resolve Git diff base for Layer 3 Semantic AST Guard.'} Initialize Git or specify a valid --base commit.`,
       ],
-      failures: [],
-      ai: { llmCalls: 0, models: [], promptHashes: [] },
       nextActions: [{ action: 'git-check', command: 'git status && git rev-parse --show-toplevel' }],
-    };
+    });
   }
 
-  // Step 2: Target Safety & Scope Resolution
+  // Step 2: Target Safety & Scope Resolution (`WU-04`: honor aitest.runtime.json & forbid silent offline downgrade)
+  const runtimeCfgRes = loadRuntimeConfig(qaDir);
   /** @type {Record<string, string>} */
   const overrides = {};
-  if (options.baseUrl) overrides.TEST_BASE_URL = options.baseUrl;
+  if (options.baseUrl) {
+    overrides.TEST_BASE_URL = options.baseUrl;
+  } else if (!process.env.TEST_BASE_URL && runtimeCfgRes.ok && runtimeCfgRes.config?.baseURL) {
+    overrides.TEST_BASE_URL = runtimeCfgRes.config.baseURL;
+  }
+  if (options.allowMutation === true) overrides.TEST_ALLOW_MUTATION = '1';
+  else if (options.allowMutation === false) overrides.TEST_ALLOW_MUTATION = '0';
+
   const mergedEnv = loadMergedQaEnv(qaDir, { ...process.env, ...overrides });
   const safety = evaluateTargetSafety(mergedEnv);
   if (!safety.ok) {
-    return {
-      schemaVersion: SCHEMA_VERSIONS.verdict,
-      ok: false,
-      exitCode: 2,
-      verdict: 'blocked',
-      trustTier: 'T0',
-      confidence: { level: 'high', reasons: ['target-guard-blocked'] },
-      runId: null,
+    return buildBlockedVerdict({
+      reasonCode: 'target-guard-blocked',
       gitSha: resolveGitHeadSha(repoDir),
       base: baseResolution,
-      acceptanceScope: 'local-workbench',
-      scope: { requested: requestedMode, actual: 'none', downgraded: true, mode: requestedMode, selected: 0, total: 0, why: [] },
+      requestedMode,
       gates: { governance: govPre.status || 'pass', static: 'skipped', runtime: 'skipped', semanticDiff: 'skipped' },
       gateErrors: safety.errors,
-      failures: [],
-      ai: { llmCalls: 0, models: [], promptHashes: [] },
-      nextActions: [],
-    };
+    });
+  }
+
+  const effectiveBaseUrl = safety.baseURL || null;
+  const allowOfflineSmoke = Boolean(options.allowOfflineSmoke);
+  if (requestedMode !== 'smoke' && !effectiveBaseUrl && !allowOfflineSmoke) {
+    return buildBlockedVerdict({
+      reasonCode: 'server-unreachable',
+      blockerKind: 'server-unreachable',
+      recoverable: true,
+      recoverySteps: [
+        'Run aitest bootstrap --target <repo> (or configure loopback baseURL/webServer in qa/aitest.runtime.json).',
+        'Or pass --base-url http://127.0.0.1:<port>, or pass --allow-offline-smoke for offline smoke only.',
+      ],
+      gitSha: resolveGitHeadSha(repoDir),
+      base: baseResolution,
+      requestedMode,
+      gates: { governance: govPre.status || 'pass', static: 'skipped', runtime: 'blocked', semanticDiff: 'skipped' },
+      gateErrors: [
+        `[Verify Change Blocked] Mode "${requestedMode}" requires a live or auto-bootable target server (TEST_BASE_URL or qa/aitest.runtime.json). Refusing to silently downgrade to offline smoke.`,
+      ],
+      nextActions: [{ tool: 'aitest_bootstrap', args: { target } }],
+    });
   }
 
   const effectiveBaseRef = baseResolution.resolved || 'HEAD~1';
   const impact = await computeImpact(repoDir, { qaDir: options.qaDir, base: effectiveBaseRef });
   const hasPlaywright = Boolean(resolvePlaywrightCli(qaDir));
   if (!hasPlaywright) {
-    return {
-      schemaVersion: SCHEMA_VERSIONS.verdict,
-      ok: false,
-      exitCode: 2,
-      verdict: 'blocked',
-      trustTier: 'T0',
+    return buildBlockedVerdict({
+      reasonCode: 'playwright-missing',
+      blockerKind: 'playwright-missing',
+      recoverable: true,
+      recoverySteps: ['Run aitest bootstrap --target <repo> or "npm --prefix qa ci" to install Playwright.'],
+      gitSha: resolveGitHeadSha(repoDir),
+      base: baseResolution,
+      requestedMode,
+      gates: { governance: govPre.status || 'pass', static: 'skipped', runtime: 'blocked', semanticDiff: 'skipped' },
+      gateErrors: [`Playwright dependencies not installed in ${qaDir}. Run init first.`],
       error: `Playwright dependencies not installed in ${qaDir}. Run init first.`,
-    };
+    });
   }
 
   const effectiveSuite =
     requestedMode === 'smoke'
       ? 'smoke'
       : requestedMode === 'full'
-        ? safety.baseURL
+        ? effectiveBaseUrl
           ? 'all'
           : 'smoke'
         : ['e2e', 'api', 'a11y', 'critical'].includes(requestedMode)
-          ? safety.baseURL
+          ? effectiveBaseUrl
             ? requestedMode
             : 'smoke'
-          : safety.baseURL
+          : effectiveBaseUrl
             ? 'impact'
             : 'smoke';
-  const scopeDowngraded = !safety.baseURL && requestedMode !== 'smoke';
+  const scopeDowngraded = !effectiveBaseUrl && requestedMode !== 'smoke';
 
   // Step 3: Execute suite bound to Run Ledger (pass precomputedImpact so computeImpact runs ONCE!)
   const runOut = await executeSuiteCore({
     target,
     qaDir: options.qaDir,
     suite: effectiveSuite,
-    baseUrl: options.baseUrl,
+    baseUrl: options.baseUrl || (effectiveBaseUrl ?? undefined),
+    allowMutation: options.allowMutation ?? safety.allowMutation,
     base: effectiveBaseRef,
     precomputedImpact: impact,
     audit: false,
@@ -387,19 +191,32 @@ export async function verifyChangeCore(options = {}) {
     signal: options.signal,
   });
 
+  // Read optional branch baseline-ref for new-branch spec exemption (`WU-04`)
+  let branchBaselineRef = null;
+  const baselineRefFile = path.join(qaDir, '.aitest', 'baseline-ref');
+  if (fs.existsSync(baselineRefFile)) {
+    try {
+      branchBaselineRef = JSON.parse(fs.readFileSync(baselineRefFile, 'utf8')).baselineRef || null;
+    } catch {
+      branchBaselineRef = null;
+    }
+  }
+
   // Step 4: Full 4-Layer Fail-Closed AST Audit
+  const auditTrustContext = openTrustContext({ qaDir, repoDir, createKeyIfMissing: false });
   const auditOut = runAuditForQaDir(qaDir, {
     checkSpecs: true,
-    requireE2e: Boolean(safety.baseURL && requestedMode === 'full'),
-    allowMutation: safety.allowMutation,
+    requireE2e: Boolean(effectiveBaseUrl && requestedMode === 'full'),
+    allowMutation: options.allowMutation ?? safety.allowMutation,
     expectedRunId: runOut.runId,
     diffBase: baseResolution.resolved,
+    baselineRef: branchBaselineRef,
     requireDiff: !allowNonGit,
-    allowForeignLockMac: !hadT1KeyBeforeRun,
+    trustContext: auditTrustContext,
   });
 
   // Step 4b: Check Heal Session Conflicts (`T-07`)
-  const healCheck = checkHealSessionConflicts(qaDir, baseResolution);
+  const healCheck = checkHealSessionConflicts(qaDir, baseResolution, auditTrustContext);
   const combinedGateErrors = [...auditOut.errors, ...healCheck.errors];
 
   // Step 5: Structured Diagnostics on Failures
@@ -609,23 +426,38 @@ export async function verifyChangeCore(options = {}) {
 export async function runVerifyChangeCommand(options = {}) {
   /** @type {Record<string, any>} */
   const res = await verifyChangeCore(options);
-  if (options.json) {
-    console.log(JSON.stringify(res, null, 2));
-    return res.exitCode;
+  if (!options.json) {
+    if (res.error && !res.verdict) {
+      console.error(res.error);
+    } else {
+      console.log(
+        `\n[Verify Change] Verdict=${String(res.verdict).toUpperCase()} trustTier=${res.trustTier || 'T0'} runId=${res.runId || 'none'} scope=${res.acceptanceScope}`
+      );
+      if (res.artifacts?.summaryMdPath) {
+        console.log(`  Verdict MD   : ${res.artifacts.summaryMdPath}`);
+        console.log(`  SARIF Report : ${res.artifacts.sarifPath}`);
+        if (res.artifacts.attestationPath) console.log(`  Attestation  : ${res.artifacts.attestationPath}`);
+        if (res.artifacts.sigstoreBundlePath) console.log(`  Sigstore     : ${res.artifacts.sigstoreBundlePath}`);
+      }
+      for (const e of res.gateErrors || []) console.error(`  [GATE FAIL] ${e}`);
+    }
   }
-  if (res.error && !res.verdict) {
-    console.error(res.error);
-    return res.exitCode;
-  }
-  console.log(
-    `\n[Verify Change] Verdict=${String(res.verdict).toUpperCase()} trustTier=${res.trustTier || 'T0'} runId=${res.runId || 'none'} scope=${res.acceptanceScope}`
+  const summary =
+    res.error && !res.verdict
+      ? String(res.error)
+      : `Verdict=${String(res.verdict).toUpperCase()} (${res.trustTier || 'T0'}, runId=${res.runId || 'none'}, scope=${res.acceptanceScope})`;
+  return emitCommandResult(
+    buildCommandResult({
+      tool: 'verify-change',
+      outcome: res.verdict === 'blocked' || res.exitCode === 2 ? 'blocked' : res.ok ? 'pass' : 'fail',
+      ok: Boolean(res.ok),
+      exitCode: res.exitCode,
+      summary,
+      recoverable: Boolean(res.recoverable),
+      blockerKind: res.blockerKind || null,
+      recoverySteps: Array.isArray(res.recoverySteps) ? res.recoverySteps : [],
+      data: res,
+    }),
+    { asJson: Boolean(options.json) }
   );
-  if (res.artifacts?.summaryMdPath) {
-    console.log(`  Verdict MD   : ${res.artifacts.summaryMdPath}`);
-    console.log(`  SARIF Report : ${res.artifacts.sarifPath}`);
-    if (res.artifacts.attestationPath) console.log(`  Attestation  : ${res.artifacts.attestationPath}`);
-    if (res.artifacts.sigstoreBundlePath) console.log(`  Sigstore     : ${res.artifacts.sigstoreBundlePath}`);
-  }
-  for (const e of res.gateErrors || []) console.error(`  [GATE FAIL] ${e}`);
-  return res.exitCode;
 }

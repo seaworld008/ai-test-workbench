@@ -4,7 +4,7 @@
 
 Analyze and triage failing Playwright tests in `<repo>/qa/`:
 
-1. Run `aitest_diagnose` (`npx ai-test-workbench@6.1.0 diagnose --target "<repo>"`) and read `qa/reports/ai-diagnostics.md` + Playwright's `error-context.md`.
+1. Run `aitest_diagnose` (`npx ai-test-workbench@6.2.0 diagnose --target "<repo>"`) and read `qa/reports/ai-diagnostics.md` + Playwright's `error-context.md`.
 2. Classify each failure before editing any file:
    - **A. Test Locator / Synchronization Issue** -> Allowed to repair test code (max 3 attempts per test).
    - **B. Environment / Auth / Network Issue** -> Do not edit assertions; report infrastructure fix.
@@ -12,5 +12,5 @@ Analyze and triage failing Playwright tests in `<repo>/qa/`:
    - **D. Requirement Ambiguity** -> Pause and request clarification.
 3. Override Playwright's default healer instruction: **NEVER** mark failing tests as `test.fixme()` or `test.skip()`.
 4. After any Class-A test repair, run:
-   `npx ai-test-workbench@6.1.0 audit --target "<repo>" --check-specs --diff-base HEAD`
+   `npx ai-test-workbench@6.2.0 audit --target "<repo>" --check-specs --diff-base HEAD`
    to verify zero deleted assertions, zero added skips, and zero `{ force: true }` workarounds.

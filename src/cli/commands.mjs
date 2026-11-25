@@ -1,227 +1,34 @@
 // @ts-check
-import { runUpdateAgents } from '../agents.mjs';
 import { runAuditCommand } from '../audit.mjs';
-import { runAuthLoginCommand } from '../auth-login.mjs';
-import { runMapCommand } from '../codemap.mjs';
 import { runDiagnoseCommand } from '../diagnose.mjs';
-import { runDoctor } from '../doctor.mjs';
-import { runExploreCommand } from '../explore.mjs';
 import { runFlakyCommand } from '../flaky.mjs';
 import { runGovernanceCommand } from '../governance.mjs';
 import { runHealCommand } from '../heal.mjs';
 import { runImpactCommand } from '../impact.mjs';
-import { runInit } from '../init.mjs';
-import { runMcpCommand } from '../mcp-hub.mjs';
-import { runMcpServeCommand } from '../mcp-server.mjs';
 import { runPerfCommand } from '../perf.mjs';
 import { runReportCommand } from '../report.mjs';
 import { runSuiteCommand } from '../runner.mjs';
-import { runSkillInstallCommand } from '../skill-install.mjs';
 import { runTraceMatrixCommand } from '../traceability.mjs';
 import { runAttestCommand } from '../trust.mjs';
-import { runUpgradeCommand } from '../upgrade.mjs';
 import { runVerifyChangeCommand } from '../verdict.mjs';
 
-const STR = /** @type {const} */ ({ type: 'string' });
-const BOOL = /** @type {const} */ ({ type: 'boolean' });
-
-const BASE_OPTS = {
-  help: { type: /** @type {'boolean'} */ ('boolean'), short: 'h' },
-  lang: STR,
-  json: BOOL,
-};
-
-const TARGET_OPTS = {
-  ...BASE_OPTS,
-  target: STR,
-  'qa-dir': STR,
-};
-
-const WORKSPACE_MUTATION_OPTS = {
-  ...TARGET_OPTS,
-  'dry-run': BOOL,
-  force: BOOL,
-};
-
-/** @param {Record<string, any>} v @param {'zh' | 'en'} lang */
-function makeCommon(v, lang) {
-  return {
-    lang,
-    target: typeof v.target === 'string' ? v.target : undefined,
-    qaDir: typeof v['qa-dir'] === 'string' ? v['qa-dir'] : undefined,
-    dryRun: Boolean(v['dry-run']),
-    force: Boolean(v.force),
-    json: Boolean(v.json),
-  };
-}
+import { WORKSPACE_CLI_COMMANDS } from './commands-workspace.mjs';
+import { BOOL, STR, TARGET_OPTS, makeCommon } from './opts.mjs';
 
 /**
- * Per-command declarative CLI registry (`v6.0`).
- * Each command declares ONLY the flags it actually consumes so unrelated flags fail fast (exit 1).
+ * Per-command declarative CLI registry (`v6.2`).
+ * Each command declares ONLY the flags it actually consumes so unrelated flags fail fast (exit 64).
  * @type {Record<string, {
  *   options: Record<string, { type: 'string' | 'boolean', short?: string }>,
+ *   requireTarget?: boolean,
  *   deprecatedAliases?: Record<string, { replacement: string, deprecatedSince: string, removeIn: string }>,
  *   run: (v: Record<string, any>, positionals: string[], lang: 'zh' | 'en') => Promise<number>,
  * }>}
  */
 export const CLI_COMMANDS = {
-  doctor: {
-    options: { ...TARGET_OPTS },
-    run: (v, _pos, lang) => runDoctor(makeCommon(v, lang)),
-  },
-  init: {
-    options: {
-      ...WORKSPACE_MUTATION_OPTS,
-      name: STR,
-      preset: STR,
-      loop: STR,
-      'skip-install': BOOL,
-      'skip-browser': BOOL,
-      'bridge-root': BOOL,
-    },
-    run: (v, _pos, lang) =>
-      runInit({
-        ...makeCommon(v, lang),
-        name: v.name,
-        preset: v.preset,
-        loop: v.loop,
-        skipInstall: Boolean(v['skip-install']),
-        skipBrowser: Boolean(v['skip-browser']),
-        bridgeRoot: Boolean(v['bridge-root']),
-      }),
-  },
-  upgrade: {
-    options: {
-      ...WORKSPACE_MUTATION_OPTS,
-      scope: STR,
-    },
-    run: (v, _pos, lang) =>
-      runUpgradeCommand({
-        ...makeCommon(v, lang),
-        scope: typeof v.scope === 'string' ? v.scope : undefined,
-      }),
-  },
-  'auth-login': {
-    options: {
-      ...TARGET_OPTS,
-      'base-url': STR,
-      account: STR,
-      'login-path': STR,
-      'cdp-url': STR,
-      timeout: STR,
-    },
-    run: (v, _pos, lang) =>
-      runAuthLoginCommand({
-        ...makeCommon(v, lang),
-        baseUrl: v['base-url'],
-        account: v.account,
-        loginPath: v['login-path'],
-        cdpUrl: v['cdp-url'],
-        timeout: v.timeout ? Number(v.timeout) : undefined,
-      }),
-  },
-  explore: {
-    options: {
-      ...TARGET_OPTS,
-      'dry-run': BOOL,
-      'base-url': STR,
-      'entry-path': STR,
-      'max-pages': STR,
-      'max-portals': STR,
-      'max-tabs': STR,
-      'max-dialogs': STR,
-      'explore-tabs': BOOL,
-      'explore-dialogs': BOOL,
-      'explore-portals': BOOL,
-      'no-explore-tabs': BOOL,
-      'no-explore-dialogs': BOOL,
-      'no-explore-portals': BOOL,
-      'no-sync-impact': BOOL,
-    },
-    run: (v, _pos, lang) =>
-      runExploreCommand({
-        ...makeCommon(v, lang),
-        baseUrl: v['base-url'],
-        entryPath: v['entry-path'],
-        maxPages: v['max-pages'] ? Number(v['max-pages']) : undefined,
-        maxPortals: v['max-portals'] ? Number(v['max-portals']) : undefined,
-        maxTabsPerPage: v['max-tabs'] !== undefined ? Number(v['max-tabs']) : undefined,
-        maxDialogsPerPage: v['max-dialogs'] !== undefined ? Number(v['max-dialogs']) : undefined,
-        exploreTabs: v['no-explore-tabs'] ? false : true,
-        exploreDialogs: v['no-explore-dialogs'] ? false : true,
-        explorePortals: v['no-explore-portals'] ? false : true,
-        noSyncImpact: Boolean(v['no-sync-impact']),
-      }),
-  },
-  map: {
-    options: {
-      ...TARGET_OPTS,
-      force: BOOL,
-      repo: STR,
-      'no-sync-impact': BOOL,
-    },
-    run: (v, _pos, lang) =>
-      runMapCommand({
-        ...makeCommon(v, lang),
-        repo: v.repo,
-        noSyncImpact: Boolean(v['no-sync-impact']),
-      }),
-  },
-  mcp: {
-    options: {
-      ...TARGET_OPTS,
-      'dry-run': BOOL,
-      action: STR,
-      profile: STR,
-      servers: STR,
-      lock: BOOL,
-      transport: STR,
-      port: STR,
-      host: STR,
-      'auth-token': STR,
-      'workspace-root': STR,
-    },
-    run: (v, pos, lang) => {
-      const action = String(v.action || pos[0] || 'presets').toLowerCase();
-      if (action === 'serve') {
-        return runMcpServeCommand({
-          ...makeCommon(v, lang),
-          transport: v.transport,
-          port: v.port !== undefined ? Number(v.port) : undefined,
-          host: v.host,
-          authToken: v['auth-token'],
-          workspaceRoots: v['workspace-root'],
-        });
-      }
-      return runMcpCommand({
-        ...makeCommon(v, lang),
-        action,
-        profile: v.profile,
-        servers: v.servers,
-        lock: Boolean(v.lock),
-      });
-    },
-  },
-  'mcp-serve': {
-    options: {
-      ...TARGET_OPTS,
-      transport: STR,
-      port: STR,
-      host: STR,
-      'auth-token': STR,
-      'workspace-root': STR,
-    },
-    run: (v, _pos, lang) =>
-      runMcpServeCommand({
-        ...makeCommon(v, lang),
-        transport: v.transport,
-        port: v.port !== undefined ? Number(v.port) : undefined,
-        host: v.host,
-        authToken: v['auth-token'],
-        workspaceRoots: v['workspace-root'],
-      }),
-  },
+  ...WORKSPACE_CLI_COMMANDS,
   perf: {
+    requireTarget: true,
     options: {
       ...TARGET_OPTS,
       'dry-run': BOOL,
@@ -252,6 +59,7 @@ export const CLI_COMMANDS = {
       }),
   },
   run: {
+    requireTarget: true,
     options: {
       ...TARGET_OPTS,
       suite: STR,
@@ -260,6 +68,8 @@ export const CLI_COMMANDS = {
       workers: STR,
       retries: STR,
       grep: STR,
+      files: STR,
+      line: STR,
       base: STR,
       audit: BOOL,
       'last-failed': BOOL,
@@ -278,6 +88,8 @@ export const CLI_COMMANDS = {
         workers: v.workers !== undefined ? Number(v.workers) : undefined,
         retries: v.retries !== undefined ? Number(v.retries) : undefined,
         grep: v.grep,
+        files: v.files,
+        line: v.line !== undefined ? Number(v.line) : undefined,
         base: v.base,
         audit: Boolean(v.audit),
         lastFailed: Boolean(v['last-failed']),
@@ -289,6 +101,7 @@ export const CLI_COMMANDS = {
       }),
   },
   impact: {
+    requireTarget: true,
     options: {
       ...TARGET_OPTS,
       base: STR,
@@ -302,6 +115,7 @@ export const CLI_COMMANDS = {
       }),
   },
   audit: {
+    requireTarget: true,
     options: {
       ...TARGET_OPTS,
       results: STR,
@@ -333,6 +147,7 @@ export const CLI_COMMANDS = {
       }),
   },
   diagnose: {
+    requireTarget: true,
     options: {
       ...TARGET_OPTS,
       'dry-run': BOOL,
@@ -347,12 +162,15 @@ export const CLI_COMMANDS = {
       }),
   },
   'verify-change': {
+    requireTarget: true,
     options: {
       ...TARGET_OPTS,
       'base-url': STR,
       base: STR,
       mode: STR,
       suite: STR,
+      'allow-mutation': BOOL,
+      'allow-offline-smoke': BOOL,
       'budget-ms': STR,
       'allow-non-git': BOOL,
     },
@@ -363,6 +181,8 @@ export const CLI_COMMANDS = {
         base: v.base,
         mode: v.mode || v.suite,
         suite: v.suite,
+        allowMutation: v['allow-mutation'] ? true : undefined,
+        allowOfflineSmoke: Boolean(v['allow-offline-smoke']),
         budgetMs: v['budget-ms'] ? Number(v['budget-ms']) : undefined,
         allowNonGit: Boolean(v['allow-non-git']),
       }),
@@ -376,7 +196,10 @@ export const CLI_COMMANDS = {
       'expect-repo': STR,
       'expect-workflow': STR,
       'expect-ref': STR,
+      'expect-git-sha': STR,
+      'expect-tree-digest': STR,
       'trusted-root-cert': STR,
+      'trusted-root-sha256': STR,
       'require-mac': BOOL,
     },
     run: (v, pos, lang) =>
@@ -388,11 +211,15 @@ export const CLI_COMMANDS = {
         expectRepo: v['expect-repo'],
         expectWorkflow: v['expect-workflow'],
         expectRef: v['expect-ref'],
+        expectGitSha: v['expect-git-sha'],
+        expectTreeDigest: v['expect-tree-digest'],
         trustedRootCert: v['trusted-root-cert'],
+        trustedRootSha256: v['trusted-root-sha256'],
         requireMac: Boolean(v['require-mac']),
       }),
   },
   heal: {
+    requireTarget: true,
     options: {
       ...TARGET_OPTS,
       action: STR,
@@ -416,6 +243,7 @@ export const CLI_COMMANDS = {
       })) ?? 1,
   },
   flaky: {
+    requireTarget: true,
     options: {
       ...TARGET_OPTS,
       'sync-quarantine': BOOL,
@@ -427,6 +255,7 @@ export const CLI_COMMANDS = {
       }),
   },
   'trace-matrix': {
+    requireTarget: true,
     options: {
       ...TARGET_OPTS,
       'dry-run': BOOL,
@@ -434,12 +263,14 @@ export const CLI_COMMANDS = {
     run: (v, _pos, lang) => runTraceMatrixCommand(makeCommon(v, lang)),
   },
   governance: {
+    requireTarget: true,
     options: {
       ...TARGET_OPTS,
       action: STR,
       by: STR,
       approver: STR,
       reason: STR,
+      yes: BOOL,
     },
     deprecatedAliases: {
       approver: { replacement: 'by', deprecatedSince: '6.0.0', removeIn: '7.0.0' },
@@ -450,32 +281,22 @@ export const CLI_COMMANDS = {
         action: v.action || pos[0] || 'verify',
         by: v.by || v.approver,
         reason: v.reason,
+        yes: Boolean(v.yes),
       }),
   },
   report: {
-    options: { ...TARGET_OPTS },
-    run: (v, _pos, lang) => runReportCommand(makeCommon(v, lang)),
-  },
-  'update-agents': {
+    requireTarget: true,
     options: {
-      ...WORKSPACE_MUTATION_OPTS,
-      loop: STR,
+      ...TARGET_OPTS,
+      view: STR,
+      'sync-quarantine': BOOL,
+      'dry-run': BOOL,
     },
     run: (v, _pos, lang) =>
-      runUpdateAgents({
+      runReportCommand({
         ...makeCommon(v, lang),
-        loop: v.loop,
-      }),
-  },
-  'skill-install': {
-    options: {
-      ...WORKSPACE_MUTATION_OPTS,
-      client: STR,
-    },
-    run: (v, _pos, lang) =>
-      runSkillInstallCommand({
-        ...makeCommon(v, lang),
-        client: v.client,
+        view: v.view,
+        syncQuarantine: Boolean(v['sync-quarantine']),
       }),
   },
 };

@@ -1,0 +1,140 @@
+import { getNodeLine, resolveTypeScriptCompiler } from '../ts-loader.mjs';
+
+/**
+ * @typedef {import('./governance-rules.mjs').GateFinding} GateFinding
+ * @typedef {import('./governance-rules.mjs').RuleEvalCtx} RuleEvalCtx
+ */
+
+const DIESELGATE_PATTERNS = [
+  { label: 'Playwright/Headless UA sniffing', re: /\b(?:Playwright|HeadlessChrome|pw-test)\b/i },
+  { label: 'navigator.webdriver probe', re: /\bnavigator\s*\.\s*webdriver\b|\b\.webdriver\b/ },
+  { label: 'NODE_ENV test branch', re: /\bNODE_ENV\b[^=!\n]{0,16}(?:===|!==|==|!=)\s*['"`]test['"`]|['"`]test['"`]\s*(?:===|!==|==|!=)\s*[^&\n]{0,24}\bNODE_ENV\b/ },
+  { label: 'CI/PLAYWRIGHT env branch', re: /\bprocess\s*\.\s*env\s*\.\s*(?:CI|PLAYWRIGHT|PW_TEST|E2E_TEST)\b/ },
+  { label: 'test runner custom header check', re: /\bx-(?:playwright|aitest|headless|webdriver)\b/i },
+];
+
+/**
+ * Extracts normalized conditional branch snippets referencing automated-test/browser-driver detection
+ * from an arbitrary product JS/TS/MJS source file using TypeScript AST (`WU-05`, `AITEST-G117`).
+ *
+ * @param {string} filePath
+ * @param {string} sourceText
+ * @param {{ tsCompiler?: any, qaDir?: string }} [options]
+ * @returns {{ usedAst: boolean, branches: Array<{ line: number, label: string, key: string, snippet: string }> }}
+ */
+function extractDieselgateBranches(filePath, sourceText, options = {}) {
+  if (!sourceText || !sourceText.trim()) return { usedAst: true, branches: [] };
+  const ts = 'tsCompiler' in options ? options.tsCompiler : resolveTypeScriptCompiler(options.qaDir);
+  if (!ts) {
+    /** @type {Array<{ line: number, label: string, key: string, snippet: string }>} */
+    const fallback = [];
+    const lines = sourceText.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i += 1) {
+      const lineText = lines[i];
+      if (!/\b(?:if|switch|&&|\|\||\?)\b/.test(lineText)) continue;
+      for (const pat of DIESELGATE_PATTERNS) {
+        if (pat.re.test(lineText)) {
+          fallback.push({
+            line: i + 1,
+            label: pat.label,
+            key: `${pat.label}:${lineText.replace(/\s+/g, '')}`,
+            snippet: lineText.trim().slice(0, 140),
+          });
+        }
+      }
+    }
+    return { usedAst: false, branches: fallback };
+  }
+
+  const sf = ts.createSourceFile(filePath || 'product.ts', sourceText, ts.ScriptTarget.Latest, true);
+  /** @type {Array<{ line: number, label: string, key: string, snippet: string }>} */
+  const branches = [];
+
+  /** @param {any} expr @param {any} node */
+  const checkConditionExpr = (expr, node) => {
+    if (!expr) return;
+    const condText = expr.getText(sf);
+    for (const pat of DIESELGATE_PATTERNS) {
+      if (pat.re.test(condText)) {
+        const snippet = condText.replace(/\s+/g, ' ').trim().slice(0, 140);
+        branches.push({
+          line: getNodeLine(ts, sf, node),
+          label: pat.label,
+          key: `${pat.label}:${condText.replace(/\s+/g, '')}`,
+          snippet,
+        });
+      }
+    }
+  };
+
+  /** @param {any} node */
+  const visit = (node) => {
+    if (ts.isIfStatement(node) || ts.isConditionalExpression(node)) {
+      checkConditionExpr(node.expression || node.condition, node);
+    } else if (ts.isSwitchStatement(node)) {
+      checkConditionExpr(node.expression, node);
+    } else if (
+      ts.isBinaryExpression(node) &&
+      (node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+        node.operatorToken.kind === ts.SyntaxKind.BarBarToken)
+    ) {
+      checkConditionExpr(node.left, node);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return { usedAst: true, branches };
+}
+
+/**
+ * Compares product-side base vs head source files to detect newly added Dieselgate test-traffic
+ * special-casing (`Playwright`, `HeadlessChrome`, `navigator.webdriver`, `NODE_ENV === 'test'`, `process.env.CI`).
+ *
+ * @param {string} filePath
+ * @param {string} baseSource
+ * @param {string} headSource
+ * @param {{ tsCompiler?: any, qaDir?: string }} [options]
+ * @returns {{ ok: boolean, findings: GateFinding[], violations: string[] }}
+ */
+export function evaluateProductFileAst(filePath, baseSource, headSource, options = {}) {
+  const baseBranches = extractDieselgateBranches(filePath, baseSource || '', options);
+  const headBranches = extractDieselgateBranches(filePath, headSource || '', options);
+  const baseKeys = new Set(baseBranches.branches.map((b) => b.key));
+  /** @type {GateFinding[]} */
+  const findings = [];
+  const seen = new Set();
+
+  for (const b of headBranches.branches) {
+    if (baseKeys.has(b.key) || seen.has(b.key)) continue;
+    seen.add(b.key);
+    findings.push({
+      code: 'AITEST-G117',
+      severity: 'error',
+      file: filePath,
+      line: b.line,
+      message: `${filePath}:${b.line}: product code introduces test-traffic special-casing (${b.label}: "${b.snippet}") (Dieselgate bypass forbidden).`,
+      evidence: { label: b.label, snippet: b.snippet },
+    });
+  }
+
+  return {
+    ok: findings.length === 0,
+    findings,
+    violations: findings.map((f) => `[Healer Diff Guard][${f.code}] ${f.message}`),
+  };
+}
+
+/**
+ * AITEST-G117 registry metadata entry (product-side evaluation runs via `evaluateProductFileAst` in `changeset.mjs`).
+ */
+export const ruleG117 = {
+  code: 'AITEST-G117',
+  name: 'no-dieselgate-test-branching',
+  description: 'Blocks introducing Playwright/HeadlessChrome/navigator.webdriver/NODE_ENV===test conditional branches in product source files.',
+  waiverKey: 'dieselgate-branch',
+  defaultEnabled: true,
+  /** @param {RuleEvalCtx} _ctx @returns {GateFinding[]} */
+  evaluate(_ctx) {
+    return [];
+  },
+};

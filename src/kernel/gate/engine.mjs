@@ -3,7 +3,7 @@ import path from 'node:path';
 import { mergeOutcomes } from '../../core/outcome.mjs';
 import { WORKBENCH_VERSION } from '../../core/version.mjs';
 import { runGitDiffGuard, runStaticSpecChecks } from './ast-analyzer.mjs';
-import { computeWorkspaceInputHash } from './git-utils.mjs';
+import { computeWorkspaceInputHash } from './workspace-hash.mjs';
 import {
   auditResultsJson,
   countMutationSpecsInFiles,
@@ -15,6 +15,7 @@ import {
   loadAndValidateWaivers,
   verifyGovernanceLockInQaDir,
 } from './policy.mjs';
+import { openTrustContext } from './trust-context.mjs';
 
 export const GATE_KERNEL_VERSION = WORKBENCH_VERSION;
 
@@ -36,20 +37,29 @@ export const GATE_KERNEL_VERSION = WORKBENCH_VERSION;
  *   requireE2e?: boolean;
  *   staticOnly?: boolean;
  *   diffBase?: string | null;
+ *   baselineRef?: string | null;
  *   requireDiff?: boolean;
  *   allowMutation?: boolean;
  *   skipGovernanceCheck?: boolean;
  *   requireT1Mac?: boolean;
- *   allowForeignLockMac?: boolean;
  *   allowUninitialized?: boolean;
  *   legacyWaiverCompat?: boolean;
  *   allowUnboundResults?: boolean;
  *   expectedRunId?: string;
  *   requireCompilers?: boolean;
+ *   trustContext?: import('./trust-context.mjs').TrustContext;
  *   env?: Record<string, string | undefined>;
  * }} [options]
  */
 export function runAuditForQaDir(qaDir, options = {}) {
+  const trustContext =
+    options.trustContext ||
+    openTrustContext({
+      qaDir,
+      repoDir: path.dirname(qaDir),
+      env: options.env || process.env,
+      createKeyIfMissing: false,
+    });
   const resultsPath = options.resultsPath
     ? path.resolve(qaDir, options.resultsPath)
     : path.join(qaDir, 'reports', 'results.json');
@@ -102,8 +112,8 @@ export function runAuditForQaDir(qaDir, options = {}) {
   if (options.skipGovernanceCheck !== true) {
     const govRes = verifyGovernanceLockInQaDir(qaDir, {
       requireT1Mac: Boolean(options.requireT1Mac),
-      allowForeignMac: Boolean(options.allowForeignLockMac),
       allowUninitialized: Boolean(options.allowUninitialized),
+      trustContext,
     });
     lockDigest = govRes.lockDigest || null;
     govTrustTier = govRes.trustTier || 'T0';
@@ -127,10 +137,17 @@ export function runAuditForQaDir(qaDir, options = {}) {
     if (governanceStatus === 'pass' || governanceStatus === 'skipped') governanceStatus = 'fail';
   }
 
-  const quarantineCheck = loadActiveQuarantine(qaDir);
+  const quarantineCheck = loadActiveQuarantine(qaDir, {
+    requireT1Mac: Boolean(options.requireT1Mac),
+    trustContext,
+  });
   if (!quarantineCheck.ok) {
     allErrors.push(...quarantineCheck.errors);
-    if (governanceStatus === 'pass' || governanceStatus === 'skipped') governanceStatus = 'fail';
+    if (quarantineCheck.blocked) {
+      governanceStatus = 'blocked';
+    } else if (governanceStatus === 'pass' || governanceStatus === 'skipped') {
+      governanceStatus = 'fail';
+    }
   }
 
   // Layer 1: Runtime Results + Fail-Closed Run Ledger Binding
@@ -149,6 +166,7 @@ export function runAuditForQaDir(qaDir, options = {}) {
           expectedRunId: options.expectedRunId,
           currentWorktreeHash,
           requireT1Mac: Boolean(options.requireT1Mac),
+          trustContext,
         });
         boundRunId = binding.runId;
         resultsDigest = binding.resultsDigest || null;
@@ -198,10 +216,28 @@ export function runAuditForQaDir(qaDir, options = {}) {
   }
 
   // Layer 3: Full-File AST Semantic Diff Guard
+  const baselineRefFile = path.join(qaDir, '.aitest', 'baseline-ref');
+  let baselineRef = options.baselineRef ?? null;
+  if (!baselineRef && fs.existsSync(baselineRefFile)) {
+    try {
+      const rawRef = fs.readFileSync(baselineRefFile, 'utf8').trim();
+      if (rawRef.startsWith('{')) {
+        const parsedRef = JSON.parse(rawRef);
+        baselineRef = typeof parsedRef.baselineRef === 'string' ? parsedRef.baselineRef.trim() || null : null;
+      } else {
+        baselineRef = rawRef || null;
+      }
+    } catch {
+      baselineRef = null;
+    }
+  }
   /** @type {'pass' | 'fail' | 'blocked' | 'skipped'} */
   let diffStatus = diffBase ? 'pass' : requireDiff ? 'blocked' : 'skipped';
   if (diffBase) {
-    const diffRes = runGitDiffGuard(qaDir, diffBase, { activeWaivers: waiverCheck.activeWaivers });
+    const diffRes = runGitDiffGuard(qaDir, diffBase, {
+      activeWaivers: waiverCheck.activeWaivers,
+      baselineRef,
+    });
     diffStatus = /** @type {any} */ (diffRes.status || (diffRes.ok ? 'pass' : 'fail'));
     allErrors.push(...diffRes.violations);
   } else if (requireDiff) {

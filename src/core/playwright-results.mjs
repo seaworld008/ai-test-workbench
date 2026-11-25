@@ -67,9 +67,16 @@ export function flattenPlaywrightResults(resultsObj) {
           attempts.find((r) => r.status && r.status !== 'passed' && r.status !== 'skipped') ||
           attempts[attempts.length - 1];
         const errMsg = firstFailure?.error?.message || null;
+        const attachments = attempts
+          .flatMap((a) => (Array.isArray(a.attachments) ? a.attachments : []))
+          .map((att) => ({
+            name: String(att?.name || ''),
+            path: att?.path ? String(att.path) : null,
+            contentType: att?.contentType ? String(att.contentType) : null,
+          }));
 
         tests.push({
-          testId: `${file}::${fullTitle}`,
+          testId: `${file}::${fullTitle.replace(/\\/g, '/')}`,
           file,
           line: Number(spec.line || 0),
           title: fullTitle,
@@ -82,6 +89,7 @@ export function flattenPlaywrightResults(resultsObj) {
           tags,
           annotations: Array.isArray(testEntry.annotations) ? testEntry.annotations : [],
           results: attempts,
+          attachments,
           errorSnippet: errMsg ? String(errMsg).split('\n')[0].slice(0, 240) : null,
         });
       }

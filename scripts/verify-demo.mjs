@@ -5,9 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startDemoServer } from '../examples/demo-webapp/server.mjs';
-import { runCli } from '../src/cli.mjs';
-import { handleMcpJsonRpcMessage } from '../src/mcp-server.mjs';
-import { verifyAttestationFile } from '../src/trust.mjs';
+import { handleMcpJsonRpcMessage, runCli, verifyAttestationFile } from '../src/app/index.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKBENCH_ROOT = path.resolve(__dirname, '..');

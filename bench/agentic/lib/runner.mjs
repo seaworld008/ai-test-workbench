@@ -2,8 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { GATE_KERNEL_VERSION } from '../../../src/audit.mjs';
-import { WORKBENCH_VERSION } from '../../../src/version.mjs';
+import { GATE_KERNEL_VERSION, WORKBENCH_VERSION } from '../../../src/app/index.mjs';
 import { executeAgentAdapter, getAdapterKind, sanitizeTrajectoryText } from './agent-adapters.mjs';
 import { evaluateTrial } from './evaluator.mjs';
 import { createTrialSandbox, TEMPLATE_MODULES_DIR } from './sandbox.mjs';
@@ -128,7 +127,8 @@ export async function runAgenticBenchmark(options = {}) {
     adapter,
     adapterKind: getAdapterKind(adapter),
     modelVersion: options.model || (adapter === 'scripted' ? `scripted-l1-l3-v${WORKBENCH_VERSION}` : null),
-    executionMode: fast ? 'fast-oracle' : 'live-playwright',
+    executionMode: fast ? 'fast-simulated-oracle' : 'live-playwright',
+    liveBrowserExecuted: !fast,
     gateKernelVersion: GATE_KERNEL_VERSION,
     workbenchVersion: WORKBENCH_VERSION,
     trials: allTrials,

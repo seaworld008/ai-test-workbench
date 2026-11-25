@@ -9,10 +9,10 @@ import {
   isRuleEnabled,
 } from '../../src/kernel/gate-kernel.mjs';
 
-test('Gate Rule Registry exposes all 15 canonical rules AITEST-G101..G115 with toggleable config', () => {
-  assert.equal(ALL_GATE_RULES.length, 15);
+test('Gate Rule Registry exposes all 17 canonical rules AITEST-G101..G117 with toggleable config', () => {
+  assert.equal(ALL_GATE_RULES.length, 17);
   const codes = ALL_GATE_RULES.map((r) => r.code);
-  for (let n = 101; n <= 115; n += 1) {
+  for (let n = 101; n <= 117; n += 1) {
     const code = `AITEST-G${n}`;
     assert.ok(codes.includes(code), `Missing rule ${code}`);
     const rule = getGateRuleByCode(code);
@@ -342,4 +342,12 @@ test('WU-05 Systemic FP Fixes: cross-file split pooling, scope awareness, capabi
   );
   assert.equal(fake200Route.ok, false);
   assert.ok(fake200Route.findings.some((f) => f.code === 'AITEST-G114'));
+
+  const fake403RbacStub = compareSpecSourcesAst(
+    'tests/rbac.spec.ts',
+    "test('rbac', async ({ page }) => { const res = await page.goto('/admin'); expect(res?.status()).toBe(403); });",
+    "test('rbac', async ({ page }) => { await page.route('**/admin', r => r.fulfill({ status: 403, body: 'Forbidden' })); const res = await page.goto('/admin'); expect(res?.status()).toBe(403); });"
+  );
+  assert.equal(fake403RbacStub.ok, false);
+  assert.ok(fake403RbacStub.findings.some((f) => f.code === 'AITEST-G114'));
 });

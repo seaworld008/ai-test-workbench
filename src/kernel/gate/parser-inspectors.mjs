@@ -239,13 +239,13 @@ export function inspectPropertyAssignment(ts, sf, node, line, ctx, state) {
     summary.events.timeoutOrRetry.push(ev);
     pushViolation('AITEST-G109', ev.message, ev.snippet, ev);
   }
-  if (propName === 'testIgnore') {
+  if (propName === 'testIgnore' || ((propName === 'testDir' || propName === 'testMatch') && /playwright\.config/i.test(fileLabel))) {
     const ev = {
       line,
       scopeKind: ctx.scopeKind,
       testTitle: ctx.testTitle,
       snippet: propText,
-      message: `${fileLabel}: added testIgnore exclusion.`,
+      message: `${fileLabel}: modified protected test selection field "${propName}".`,
     };
     summary.events.configTamper.push(ev);
     pushViolation('AITEST-G101', ev.message, ev.snippet, ev);

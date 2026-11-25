@@ -83,6 +83,16 @@ test('Layer 0 Governance Lock intercepts all 5 config/waiver/fixture tampering v
     const missingLockAudit = runAuditForQaDir(qaDir, { staticOnly: true });
     assert.equal(missingLockAudit.ok, false);
     assert.match(missingLockAudit.errors.join('\n'), /Missing \.aitest\/governance\.lock/);
+
+    // Stripping mac/macs from default-path governance.lock on T1-sticky host stays blocked (never downgrades to T0)
+    const strippedLock = JSON.parse(savedLock);
+    delete strippedLock.mac;
+    delete strippedLock.macs;
+    delete strippedLock.macKeyId;
+    fs.writeFileSync(lockPath, `${JSON.stringify(strippedLock, null, 2)}\n`, 'utf8');
+    const strippedMacAudit = runAuditForQaDir(qaDir, { staticOnly: true });
+    assert.equal(strippedMacAudit.ok, false);
+    assert.equal(strippedMacAudit.outcome, 'blocked');
     fs.writeFileSync(lockPath, savedLock, 'utf8');
 
     // MCP child context or bot approver cannot run `governance approve`
@@ -127,6 +137,7 @@ test('Layer 0 Governance Lock intercepts all 5 config/waiver/fixture tampering v
       'qa-director-zhang',
       '--reason',
       'Tighten assertFunctionNames to expect* only',
+      '--yes',
     ]);
     assert.equal(humanOkCode, 0);
     assert.equal(runAuditForQaDir(qaDir, { staticOnly: true }).ok, true);
@@ -423,9 +434,9 @@ test('Requirement Traceability Matrix & Strict CLI flag validation work cleanly'
     assert.equal(matrix.coveredRequirements, 3);
     assert.equal(matrix.coveragePct, 100);
 
-    // Strict CLI unknown flag rejection (`Q-05`)
+    // Strict CLI unknown flag rejection (`Q-05` / exit 64)
     const badFlagCode = await runCli(['run', '--sute', 'smoke']);
-    assert.equal(badFlagCode, 1);
+    assert.equal(badFlagCode, 64);
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
   }

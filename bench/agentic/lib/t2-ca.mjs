@@ -3,9 +3,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import {
   GITHUB_ACTIONS_OIDC_ISSUER,
+  INTOTO_STATEMENT_TYPE,
+  VERDICT_PREDICATE_TYPE,
   computeDssePae,
-} from '../../../src/trust/der-x509.mjs';
-import { INTOTO_STATEMENT_TYPE, VERDICT_PREDICATE_TYPE } from '../../../src/trust/intoto.mjs';
+} from '../../../src/app/index.mjs';
 
 /**
  * Pure zero-dependency ASN.1 DER X.509 v3 Ephemeral Fulcio CA & Sigstore v0.3 DSSE Bundle builder.
@@ -335,10 +336,12 @@ export function createEphemeralFulcioCa(rootCn = 'AI-Test-Workbench Ephemeral Fu
     };
   }
 
+  const rootCertSha256 = crypto.createHash('sha256').update(rootCert.der).digest('hex').toLowerCase();
   return {
     rootCn,
     rootCertDer: rootCert.der,
     rootCertPem: rootCert.pem,
+    rootCertSha256,
     issueLeafCert,
     signAttestationFile,
   };

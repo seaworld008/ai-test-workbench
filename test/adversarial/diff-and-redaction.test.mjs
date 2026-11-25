@@ -206,4 +206,7 @@ test('WCAG 2.0/2.1/2.2 tag lock & JSON Schema / OpenAPI contract validator work 
   );
   assert.equal(drifted.ok, false);
   assert.equal(drifted.errors.length, 2);
+
+  // Verify base.ts expectAccessible helper enforces deterministic error formatting on axe violations
+  assert.match(baseTsText, /Automated WCAG 2\.0\/2\.1\/2\.2 A\/AA axe violations/);
 });

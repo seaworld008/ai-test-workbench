@@ -1,6 +1,7 @@
 // @ts-check
 import { detectLang } from '../core/i18n.mjs';
-import { WORKBENCH_VERSION } from '../core/version.mjs';
+import { exitCodeToOutcome, stripVTControlCharacters } from '../core/outcome.mjs';
+import { SCHEMA_VERSIONS, WORKBENCH_VERSION } from '../core/version.mjs';
 import { defaultJobManager } from '../jobs.mjs';
 import { getMcpToolDefinitions, resolveToolCall, validateToolArguments } from './registry.mjs';
 import {
@@ -15,6 +16,7 @@ import {
   parseWorkspaceRoots,
   validateToolPathArgs,
 } from './security.mjs';
+import { deriveDynamicNextActions, summarizeToolResult } from './summarize.mjs';
 
 export const SUPPORTED_MCP_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 export const BATCH_CAPABLE_MCP_VERSIONS = new Set(['2025-03-26', '2024-11-05']);
@@ -108,13 +110,22 @@ function buildBoundedTextPayload(structuredContent) {
 /**
  * @param {string} toolName @param {boolean} ok @param {number} exitCode @param {string} summary
  * @param {Record<string, any>} data @param {string[]} nextActions
- * @param {{ target?: string | null, resourceSuffix?: string | null, protocolVersion?: string, deprecation?: { deprecatedTool: string, replacement: string, deprecatedSince: string, removeIn: string } | null }} [options]
+ * @param {{
+ *   target?: string | null,
+ *   resourceSuffix?: string | null,
+ *   protocolVersion?: string,
+ *   outcome?: string,
+ *   recoverable?: boolean,
+ *   blockerKind?: string | null,
+ *   recoverySteps?: string[],
+ *   deprecation?: { deprecatedTool: string, replacement: string, deprecatedSince: string, removeIn: string } | null
+ * }} [options]
  * @returns {{ unknownTool: false, result: Record<string, any> }}
  */
 function wrapEnvelope(toolName, ok, exitCode, summary, data, nextActions, options = {}) {
   const { target = null, resourceSuffix = null, protocolVersion = '2025-11-25', deprecation = null } = options;
   const finalData = data && typeof data === 'object' ? { ...data } : {};
-  let finalSummary = String(summary || '');
+  let finalSummary = stripVTControlCharacters(summary || '').trim() || summarizeToolResult(toolName, finalData, ok, exitCode);
   const finalNextActions = Array.isArray(nextActions) ? [...nextActions] : [];
 
   if (deprecation) {
@@ -125,11 +136,17 @@ function wrapEnvelope(toolName, ok, exitCode, summary, data, nextActions, option
     );
   }
 
+  const outcome = options.outcome || exitCodeToOutcome(/** @type {any} */ (exitCode));
   const structuredContent = {
+    schemaVersion: SCHEMA_VERSIONS.resultEnvelope,
     ok,
     exitCode,
+    outcome,
     tool: toolName,
     summary: finalSummary.slice(0, 300),
+    recoverable: options.recoverable ?? (!ok && outcome !== 'pass'),
+    blockerKind: options.blockerKind ?? (exitCode === 2 ? 'PREREQUISITE_OR_GATE_BLOCK' : null),
+    recoverySteps: Array.isArray(options.recoverySteps) ? options.recoverySteps : [],
     data: finalData,
     nextRecommendedActions: finalNextActions,
   };
@@ -292,32 +309,45 @@ async function executeMcpTool(name, rawArgs = {}, ctx = {}, meta = {}) {
   }
 
   const completed = execRes.job;
-  const exitCode = completed.exitCode ?? 1;
+  const rawEnvelope = completed.parsedData;
+  const isV2Envelope =
+    rawEnvelope &&
+    typeof rawEnvelope === 'object' &&
+    rawEnvelope.schemaVersion === 2 &&
+    rawEnvelope.data &&
+    typeof rawEnvelope.data === 'object';
+
+  const exitCode = isV2Envelope && typeof rawEnvelope.exitCode === 'number' ? rawEnvelope.exitCode : completed.exitCode ?? 1;
   const ok = exitCode === 0;
-  const data =
-    completed.parsedData && typeof completed.parsedData === 'object'
-      ? { ...completed.parsedData }
+  const data = isV2Envelope
+    ? { ...rawEnvelope.data }
+    : rawEnvelope && typeof rawEnvelope === 'object'
+      ? { ...rawEnvelope }
       : completed.stdout
         ? { output: completed.stdout.slice(0, 4000) }
         : {};
-  if (!ok && completed.stderr) {
+  if (!ok && completed.stderr && !data.stderr) {
     data.stderr = completed.stderr.slice(0, 1500);
   }
 
   const summaryCandidate =
-    data.verdict
-      ? `Verdict=${String(data.verdict).toUpperCase()} (${data.trustTier || 'T0'}, runId=${data.runId || 'none'}, scope=${data.acceptanceScope})`
-      : data.error ||
-        String(completed.stderr || completed.stdout || '')
-          .split(/\r?\n/)
-          .map((l) => l.trim())
-          .find((l) => l && !l.startsWith('{') && !l.startsWith('}') && !l.startsWith('"')) ||
-        (ok ? `${name} succeeded (exitCode=0)` : `${name} failed (exitCode=${exitCode})`);
+    isV2Envelope && typeof rawEnvelope.summary === 'string' && rawEnvelope.summary.trim()
+      ? rawEnvelope.summary
+      : summarizeToolResult(name, data, ok, exitCode);
 
-  return wrapEnvelope(name, ok, exitCode, summaryCandidate, data, toolEntry.nextActions(ok, args), {
+  const dynamicNextActions =
+    isV2Envelope && Array.isArray(rawEnvelope.nextRecommendedActions) && rawEnvelope.nextRecommendedActions.length > 0
+      ? rawEnvelope.nextRecommendedActions
+      : deriveDynamicNextActions(name, ok, exitCode, isV2Envelope ? rawEnvelope : data, args, toolEntry);
+
+  return wrapEnvelope(name, ok, exitCode, summaryCandidate, data, dynamicNextActions, {
     target,
     resourceSuffix: toolEntry.resourceSuffix,
     protocolVersion,
+    outcome: isV2Envelope ? rawEnvelope.outcome : undefined,
+    recoverable: isV2Envelope ? rawEnvelope.recoverable : undefined,
+    blockerKind: isV2Envelope ? rawEnvelope.blockerKind : undefined,
+    recoverySteps: isV2Envelope ? rawEnvelope.recoverySteps : undefined,
     deprecation,
   });
 }
@@ -349,7 +379,7 @@ export async function handleMcpJsonRpcMessage(msg, ctx = {}, requestMeta = {}) {
       const reqId = msg.params?.requestId;
       if (reqId !== undefined && reqId !== null) {
         const jm = ctx.jobManager || defaultJobManager;
-        jm.cancelByRequestId(reqId, sessionId);
+        void jm.cancelByRequestId(reqId, sessionId);
       }
       return null;
     }

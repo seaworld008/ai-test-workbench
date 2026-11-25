@@ -1,6 +1,6 @@
 name: Release npm Package
 
-# Triggered ONLY when a human pushes a semver release tag (e.g., v6.0.0).
+# Triggered ONLY when a human pushes a semver release tag (e.g., v6.2.0).
 # Trusted Publishing (OIDC) is active on npmjs.com:
 #   - Package: ai-test-workbench
 #   - Repository: seaworld008/ai-test-workbench
@@ -20,10 +20,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  verify-and-publish:
+  verify:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
       contents: read
 
     steps:
@@ -53,7 +52,7 @@ jobs:
           npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
 
-      - name: Run Full 8-Command Verification Gate
+      - name: Run Full Verification Gates
         run: |
           npm run check:vendor
           npm run lint:docs
@@ -62,9 +61,42 @@ jobs:
           npm run smoke
           npm run demo:verify
           npm run bench
+          node scripts/bench-agentic.mjs --fast
           npm pack --dry-run
 
-      - name: Publish to npm via OIDC Trusted Publishing with Sigstore Provenance
+      - name: Build Verified npm Tarball Artifact
+        run: |
+          mkdir -p .release-dist
+          npm pack --pack-destination .release-dist
+
+      - name: Upload Tarball Artifact for OIDC Publish Job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: npm-release-tarball
+          path: .release-dist/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Setup Node.js 24 LTS (npm >= 11.5.1 for native OIDC Trusted Publishing)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Download Verified npm Tarball
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: npm-release-tarball
+          path: .release-dist
+
+      - name: Publish Pre-Built Tarball to npm via OIDC Trusted Publishing with Sigstore Provenance
         run: |
           npm --version
-          npm publish --provenance --access public
+          npm publish .release-dist/*.tgz --provenance --access public

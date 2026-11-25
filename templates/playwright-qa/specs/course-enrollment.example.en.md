@@ -1,18 +1,19 @@
-# Test Plan Example: Smart Campus Course Enrollment
+# Test Plan Example: Core Workflow, RBAC & Concurrency Idempotency (`course-enrollment.example.en.md`)
 
 > [简体中文 (默认)](./course-enrollment.example.md)
 
 - **Project**: `__PROJECT_NAME__`
-- **Target**: Allowlisted local/staging environment (`TEST_BASE_URL`)
+- **Target**: Allowlisted local or staging environment (`TEST_BASE_URL`)
 - **Seed**: `tests/seed.spec.ts` (`--project=seed`)
+- **Note**: Replace placeholder `REQ-*` IDs, routes, and assertions below with your actual domain flows.
 
 ## Scenarios
 
-### 1. [REQ-CATALOG-001] Course Catalog Search & Accessibility (`@critical @a11y`, Read-Only)
-- Navigate to `/`, run `expectAccessible(page)` (WCAG 2.0/2.1/2.2 A/AA), filter by `"Playwright"` and `"Sold Out"`, expect matching cards and disabled sold-out button (`toBeDisabled()`) with zero `pageerror` / `5xx`.
+### 1. [REQ-CORE-001] Primary Listing, Control Constraints & Automated Accessibility (`@critical @a11y`, Read-Only)
+- Navigate to the primary route, invoke `expectAccessible(page)` (WCAG 2.0/2.1/2.2 A/AA), exercise read-only filtering, and verify unavailable action controls remain disabled (`toBeDisabled()`) with zero `pageerror` or `5xx` responses.
 
-### 2. [REQ-RBAC-001] Student vs Admin RBAC Isolation (`@critical`, Read-Only)
-- Request `/admin` and `GET /api/admin/audit` with student credentials; expect HTTP `403`.
+### 2. [REQ-RBAC-001] Role-Based Access Control Isolation (`@critical`, Read-Only)
+- Request a privileged admin page and admin API endpoint using standard non-privileged user credentials; expect HTTP `403` and zero privileged data leakage.
 
-### 3. [REQ-ENROLL-001] Duplicate & Last-Seat Concurrent Enrollment (`@mutation`, Write-Enabled Staging Only)
-- Require `TEST_ALLOW_MUTATION=1`; duplicate submission expects `409`, and `Promise.all` race on 1-seat `course-last-seat` strictly yields `[201, 409]`.
+### 3. [REQ-MUTATE-001] Duplicate Submission & Concurrent Race Guard (`@mutation`, Loopback / Write-Enabled Only)
+- Require loopback sandbox default or `TEST_ALLOW_MUTATION=1`; verify duplicate write returns `409` (conflict) and concurrent `Promise.all` quota requests allow at most one `201` without oversubscription.

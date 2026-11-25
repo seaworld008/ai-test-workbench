@@ -3,7 +3,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { resolveQaDirectory } from './domains/workspace/resolve.mjs';
 import { resolvePlaywrightCli, runPlaywright } from './proc.mjs';
+
+export { resolveQaDirectory };
 
 export const SUPPORTED_LOOPS = ['claude', 'codex', 'copilot', 'opencode', 'vscode', 'vscode-legacy'];
 const MANIFEST_REL_PATH = '.aitest/agents-manifest.json';
@@ -448,35 +451,4 @@ export async function runUpdateAgents(options = {}) {
   }
 
   return 0;
-}
-
-/**
- * @param {string} targetPath
- * @param {string} [explicitQaDir]
- * @returns {string | null}
- */
-export function resolveQaDirectory(targetPath, explicitQaDir) {
-  const abs = path.resolve(targetPath);
-  if (explicitQaDir) {
-    const explicitResolved = path.resolve(abs, explicitQaDir);
-    if (
-      fs.existsSync(path.join(explicitResolved, 'playwright.config.ts')) ||
-      fs.existsSync(path.join(explicitResolved, 'playwright.config.js')) ||
-      fs.existsSync(path.join(explicitResolved, 'package.json'))
-    ) {
-      return explicitResolved;
-    }
-  }
-  if (fs.existsSync(path.join(abs, 'playwright.config.ts')) || fs.existsSync(path.join(abs, 'playwright.config.js'))) {
-    return abs;
-  }
-  const sub = path.resolve(abs, explicitQaDir || 'qa');
-  if (
-    fs.existsSync(path.join(sub, 'playwright.config.ts')) ||
-    fs.existsSync(path.join(sub, 'playwright.config.js')) ||
-    fs.existsSync(path.join(sub, 'package.json'))
-  ) {
-    return sub;
-  }
-  return null;
 }

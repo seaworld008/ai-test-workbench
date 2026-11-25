@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveQaDirectory } from './agents.mjs';
+import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SKILL_SRC_DIR = path.resolve(__dirname, '..', 'skills', 'ai-test-workbench');
@@ -68,37 +69,61 @@ export async function runSkillInstallCommand(options = {}) {
   const force = Boolean(options.force);
 
   if (fs.existsSync(destDir) && !force) {
-    if (options.json) {
-      console.log(JSON.stringify({ ok: true, exitCode: 0, status: 'preserved', client, destination: destDir }, null, 2));
-    } else {
+    if (!options.json) {
       console.log(
         lang === 'zh'
           ? `[PRESERVED] 技能目录已存在 (${destDir})。如需覆盖更新请传 --force。`
           : `[PRESERVED] Skill directory already exists (${destDir}). Pass --force to overwrite.`
       );
     }
-    return 0;
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'skill-install',
+        outcome: 'pass',
+        ok: true,
+        exitCode: 0,
+        summary: `Skill directory already exists (${client}); preserved.`,
+        data: { status: 'preserved', client, destination: destDir },
+      }),
+      { asJson: Boolean(options.json) }
+    );
   }
 
   if (dryRun) {
-    if (options.json) {
-      console.log(JSON.stringify({ ok: true, exitCode: 0, status: 'dry-run', client, destination: destDir, source: SKILL_SRC_DIR }, null, 2));
-    } else {
+    if (!options.json) {
       console.log(`[DRY-RUN] Would copy skill "${SKILL_SRC_DIR}" -> "${destDir}"`);
     }
-    return 0;
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'skill-install',
+        outcome: 'pass',
+        ok: true,
+        exitCode: 0,
+        summary: `Dry-run: would install skill to ${destDir}`,
+        data: { status: 'dry-run', client, destination: destDir, source: SKILL_SRC_DIR },
+      }),
+      { asJson: Boolean(options.json) }
+    );
   }
 
   fs.mkdirSync(path.dirname(destDir), { recursive: true });
   fs.cpSync(SKILL_SRC_DIR, destDir, { recursive: true, force: true });
-  if (options.json) {
-    console.log(JSON.stringify({ ok: true, exitCode: 0, status: 'installed', client, destination: destDir }, null, 2));
-  } else {
+  if (!options.json) {
     console.log(
       lang === 'zh'
         ? `[OK] 已安装 ai-test-workbench 技能到: ${destDir}`
         : `[OK] Installed ai-test-workbench skill to: ${destDir}`
     );
   }
-  return 0;
+  return emitCommandResult(
+    buildCommandResult({
+      tool: 'skill-install',
+      outcome: 'pass',
+      ok: true,
+      exitCode: 0,
+      summary: `Installed ai-test-workbench skill (${client}) -> ${destDir}`,
+      data: { status: 'installed', client, destination: destDir },
+    }),
+    { asJson: Boolean(options.json) }
+  );
 }

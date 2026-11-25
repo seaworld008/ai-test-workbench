@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
 import { syncLivingCodeMap } from './codemap.mjs';
+import { loadWorkbenchConfig } from './core/config.mjs';
+import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import {
   DEFAULT_BLOCKED_ENDPOINTS,
   checkOutgoingRequestSafety,
@@ -44,6 +46,7 @@ export async function runPerfCommand(options = {}) {
     return 1;
   }
 
+  loadWorkbenchConfig({ qaDir });
   /** @type {Record<string, string>} */
   const overrides = {};
   if (options.baseUrl) overrides.TEST_BASE_URL = options.baseUrl;
@@ -115,7 +118,7 @@ export async function runPerfCommand(options = {}) {
       console.error(`[Target Guard Blocked] Perf endpoint "${ep}" blocked: ${epCheck.reason}`);
       return 2;
     }
-    apiBenchmark = await runReadOnlyApiBenchmark(epUrl, concurrency, iterations);
+    apiBenchmark = await runReadOnlyApiBenchmark(epUrl, concurrency, iterations, perfGuardConfig);
   }
 
   const budgetCfg = readJsonSafe(path.join(qaDir, 'perf-budget.json')) || DEFAULT_BUDGET;
@@ -135,12 +138,14 @@ export async function runPerfCommand(options = {}) {
   };
 
   const exitCode = options.enforceBudget && !evalOut.ok ? 1 : 0;
+  let jsonPath = null;
+  let mdPath = null;
 
   if (!options.dryRun) {
     const reportsDir = path.join(qaDir, 'reports');
     fs.mkdirSync(reportsDir, { recursive: true });
-    const jsonPath = path.join(reportsDir, 'perf-report.json');
-    const mdPath = path.join(reportsDir, 'perf-summary.md');
+    jsonPath = path.join(reportsDir, 'perf-report.json');
+    mdPath = path.join(reportsDir, 'perf-summary.md');
     fs.writeFileSync(jsonPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
     fs.writeFileSync(mdPath, buildPerfMarkdown(report, lang), 'utf8');
 
@@ -148,9 +153,7 @@ export async function runPerfCommand(options = {}) {
       syncLivingCodeMap(qaDir, { lang, syncImpact: false });
     }
 
-    if (options.json) {
-      console.log(JSON.stringify({ ok: exitCode === 0, exitCode, jsonPath, mdPath, ...report }, null, 2));
-    } else {
+    if (!options.json) {
       console.log(
         lang === 'zh'
           ? `\n[Perf] 性能探测完成 (Browser 路由=${browserMetrics.length}, LCP=${browserMetrics[0]?.lcpMs ?? '-'}ms, API P95=${apiBenchmark?.p95Ms ?? '-'}ms, RPS=${apiBenchmark?.rps ?? '-'})`
@@ -160,9 +163,20 @@ export async function runPerfCommand(options = {}) {
       console.log(`  Perf Summary : ${mdPath}`);
       for (const v of evalOut.violations) console.warn(`  [PERF WARN] ${v}`);
     }
-  } else if (options.json) {
-    console.log(JSON.stringify({ ok: exitCode === 0, exitCode, dryRun: true, ...report }, null, 2));
   }
 
-  return exitCode;
+  return emitCommandResult(
+    buildCommandResult({
+      tool: 'perf',
+      outcome: exitCode === 0 ? 'pass' : 'fail',
+      ok: exitCode === 0,
+      exitCode,
+      summary: `Perf benchmark (routes=${browserMetrics.length}, budgetPassed=${evalOut.ok}, LCP=${browserMetrics[0]?.lcpMs ?? '-'}ms, API P95=${apiBenchmark?.p95Ms ?? '-'}ms)`,
+      data: {
+        ...report,
+        ...(options.dryRun ? { dryRun: true } : { jsonPath, mdPath }),
+      },
+    }),
+    { asJson: Boolean(options.json) }
+  );
 }

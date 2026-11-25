@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
+import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import { groupOutcomesBySpecFile } from './core/playwright-results.mjs';
 import { SCHEMA_VERSIONS } from './core/version.mjs';
 
@@ -187,12 +188,20 @@ export async function runTraceMatrixCommand(options = {}) {
     fs.writeFileSync(path.join(reportsDir, 'trace-matrix.md'), renderTraceMatrixMarkdown(matrix, lang), 'utf8');
   }
 
-  if (options.json) {
-    console.log(JSON.stringify({ ok: true, exitCode: 0, ...matrix }, null, 2));
-    return 0;
+  if (!options.json) {
+    console.log(
+      `[Trace Matrix] ${matrix.coveredRequirements}/${matrix.totalRequirements} requirements covered (${matrix.coveragePct}%), orphanSpecs=${matrix.orphanSpecFiles.length}`
+    );
   }
-  console.log(
-    `[Trace Matrix] ${matrix.coveredRequirements}/${matrix.totalRequirements} requirements covered (${matrix.coveragePct}%), orphanSpecs=${matrix.orphanSpecFiles.length}`
+  return emitCommandResult(
+    buildCommandResult({
+      tool: 'trace-matrix',
+      outcome: 'pass',
+      ok: true,
+      exitCode: 0,
+      summary: `${matrix.coveredRequirements}/${matrix.totalRequirements} requirements covered (${matrix.coveragePct}%)`,
+      data: matrix,
+    }),
+    { asJson: Boolean(options.json) }
   );
-  return 0;
 }

@@ -6,7 +6,7 @@ import { DEPRECATED_TOOL_ALIASES, STATEFUL_TOOLS } from './tools/stateful.mjs';
 import { VERIFICATION_TOOLS } from './tools/verification.mjs';
 
 /**
- * Single Declarative MCP Tool Registry (`v6.0`, 17 canonical tools + 6 deprecated v5 aliases).
+ * Single Declarative MCP Tool Registry (`v6.2`, 16 canonical tools + 8 deprecated aliases).
  *
  * Composed from cohesive domain tool lists (`tools/discovery.mjs`, `tools/verification.mjs`,
  * `tools/stateful.mjs`) where each tool owns its schema, annotations, CLI argument builder,
@@ -45,7 +45,11 @@ export function resolveToolCall(name, rawArgs = {}) {
     const targetEntry = TOOL_BY_NAME.get(alias.targetTool);
     if (!targetEntry) return { found: false };
     /** @type {Record<string, any>} */
-    const effectiveArgs = { ...args, action: alias.fixedAction };
+    const effectiveArgs = {
+      ...args,
+      ...(alias.fixedArgs || {}),
+      ...(alias.fixedAction ? { action: alias.fixedAction } : {}),
+    };
     return {
       found: true,
       toolEntry: targetEntry,
@@ -54,7 +58,7 @@ export function resolveToolCall(name, rawArgs = {}) {
       effectiveArgs,
       deprecation: {
         deprecatedTool: alias.deprecatedTool,
-        replacement: `${alias.targetTool}(action="${alias.fixedAction}")`,
+        replacement: alias.replacement || `${alias.targetTool}(action="${alias.fixedAction}")`,
         deprecatedSince: alias.deprecatedSince,
         removeIn: alias.removeIn,
       },

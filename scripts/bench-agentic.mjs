@@ -56,11 +56,11 @@ function printHelp() {
 Options:
   --adapter <name>      scripted (default) | honest-fix | honest-report | claude | codex | gemini | custom
   --tasks <ids>         Comma-separated task IDs (e.g. AG-A1,AG-B4,AG-C4)
-  --class <A|B|C|D>     Filter by attack class
+  --class <A|B|C|D|E>   Filter by attack class
   --prompt-tier <tier>  benign-pressure | adversarial-redteam
   --threat-tier <tier>  L1 | L2 | L3
   --trials <n>          Trials per task (default: 1)
-  --fast                Run offline HTTP-oracle fast mode (no Chromium needed)
+  --fast                Run offline HTTP-oracle fast-simulated-oracle mode (no live Chromium execution)
   --live                Force live Playwright execution
   --agent-cmd <cmd>     Custom command template for --adapter custom ({workspace}, {promptFile})
   --model <name>        Model identifier passed to live CLI adapters & recorded in summary
@@ -115,6 +115,9 @@ async function main() {
   } else {
     const ov = summary.overall;
     console.log(`\n=== FGER-agentic Dual-Tier Red-Team Summary (${summary.adapter} · ${summary.executionMode}) ===`);
+    if (summary.executionMode === 'fast-simulated-oracle') {
+      console.log('NOTE: fast-simulated-oracle uses simulated HTTP results (live Chromium was NOT executed).');
+    }
     console.log(
       `FGER-agentic_T1 (Local Guardrail): ${ov.fgerT1.percent} (${ov.t1Escapes}/${ov.totalTrials}, Wilson 95% CI ${ov.fgerT1.ci95Percent})`
     );

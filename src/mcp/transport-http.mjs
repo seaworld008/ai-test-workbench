@@ -11,31 +11,18 @@ import {
   rpcError,
 } from './protocol.mjs';
 import {
+  hasJsonContentType,
+  isAllowedHttpHost,
   isAllowedHttpOrigin,
   isLoopbackHost,
   parseWorkspaceRoots,
+  readHttpBody,
+  sanitizeHttpErrorMessage,
+  sendHttpJson as sendJson,
   verifyBearerTokenConstantTime,
 } from './security.mjs';
 
-/** @param {http.IncomingMessage} req @param {number} [maxBytes] @returns {Promise<string>} */
-function readHttpBody(req, maxBytes = 2 * 1024 * 1024) {
-  return new Promise((resolve, reject) => {
-    let size = 0;
-    /** @type {Buffer[]} */
-    const chunks = [];
-    req.on('data', (/** @type {Buffer} */ chunk) => {
-      size += chunk.length;
-      if (size > maxBytes) {
-        reject(new Error('Request body too large'));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    req.on('error', reject);
-  });
-}
+const MAX_JSONRPC_BATCH_SIZE = 16;
 
 /**
  * Hardened Streamable HTTP (`/mcp`) + Legacy SSE (`/sse` + `/messages`) MCP Server (`M-02..M-09`).
@@ -113,20 +100,15 @@ export function createMcpHttpServer(options = {}) {
     }
   };
 
-  /** @param {http.ServerResponse} res @param {number} status @param {unknown} body @param {Record<string, string>} [extraHeaders] */
-  const sendJson = (res, status, body, extraHeaders = {}) => {
-    if (res.writableEnded) return;
-    const payload = JSON.stringify(body);
-    res.writeHead(status, {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': 'no-cache',
-      ...extraHeaders,
-    });
-    res.end(payload);
-  };
-
   const server = http.createServer(async (req, res) => {
     try {
+      const addr = server.address();
+      const listenPort = addr && typeof addr === 'object' ? addr.port : options.port ?? null;
+      if (!isAllowedHttpHost(req.headers.host, host, listenPort)) {
+        sendJson(res, 421, { error: 'Misdirected Request: Host header not allowed' });
+        return;
+      }
+
       const reqUrl = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`);
       const pathname = reqUrl.pathname;
 
@@ -198,6 +180,10 @@ export function createMcpHttpServer(options = {}) {
 
       if (pathname === '/messages' && req.method === 'POST') {
         pruneExpiredSessions();
+        if (!hasJsonContentType(req.headers['content-type'])) {
+          sendJson(res, 415, { error: 'Unsupported Media Type: expected application/json' });
+          return;
+        }
         const sessionId = reqUrl.searchParams.get('sessionId');
         const session = sessionId ? legacySseSessions.get(sessionId) : null;
         if (!session || session.res.writableEnded) {
@@ -210,10 +196,18 @@ export function createMcpHttpServer(options = {}) {
         try {
           payload = JSON.parse(await readHttpBody(req));
         } catch (err) {
-          sendJson(res, 400, rpcError(null, -32700, err instanceof Error ? err.message : String(err)));
+          sendJson(
+            res,
+            400,
+            rpcError(null, -32700, sanitizeHttpErrorMessage(err instanceof Error ? err.message : String(err)))
+          );
           return;
         }
 
+        if (Array.isArray(payload) && (payload.length === 0 || payload.length > MAX_JSONRPC_BATCH_SIZE)) {
+          sendJson(res, 400, rpcError(null, -32600, `Invalid JSON-RPC batch size (1..${MAX_JSONRPC_BATCH_SIZE} allowed)`));
+          return;
+        }
         const messages = Array.isArray(payload) ? payload : [payload];
         res.writeHead(202, { 'Content-Type': 'text/plain; charset=utf-8' });
         res.end('Accepted');
@@ -265,6 +259,10 @@ export function createMcpHttpServer(options = {}) {
             sendJson(res, 404, { error: 'Unknown or expired Mcp-Session-Id; initialize session first' });
             return;
           }
+          if (session.sseRes && !session.sseRes.writableEnded) {
+            sendJson(res, 409, { error: 'Conflict: SSE stream already open for this Mcp-Session-Id' });
+            return;
+          }
           session.lastActiveAt = Date.now();
           res.writeHead(200, {
             'Content-Type': 'text/event-stream; charset=utf-8',
@@ -278,16 +276,30 @@ export function createMcpHttpServer(options = {}) {
           }, 15_000);
           session.sseRes = res;
           session.sseKeepalive = keepalive;
-          req.on('close', () => clearInterval(keepalive));
+          req.on('close', () => {
+            clearInterval(keepalive);
+            if (session.sseRes === res) {
+              session.sseRes = null;
+              session.sseKeepalive = null;
+            }
+          });
           return;
         }
 
         if (req.method === 'POST') {
+          if (!hasJsonContentType(req.headers['content-type'])) {
+            sendJson(res, 415, { error: 'Unsupported Media Type: expected application/json' });
+            return;
+          }
           let payload;
           try {
             payload = JSON.parse(await readHttpBody(req));
           } catch (err) {
-            sendJson(res, 400, rpcError(null, -32700, err instanceof Error ? err.message : String(err)));
+            sendJson(
+              res,
+              400,
+              rpcError(null, -32700, sanitizeHttpErrorMessage(err instanceof Error ? err.message : String(err)))
+            );
             return;
           }
 
@@ -341,8 +353,12 @@ export function createMcpHttpServer(options = {}) {
               );
               return;
             }
-            if (payload.length === 0) {
-              sendJson(res, 400, rpcError(null, -32600, 'Empty JSON-RPC batch'));
+            if (payload.length === 0 || payload.length > MAX_JSONRPC_BATCH_SIZE) {
+              sendJson(
+                res,
+                400,
+                rpcError(null, -32600, `Invalid JSON-RPC batch size (1..${MAX_JSONRPC_BATCH_SIZE} allowed)`)
+              );
               return;
             }
             const replies = (
@@ -438,7 +454,7 @@ export function createMcpHttpServer(options = {}) {
 
       sendJson(res, 404, { error: 'Not Found' });
     } catch (err) {
-      const msg = err instanceof Error && err.message ? err.message : String(err);
+      const msg = sanitizeHttpErrorMessage(err instanceof Error && err.message ? err.message : String(err));
       sendJson(res, 500, rpcError(null, -32603, `Internal HTTP transport error: ${msg}`));
     }
   });

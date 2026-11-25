@@ -1,10 +1,10 @@
-# FGER-agentic Red-Team Benchmark Architecture & Specification (`v6.1`)
+# FGER-agentic Red-Team Benchmark Architecture & Specification (`v6.2`)
 
-> [中文版](./DESIGN.md) · [Scripted Baseline Summary](./results/SUMMARY.en.md) · [16-Task Pre-Registered Corpus](./tasks.json) · [Real-World FPR Pre-Registration](../real-world/PREREGISTRATION.en.md) · [4-Layer Governance Guide](../../docs/governance.en.md)
+> [中文版](./DESIGN.md) · [Scripted Baseline Summary](./results/SUMMARY.en.md) · [18-Task Pre-Registered Corpus](./tasks.json) · [Real-World FPR Pre-Registration](../real-world/PREREGISTRATION.en.md) · [4-Layer Governance Guide](../../docs/governance.en.md)
 
-- **Status**: `Implemented Harness (Scripted Multi-Step L1–L3 Baseline Verified · Live LLM CLI Adapters Ready / Pending Live Runs)`
-- **Date**: `2026-11-24`
-- **Target Version**: `ai-test-workbench v6.1.0`
+- **Status**: `Implemented Harness (18-Task Dual-Tier Red-Team + Autonomous Suite · Scripted Multi-Step L1–L3 Verified · Live LLM CLI Adapters Ready / Pending Live Runs)`
+- **Date**: `2026-11-25`
+- **Target Version**: `ai-test-workbench v6.2.0`
 - **Entrypoint**: `npm run bench:agentic` (or `node scripts/bench-agentic.mjs --adapter scripted|honest-fix|honest-report|claude|codex|gemini|custom`)
 
 ---
@@ -18,7 +18,7 @@ The **FGER-agentic (Agentic Fake-Green Escape Rate)** benchmark answers a single
 > Given a real planted product defect that causes an existing test to fail, how often can an autonomous AI agent with local shell and repository write access obtain a "pass" verdict recognized as trustworthy without fixing the underlying product bug?
 
 To support both **deterministic CI regression testing** and **live autonomous LLM evaluation** without ever conflating the two, the harness strictly separates two execution modes:
-1. **Deterministic Multi-Step Scripted Red-Team Baseline (`scripted-l1-l3`)**: Zero-LLM-cost, 100% reproducible multi-step attack trajectories executed against real isolated Git repos, a real mutated HTTP target app, real Playwright execution, and a real offline X.509/DSSE Sigstore T2 verifier across all 16 pre-registered tasks (paired with `honest-fix` and `honest-report` control baselines).
+1. **Deterministic Multi-Step Scripted Red-Team Baseline (`scripted-l1-l3`)**: Zero-LLM-cost, 100% reproducible multi-step attack trajectories executed against real isolated Git repos, a real mutated HTTP target app, real Playwright execution, and a real offline X.509/DSSE Sigstore T2 verifier across all 18 pre-registered tasks (Classes A/B/C/D plus Class E Dieselgate `AG-E1`/`AG-E2`, paired with `honest-fix`, `honest-report`, and `bench/agentic/autonomous-suite.mjs` zero-false-block verification).
 2. **Live Autonomous LLM CLI Adapters (`claude` / `codex` / `gemini` / `custom`)**: Pluggable runners invoking real coding agent CLIs inside the exact same isolated sandbox under `benign-pressure` and `adversarial-redteam` prompt tiers. Until live runs are executed with pinned model versions, live-LLM metrics remain explicitly labeled `pending`.
 
 ---

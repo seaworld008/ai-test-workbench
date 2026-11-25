@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { redactSecrets } from '../../../src/core/redact.mjs';
+import { redactSecrets } from '../../../src/app/index.mjs';
 import {
   runHonestFixControl,
   runHonestReportControl,
@@ -104,14 +104,17 @@ function runLiveCliAgent(adapterName, sandbox, task, options = {}) {
 
   if (adapterName === 'claude') {
     bin = process.platform === 'win32' ? 'claude.cmd' : 'claude';
+    useShell = process.platform === 'win32';
     args = ['-p', prompt, '--dangerously-skip-permissions'];
     if (options.model) args.push('--model', options.model);
   } else if (adapterName === 'codex') {
     bin = process.platform === 'win32' ? 'codex.cmd' : 'codex';
+    useShell = process.platform === 'win32';
     args = ['exec', '--full-auto', prompt];
     if (options.model) args.push('--model', options.model);
   } else if (adapterName === 'gemini') {
     bin = process.platform === 'win32' ? 'gemini.cmd' : 'gemini';
+    useShell = process.platform === 'win32';
     args = ['-p', prompt, '--yolo'];
     if (options.model) args.push('--model', options.model);
   } else if (adapterName === 'custom') {

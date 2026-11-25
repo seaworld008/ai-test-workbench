@@ -5,24 +5,39 @@ import path from 'node:path';
 import test from 'node:test';
 import { CLI_COMMANDS, runCli } from '../../src/cli.mjs';
 import { McpJobManager } from '../../src/jobs.mjs';
+import { flattenPlaywrightResults } from '../../src/core/playwright-results.mjs';
+import { redactSecrets } from '../../src/core/redact.mjs';
 import {
   DEPRECATED_TOOL_ALIASES,
   TOOL_REGISTRY,
   getMcpToolDefinitions,
   handleMcpJsonRpcMessage,
 } from '../../src/mcp-server.mjs';
+import { upgradeQaWorkspace } from '../../src/upgrade.mjs';
 
-test('MCP v6 tool surface exposes 17 canonical tools and forwards all 6 deprecated v5 aliases with warnings', async () => {
+test('MCP v6.2 tool surface exposes 16 canonical tools with 100% parameter descriptions and forwards all 8 deprecated aliases', async () => {
   const defs = getMcpToolDefinitions('2025-11-25');
-  assert.equal(defs.length, 17);
-  assert.equal(TOOL_REGISTRY.length, 17);
+  assert.equal(defs.length, 16);
+  assert.equal(TOOL_REGISTRY.length, 16);
 
   const names = new Set(defs.map((d) => d.name));
+  assert.equal(names.has('aitest_bootstrap'), true);
+  assert.equal(names.has('aitest_report'), true);
   assert.equal(names.has('aitest_heal'), true);
   assert.equal(names.has('aitest_job'), true);
   assert.equal(names.has('aitest_verify_change'), true);
+  for (const def of defs) {
+    assert.match(def.description, /\bUse when\b/i, `Tool ${def.name} description should explain "Use when..."`);
+    const props = def.inputSchema?.properties || {};
+    for (const [propName, propSchema] of Object.entries(props)) {
+      assert.ok(
+        typeof propSchema.description === 'string' && propSchema.description.trim().length > 0,
+        `Tool ${def.name}.${propName} missing non-empty parameter description`
+      );
+    }
+  }
   for (const deprecated of Object.keys(DEPRECATED_TOOL_ALIASES)) {
-    assert.equal(names.has(deprecated), false, `Deprecated v5 tool ${deprecated} must not appear in tools/list`);
+    assert.equal(names.has(deprecated), false, `Deprecated tool ${deprecated} must not appear in tools/list`);
   }
 
   // Verify canonical aitest_job(status/result/cancel) AND deprecated v5 job aliases
@@ -99,15 +114,15 @@ test('MCP v6 tool surface exposes 17 canonical tools and forwards all 6 deprecat
 test('CLI per-command strict option tables reject unrelated cross-command flags and support deprecated --approver alias', async () => {
   assert.ok(Object.keys(CLI_COMMANDS).length >= 22);
 
-  // 1. Cross-command unrelated flags are rejected with exit 1
+  // 1. Cross-command unrelated flags are rejected with exit 64 (USAGE)
   const badDoctor = await runCli(['doctor', '--suite', 'smoke']);
-  assert.equal(badDoctor, 1, 'doctor must reject --suite (belongs to run)');
+  assert.equal(badDoctor, 64, 'doctor must reject --suite (belongs to run)');
 
   const badFlaky = await runCli(['flaky', '--max-pages', '5']);
-  assert.equal(badFlaky, 1, 'flaky must reject --max-pages (belongs to explore)');
+  assert.equal(badFlaky, 64, 'flaky must reject --max-pages (belongs to explore)');
 
   const badUnknown = await runCli(['totally-unknown-cmd']);
-  assert.equal(badUnknown, 1);
+  assert.equal(badUnknown, 64);
 
   // 2. Per-command --help exits 0
   assert.equal(await runCli(['doctor', '--help']), 0);
@@ -137,6 +152,7 @@ test('CLI per-command strict option tables reject unrelated cross-command flags 
         'alice@example.com',
         '--reason',
         'legacy flag migration test',
+        '--yes',
         '--json',
       ]);
       assert.equal(approveCode, 0);
@@ -167,6 +183,38 @@ test('CLI per-command strict option tables reject unrelated cross-command flags 
 
     // 5. `explore` accepts positive boolean flags (--explore-portals/--explore-tabs/--explore-dialogs)
     assert.equal(await runCli(['explore', '--explore-portals', '--explore-tabs', '--explore-dialogs', '--help']), 0);
+
+    // 6. Deprecated `aitest_flaky_report` and `aitest_trace_matrix` forward cleanly to `aitest_report`
+    const flakyAlias = await handleMcpJsonRpcMessage(
+      { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'aitest_flaky_report', arguments: { target: tmpRepo } } },
+      { workspaceRoots: [tmpRepo] }
+    );
+    assert.equal(flakyAlias.result.structuredContent.data._deprecation.replacement, 'aitest_report(view="flaky")');
+    assert.match(flakyAlias.result.structuredContent.summary, /DEPRECATED aitest_flaky_report/);
+
+    const traceAlias = await handleMcpJsonRpcMessage(
+      { jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'aitest_trace_matrix', arguments: { target: tmpRepo } } },
+      { workspaceRoots: [tmpRepo] }
+    );
+    assert.equal(traceAlias.result.structuredContent.data._deprecation.replacement, 'aitest_report(view="traceability")');
+
+    // 7. VT ANSI stripping, POSIX testId normalization, and idempotent upgradeQaWorkspace
+    assert.equal(redactSecrets('\x1b[31mError\x1b[0m \x1b]0;title\x07plain'), 'Error plain');
+    assert.equal(redactSecrets('\x1b[31mFailed\x1b[0m {"apiKey":"secret_value_123"}'), 'Failed {"apiKey":"[REDACTED]"}');
+    const flat = flattenPlaywrightResults({
+      suites: [{ file: 'tests\\e2e\\login.spec.ts', specs: [{ title: 'dir\\case', line: 5, tests: [{ status: 'expected', results: [{ status: 'passed' }] }] }] }],
+    });
+    assert.equal(flat[0].testId, 'tests/e2e/login.spec.ts::dir/case');
+
+    const qaDir = path.join(tmpRepo, 'qa');
+    const up1 = upgradeQaWorkspace(qaDir, { scope: 'kernel' });
+    assert.equal(up1.ok, true);
+    const manifestPath = path.join(qaDir, '.aitest', 'template-manifest.json');
+    const beforeManifest = fs.readFileSync(manifestPath, 'utf8');
+    await new Promise((r) => setTimeout(r, 15));
+    const up2 = upgradeQaWorkspace(qaDir, { scope: 'kernel' });
+    assert.equal(up2.changedCount, 0);
+    assert.equal(fs.readFileSync(manifestPath, 'utf8'), beforeManifest);
   } finally {
     console.error = origErr;
     fs.rmSync(tmpRepo, { recursive: true, force: true });

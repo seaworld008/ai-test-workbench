@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { flattenPlaywrightResults } from '../../core/playwright-results.mjs';
 import { WORKBENCH_VERSION } from '../../core/version.mjs';
-import { sha256Hex } from './git-utils.mjs';
+import { sha256Hex } from './workspace-hash.mjs';
 import { isCoveredByWaiver, isInitializedQaWorkspace } from './policy.mjs';
 import { verifyPayloadT1 } from './trust-hmac.mjs';
 
@@ -248,7 +248,7 @@ export function auditResultsJson(resultsObj, options = {}) {
  * @param {string} qaDir
  * @param {string} resultsPath
  * @param {Record<string, any>} rawResultsObj
- * @param {{ allowUnboundResults?: boolean, requireLedger?: boolean, expectedRunId?: string, currentWorktreeHash?: string, requireT1Mac?: boolean }} [options]
+ * @param {{ allowUnboundResults?: boolean, requireLedger?: boolean, expectedRunId?: string, currentWorktreeHash?: string, requireT1Mac?: boolean, trustContext?: import('./trust-context.mjs').TrustContext }} [options]
  * @returns {{ ok: boolean, status: 'pass' | 'fail' | 'blocked', enforced: boolean, trustTier: 'T0' | 'T1', runId: string | null, resultsDigest: string | null, ledgerMac: string | null, errors: string[], warnings: string[] }}
  */
 export function verifyLedgerBindingInQaDir(qaDir, resultsPath, rawResultsObj, options = {}) {
@@ -370,11 +370,13 @@ export function verifyLedgerBindingInQaDir(qaDir, resultsPath, rawResultsObj, op
     };
   }
 
-  // Verify T1 HMAC on manifest.json (detects forged manifests written outside runner)
+  // Verify T1 HMAC on manifest.json (detects forged manifests and MAC stripping on T1-sticky hosts)
   const macCheck = verifyPayloadT1('ledger.manifest', manifest, manifest.mac, {
     qaDir,
     repoDir: manifest.repoDir || path.dirname(qaDir),
-    requireMac: Boolean(options.requireT1Mac || manifest.mac),
+    requireMac: Boolean(options.requireT1Mac),
+    macs: manifest.macs || null,
+    trustContext: options.trustContext,
   });
   if (!macCheck.ok) {
     errors.push(`[Run Ledger Tamper Blocked] ${macCheck.reason}`);
@@ -414,7 +416,7 @@ export function verifyLedgerBindingInQaDir(qaDir, resultsPath, rawResultsObj, op
 
   return {
     ok: errors.length === 0,
-    status: errors.length === 0 ? 'pass' : 'fail',
+    status: errors.length === 0 ? 'pass' : !macCheck.ok ? 'blocked' : 'fail',
     enforced: true,
     trustTier: errors.length === 0 && macCheck.verified ? 'T1' : 'T0',
     runId: manifest.runId,

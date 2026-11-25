@@ -4,6 +4,29 @@
 
 本日志遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 与 [语义化版本 (SemVer)](https://semver.org/spec/v2.0.0.html) 规范。
 
+## [6.2.0] - 2026-11-25
+
+### 破坏性变更与接口收敛 (Breaking Changes & Surface Polish)
+- **MCP 工具面收敛（17 → 16 权威工具）**：新增全自动零阻塞回环自举工具 `aitest_bootstrap`，将 `aitest_flaky_report` 与 `aitest_trace_matrix` 收编入 `aitest_report(view="summary"|"flaky"|"traceability")`，并为 `aitest_heal` 新增 `action: "discard"` 用于规范废弃过期/误建自愈草稿；`tools/call` 在整个 `v6.x` 继续兼容转发全部 **8 个历史旧名**并输出 `_deprecation` 提示；`CLI` 同步支持 `bootstrap`、`report --view`、`flaky`/`trace-matrix` 转发别名及用法错误统一 `--json` 输出（退出码表：`0=pass` / `1=fail` / `2=blocked` / `64=usage`）。
+
+### 安全加固与可信边界 (Security & Fail-Closed Kernel)
+- **不可变 `TrustContext`、粘性 T1 与 `aitest_init` 重签封堵（WU-01）**：
+  - 新增 `src/kernel/gate/trust-context.mjs`，在命令入口单次冻结打开 `{ tierCeiling, key, keyId, source, hostT1Sticky }` 并显式传递全链路；消除运行期隐式 `signPayloadT1(..., { createIfMissing: true })` 改态与 `allowForeignLockMac` 洗白。
+  - `.aitest/governance.lock` 升级支持多机 `macs: { [keyId]: hmac }`（向下兼容 `mac`）；引入本机粘性 T1 标记防剥离 `mac` 或删账本退回 T0；`aitest_init` 仅在无治理历史痕迹且受保护文件 100% 匹配内置模板出厂哈希时才允许写入 `source: "aitest-init"`。
+  - 修复 `src/jobs.mjs`（MCP 子进程继承 `AITEST_HMAC_KEY_FILE`，消除 CLI/MCP 密钥分裂）与 `src/runner.mjs`（Playwright/业务子进程采用严格 env 白名单彻底剥离 `AITEST_HMAC_KEY*` 与 CI OIDC 变量）；实现 RFC 8785 安全的 `canonicalizeJson` 并收紧机器人审批拦截。
+- **全链路 10 跳 HTTP 重定向防火墙、MCP HTTP 加固与脱敏 v3（WU-03）**：
+  - `base.ts` `context.route`、`APIRequestContext` 包装、`explore` 观察器与 `perf` 采集器统一启用 `maxRedirects: 0` 逐跳循环（上限 10 跳）复验出站与高危策略，正确区分 `301/302/303` 与 `307/308`；非法 `TEST_EGRESS_MODE` 严格 Fail-Closed。
+  - MCP HTTP 服务端精确校验 `Host`（`421`/`403`）、`Origin`（`403`）与 POST `Content-Type: application/json`（`415`），限制 JSON-RPC Batch 长度，重复挂载 SSE 返回 `409`，并在错误体隐藏宿主机绝对路径；POSIX 进程树取消升级 `SIGTERM -> SIGKILL`。
+  - `redactSecrets` 升级 v3（增加 VT ANSI 转义序列表剥离并扩展密钥模式）；`sync:vendor` 改为从 `src/kernel/` 出发的依赖闭包确定性镜像（`41` 个文件）；CI 与签名工作流落实最小权限拆分，离线 T2 验签绑定 `commit/tree/root`。
+- **AST 语义门禁内核 v2 与 `AITEST-G116 / G117`（WU-05）**：
+  - 新增跨作用域 `src/kernel/gate/symbol-table.mjs`（`const` 传播、页面 `route` 命名处理函数、DOM 污点源、辅助函数返回追踪）；强化 `AITEST-G104..G114` 对 `expect.poll`、循环包裹、事件监听、`allSettled` 与正则空串匹配的拦截，并在 `ruleG114` 封堵按测试预期否定状态码（如 `403` RBAC 桩）绕过故障注入豁免的缺口。
+  - 新增 **`AITEST-G116`**（拦截跨等价类 HTTP 状态改写与 Exact→Range 放宽，如 `409→201`、`403→200`）与 **`AITEST-G117`**（跨文件产品侧 `Dieselgate` 测试流量分支识别）；`changeset.mjs` 新增 `G-08` 拦截 `git mv` 将 Spec 移出测试目录。
+
+### 架构收口与 AI 零阻塞自治（Architecture & Zero-Block Autonomy）
+- **帧化 IPC、原子写锁与分层收口（WU-02）**：以 `AITEST_RESULT_FILE` 临时信封文件取代 `stdout` 刮取；`acquireDiskLock` 改用临时文件 + 硬链接原子创建且仅回收已死 PID；激活 `loadWorkbenchConfig` 集中配置与显式 `caller`；新建稳定应用门面 `src/app/index.mjs`，拆解所有巨型模块使**全仓 `src/**/*.mjs <= 500` 行**（`test/unit/architecture-boundaries.test.mjs` 强执）。
+- **零阻塞自治闭环与基准扩展（WU-04 & WU-06）**：区分回环沙箱默认 CRUD 与共享非回环只读；基于 `.aitest/baseline-ref` 支持分支新增 Spec 豁免历史回退比对（守住 `>= S2` 底线）；`diagnose` 结合产品 Diff 输出 `A-UI-Sync`；`explore` 自动合成 `specs/api-schemas.json`；`init --preset demo-campus` 补充独立域契约 Spec 实现通用模板与靶场预设彻底解耦。
+- **18 任务 `FGER-agentic`（含 E 类 Dieselgate `AG-E1`/`AG-E2`）与 `autonomous-suite` 实测（`--fast`, `v6.2.0`）**：`FGER-agentic_T1 = 11.1%` (`2/18`, Wilson 95% CI `[3.1%, 32.8%]` — 仅 `AG-B4`/`AG-C4` 同用户边界)、`FGER-agentic_T2 = 0.0%` (`0/18`, CI `[0.0%, 17.6%]`)，`AG-E1`/`AG-E2` 全部由 `L3-AST-Diff` 阻断；`bench/agentic/autonomous-suite.mjs` 零阻塞完成率 `100%` 且 `FGER = 0%`（详见 [bench/agentic/results/SUMMARY.md](./bench/agentic/results/SUMMARY.md)）。
+
 ## [6.1.0] - 2026-11-24
 
 ### 新增 (Added)

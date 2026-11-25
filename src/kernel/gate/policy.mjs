@@ -1,44 +1,19 @@
+// @ts-check
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadAndValidateAitestConfigFile } from '../../core/config.mjs';
+import { DEFAULT_CONFIG_PROTECTED_GLOBS, loadAndValidateAitestConfigFile } from '../../core/config.mjs';
 import { compileGlob } from '../../core/glob.mjs';
-import { computeFlakyStats } from '../../core/playwright-results.mjs';
 import { WORKBENCH_VERSION } from '../../core/version.mjs';
-import { sha256Hex } from './git-utils.mjs';
+import { sha256Hex } from './workspace-hash.mjs';
+import { loadActiveQuarantine } from './policy-quarantine.mjs';
+import { BOT_APPROVER_RE, isBotApprover, isCoveredByWaiver, loadAndValidateWaivers } from './policy-waivers.mjs';
 import { verifyPayloadT1 } from './trust-hmac.mjs';
 
-/**
- * Governance Policy, Protected File Manifests, Waivers & Quarantine Validation (`T-01`, `T-02`, `T-06`, `G-09`, `I-01`).
- *
- * Security invariants:
- * 1. Declarative protected file set covers configs, lint, fixtures, setup specs, impact-map.json,
- *    package.json, .gitignore, and support/** (including support/gate/**).
- * 2. Fail-closed on missing `.aitest/governance.lock` in any initialized QA workspace.
- * 3. T1 HMAC verification detects local lock forgery when T1 key is available.
- * 4. Quarantine requires TTL <= 7d, cap <= 5, no @critical/@smoke, T1 MAC, and real ledger flaky evidence.
- */
+export { BOT_APPROVER_RE, isBotApprover, isCoveredByWaiver, loadActiveQuarantine, loadAndValidateWaivers };
 
-export const DEFAULT_PROTECTED_GLOBS = Object.freeze([
-  'playwright.config.ts',
-  'playwright.config.js',
-  'eslint.config.mjs',
-  'eslint.config.js',
-  'eslint.config.ts',
-  'aitest.config.json',
-  'waivers.json',
-  'tsconfig.json',
-  'perf-budget.json',
-  'impact-map.json',
-  'package.json',
-  '.gitignore',
-  'support/**',
-  'scripts/audit-results.mjs',
-  'tests/fixtures/**',
-  'tests/*.setup.ts',
-  'tests/*.setup.js',
-]);
+export const DEFAULT_PROTECTED_GLOBS = DEFAULT_CONFIG_PROTECTED_GLOBS;
 
-// Static list preserved for backward compatibility with callers inspecting PROTECTED_GOVERNANCE_REL_FILES
+// Static referee-kernel list (adaptation layer files like perf-budget.json, auth.setup.ts, and tests/fixtures/custom/** are open)
 export const PROTECTED_GOVERNANCE_REL_FILES = Object.freeze([
   'playwright.config.ts',
   'playwright.config.js',
@@ -47,13 +22,13 @@ export const PROTECTED_GOVERNANCE_REL_FILES = Object.freeze([
   'aitest.config.json',
   'waivers.json',
   'tsconfig.json',
-  'perf-budget.json',
   'impact-map.json',
   'package.json',
   '.gitignore',
   'support/target-guard.mjs',
   'support/gate-kernel.mjs',
   'support/schema-validator.mjs',
+  'support/gate/trust-context.mjs',
   'support/gate/trust-hmac.mjs',
   'support/gate/git-utils.mjs',
   'support/gate/policy.mjs',
@@ -62,14 +37,7 @@ export const PROTECTED_GOVERNANCE_REL_FILES = Object.freeze([
   'support/gate/engine.mjs',
   'scripts/audit-results.mjs',
   'tests/fixtures/base.ts',
-  'tests/auth.setup.ts',
 ]);
-
-/**
- * Matches AI/bot identifiers anywhere as a whole token segment (`claude-code`, `codex-cli`, `ai-agent`, etc.).
- */
-export const BOT_APPROVER_RE =
-  /(?:^|[-_.\s/])(ai|agent|bot|healer|codex|claude|cursor|copilot|gemini|antigravity|llm|gpt|auto|self)(?:$|[-_.\s/])/i;
 
 /**
  * Converts a simple glob (`**`, `*`) to a case-insensitive RegExp anchored on POSIX relative paths.
@@ -80,7 +48,7 @@ export function compilePolicyGlob(glob) {
 }
 
 /**
- * Returns whether a diff file path (relative to repo root or qaDir) targets a protected governance file (`G-09`, `I-01`).
+ * Returns whether a diff file path targets a protected governance file (`G-09`, `I-01`).
  * @param {string} filePath
  * @param {string[]} [extraGlobs]
  */
@@ -88,15 +56,13 @@ export function isProtectedDiffPath(filePath, extraGlobs = []) {
   const norm = String(filePath || '').replace(/\\/g, '/').replace(/^\.\//, '');
   if (!norm) return false;
 
-  // Always protect governance lock, quarantine, and .env files in QA diffs
-  if (/(^|\/)\.aitest\/(governance\.lock|quarantine\.json|governance-audit\.jsonl)$/i.test(norm)) {
+  if (/(^|\/)\.aitest\/(governance\.lock|quarantine\.json|governance-audit\.jsonl|template-manifest\.json)$/i.test(norm)) {
     return true;
   }
   if (/(^|\/)\.env(?:\.[^/]+)?$/i.test(norm) && !/\.env\.example$/i.test(norm) && !/\.env\.mcp\.example$/i.test(norm)) {
     return true;
   }
 
-  // Extract suffix relative to `qa/` if present, plus check full path directly
   const qaIdx = norm.indexOf('/qa/');
   const candidates = [norm];
   if (norm.startsWith('qa/')) candidates.push(norm.slice(3));
@@ -154,10 +120,8 @@ function collectFilesMatchingGlobs(qaDir, globs) {
       const rel = path.relative(qaDir, full).replace(/\\/g, '/');
       if (entry.isDirectory()) {
         walk(full);
-      } else if (entry.isFile()) {
-        if (compiled.some((re) => re.test(rel))) {
-          matched.add(rel);
-        }
+      } else if (entry.isFile() && compiled.some((re) => re.test(rel))) {
+        matched.add(rel);
       }
     }
   };
@@ -202,11 +166,69 @@ export function isInitializedQaWorkspace(qaDir) {
 }
 
 /**
- * Fail-closed Layer 0 Governance Lock verification (`T-01`, `T-02`).
- * - Missing `.aitest/governance.lock` in an initialized QA workspace returns `ok: false, status: 'blocked'`.
- * - Verifies schema, non-bot approver, protected file hashes, and T1 HMAC when present.
+ * Verifies that an `aitest-init` lock has NOT drifted from the recorded factory template manifest.
  * @param {string} qaDir
- * @param {{ requireT1Mac?: boolean, allowUninitialized?: boolean, allowForeignMac?: boolean }} [options]
+ * @param {Record<string, any>} lockObj
+ * @param {Record<string, string>} currentHashes
+ * @returns {{ ok: boolean, blocked: boolean, errors: string[] }}
+ */
+function verifyInitLockAgainstFactoryManifest(qaDir, lockObj, currentHashes) {
+  /** @type {string[]} */
+  const errors = [];
+  const manifestPath = path.join(qaDir, '.aitest', 'template-manifest.json');
+  if (!fs.existsSync(manifestPath)) {
+    errors.push(
+      '[Governance Tamper Blocked] Governance lock has source="aitest-init" but .aitest/template-manifest.json is missing; run "governance approve" after human review.'
+    );
+    return { ok: false, blocked: true, errors };
+  }
+
+  let manifestRaw = '';
+  let manifestObj;
+  try {
+    manifestRaw = fs.readFileSync(manifestPath, 'utf8');
+    manifestObj = JSON.parse(manifestRaw);
+  } catch (err) {
+    errors.push(
+      `[Governance Tamper Blocked] Corrupted .aitest/template-manifest.json: ${err instanceof Error ? err.message : String(err)}`
+    );
+    return { ok: false, blocked: true, errors };
+  }
+
+  if (!lockObj.templateManifestDigest || typeof lockObj.templateManifestDigest !== 'string') {
+    errors.push(
+      '[Governance Tamper Blocked] Governance lock has source="aitest-init" without mandatory templateManifestDigest binding.'
+    );
+  } else {
+    const actualManifestDigest = `sha256:${sha256Hex(manifestRaw.replace(/\r\n/g, '\n'))}`;
+    if (actualManifestDigest !== lockObj.templateManifestDigest) {
+      errors.push(
+        `[Governance Tamper Blocked] .aitest/template-manifest.json digest mismatch (${actualManifestDigest.slice(0, 19)} != ${String(lockObj.templateManifestDigest).slice(0, 19)}) under aitest-init lock.`
+      );
+    }
+  }
+
+  const factoryFiles = manifestObj?.files && typeof manifestObj.files === 'object' ? manifestObj.files : {};
+  for (const [rel, curHash] of Object.entries(currentHashes)) {
+    const expectedFactoryHash = factoryFiles[rel];
+    if (!expectedFactoryHash) {
+      errors.push(
+        `[Governance Tamper Blocked] Unapproved protected file "${rel}" present under source="aitest-init" lock (not in factory template manifest).`
+      );
+    } else if (curHash !== expectedFactoryHash) {
+      errors.push(
+        `[Governance Tamper Blocked] Protected file "${rel}" differs from factory template manifest under source="aitest-init" lock (${curHash.slice(0, 19)} != ${String(expectedFactoryHash).slice(0, 19)}).`
+      );
+    }
+  }
+
+  return { ok: errors.length === 0, blocked: errors.length > 0, errors };
+}
+
+/**
+ * Fail-closed Layer 0 Governance Lock verification (`T-01`, `T-02`).
+ * @param {string} qaDir
+ * @param {{ requireT1Mac?: boolean, allowUninitialized?: boolean, trustContext?: import('./trust-context.mjs').TrustContext }} [options]
  * @returns {{ ok: boolean, status: 'pass' | 'fail' | 'blocked', enforced: boolean, trustTier: 'T0' | 'T1', lockPath: string, lockDigest?: string, errors: string[], warnings: string[], approvedBy?: string }}
  */
 export function verifyGovernanceLockInQaDir(qaDir, options = {}) {
@@ -222,15 +244,7 @@ export function verifyGovernanceLockInQaDir(qaDir, options = {}) {
       errors.push(
         `[Governance Tamper Blocked] Missing .aitest/governance.lock in initialized QA workspace (${qaDir}). Fail-closed: restore from Git or have a human run "npx ai-test-workbench@${WORKBENCH_VERSION} governance approve".`
       );
-      return {
-        ok: false,
-        status: 'blocked',
-        enforced: true,
-        trustTier: 'T0',
-        lockPath,
-        errors,
-        warnings,
-      };
+      return { ok: false, status: 'blocked', enforced: true, trustTier: 'T0', lockPath, errors, warnings };
     }
     if (options.allowUninitialized === true) {
       return {
@@ -246,15 +260,7 @@ export function verifyGovernanceLockInQaDir(qaDir, options = {}) {
     errors.push(
       `[Governance Blocked] Uninitialized QA workspace (${qaDir}) is missing playwright.config.* / aitest.config.json and .aitest/governance.lock. Fail-closed: run "npx ai-test-workbench@${WORKBENCH_VERSION} init" first.`
     );
-    return {
-      ok: false,
-      status: 'blocked',
-      enforced: true,
-      trustTier: 'T0',
-      lockPath,
-      errors,
-      warnings,
-    };
+    return { ok: false, status: 'blocked', enforced: true, trustTier: 'T0', lockPath, errors, warnings };
   }
 
   let lockObj;
@@ -277,25 +283,21 @@ export function verifyGovernanceLockInQaDir(qaDir, options = {}) {
     return { ok: false, status: 'blocked', enforced: true, trustTier: 'T0', lockPath, errors, warnings };
   }
 
-  // Reject forged bot approvers even if hand-written directly into governance.lock
-  if (lockObj.source !== 'aitest-init' && BOT_APPROVER_RE.test(String(lockObj.approvedBy))) {
-    errors.push(
-      `[Governance Tamper Blocked] Lock approver "${lockObj.approvedBy}" matches reserved AI/bot identity.`
-    );
+  if (lockObj.source !== 'aitest-init' && isBotApprover(lockObj.approvedBy)) {
+    errors.push(`[Governance Tamper Blocked] Lock approver "${lockObj.approvedBy}" matches reserved AI/bot identity.`);
   }
 
-  // Verify T1 HMAC tamper-evidence if present (or required)
   const macCheck = verifyPayloadT1('governance.lock', lockObj, lockObj.mac, {
     qaDir,
     repoDir: path.dirname(qaDir),
     requireMac: Boolean(options.requireT1Mac),
+    macs: lockObj.macs || null,
+    trustContext: options.trustContext,
   });
+  let forceBlocked = false;
   if (!macCheck.ok) {
-    if (options.allowForeignMac && !options.requireT1Mac) {
-      warnings.push(`[Governance T0 Cross-Machine] ${macCheck.reason}`);
-    } else {
-      errors.push(`[Governance Tamper Blocked] ${macCheck.reason}`);
-    }
+    forceBlocked = true;
+    errors.push(`[Governance Tamper Blocked] ${macCheck.reason}`);
   } else if (!macCheck.verified) {
     warnings.push(`[Governance T0 Advisory] ${macCheck.reason}`);
   }
@@ -303,13 +305,23 @@ export function verifyGovernanceLockInQaDir(qaDir, options = {}) {
   const currentHashes = computeProtectedFileHashes(qaDir);
   const lockedFiles = lockObj.files || {};
 
+  if (lockObj.source === 'aitest-init') {
+    const factoryCheck = verifyInitLockAgainstFactoryManifest(qaDir, lockObj, currentHashes);
+    if (!factoryCheck.ok) {
+      forceBlocked = true;
+      errors.push(...factoryCheck.errors);
+    }
+  }
+
   for (const [rel, expectedHash] of Object.entries(lockedFiles)) {
     const actualHash = currentHashes[rel];
     if (!actualHash) {
+      forceBlocked = true;
       errors.push(
         `[Governance Tamper Blocked] Protected governance file "${rel}" was deleted. Human approval required via "npx ai-test-workbench@${WORKBENCH_VERSION} governance approve".`
       );
     } else if (actualHash !== expectedHash) {
+      forceBlocked = true;
       errors.push(
         `[Governance Tamper Blocked] Protected governance file "${rel}" was modified (${actualHash.slice(0, 19)} != ${String(expectedHash).slice(0, 19)}). Agents may NOT edit governance configs/waivers; a human must run "npx ai-test-workbench@${WORKBENCH_VERSION} governance approve --target <repo> --by <name> --reason <why>".`
       );
@@ -318,15 +330,17 @@ export function verifyGovernanceLockInQaDir(qaDir, options = {}) {
 
   for (const rel of Object.keys(currentHashes)) {
     if (!(rel in lockedFiles)) {
+      forceBlocked = true;
       errors.push(
         `[Governance Tamper Blocked] Unapproved protected file "${rel}" added without updating .aitest/governance.lock. Human approval required via "npx ai-test-workbench@${WORKBENCH_VERSION} governance approve".`
       );
     }
   }
 
+  const status = errors.length === 0 ? 'pass' : forceBlocked ? 'blocked' : 'fail';
   return {
     ok: errors.length === 0,
-    status: errors.length === 0 ? 'pass' : 'fail',
+    status,
     enforced: true,
     trustTier: errors.length === 0 && macCheck.verified ? 'T1' : 'T0',
     lockPath,
@@ -335,235 +349,4 @@ export function verifyGovernanceLockInQaDir(qaDir, options = {}) {
     warnings,
     approvedBy: lockObj.approvedBy,
   };
-}
-
-/**
- * Validates `waivers.json` with anti-self-approval, issue/trace linkage, and <=14-day TTL enforcement.
- * @param {string} waiversPath
- * @param {number} [nowMs]
- * @param {{ maxWaiverDays?: number, maxWaivers?: number, legacyCompat?: boolean }} [options]
- */
-export function loadAndValidateWaivers(waiversPath, nowMs = Date.now(), options = {}) {
-  const maxWaiverDays = options.maxWaiverDays ?? 14;
-  const maxWaivers = options.maxWaivers ?? 5;
-  const legacyCompat = Boolean(options.legacyCompat);
-  /** @type {string[]} */
-  const errors = [];
-  /** @type {Array<Record<string, any>>} */
-  const activeWaivers = [];
-
-  if (!waiversPath || !fs.existsSync(waiversPath)) {
-    return { ok: true, errors, activeWaivers };
-  }
-
-  let parsed;
-  try {
-    parsed = JSON.parse(fs.readFileSync(waiversPath, 'utf8'));
-  } catch (err) {
-    return { ok: false, errors: [`Invalid JSON in waivers file (${waiversPath}): ${err instanceof Error ? err.message : String(err)}`], activeWaivers };
-  }
-
-  const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed.waivers) ? parsed.waivers : [];
-  if (list.length > maxWaivers) {
-    errors.push(`Waiver count (${list.length}) exceeds maximum allowed active waivers (${maxWaivers}).`);
-  }
-
-  list.forEach((/** @type {any} */ w, /** @type {number} */ idx) => {
-    const label = `waiver[${idx}]`;
-    if (!w || typeof w !== 'object') {
-      errors.push(`${label}: entry must be an object.`);
-      return;
-    }
-    if (!w.titlePattern && !w.filePattern && !w.testId) {
-      errors.push(`${label}: requires "testId", "titlePattern", or "filePattern".`);
-    }
-    if (!w.owner || typeof w.owner !== 'string' || !w.owner.trim()) {
-      errors.push(`${label}: missing mandatory "owner".`);
-    } else if (BOT_APPROVER_RE.test(w.owner.trim())) {
-      errors.push(`${label}: owner "${w.owner}" cannot be an AI agent/bot identifier.`);
-    }
-    if (!w.reason || typeof w.reason !== 'string' || !w.reason.trim()) {
-      errors.push(`${label}: missing mandatory "reason".`);
-    }
-    if (!w.expiresAt || typeof w.expiresAt !== 'string') {
-      errors.push(`${label}: missing mandatory ISO date "expiresAt".`);
-      return;
-    }
-    const expMs = Date.parse(w.expiresAt);
-    if (Number.isNaN(expMs)) {
-      errors.push(`${label}: invalid date in "expiresAt": "${w.expiresAt}".`);
-      return;
-    }
-    if (expMs <= nowMs) {
-      errors.push(
-        `${label}: waiver for "${w.testId || w.titlePattern || w.filePattern}" owned by "${w.owner}" EXPIRED at ${w.expiresAt}.`
-      );
-      return;
-    }
-
-    if (!legacyCompat) {
-      if (!w.approvedBy || typeof w.approvedBy !== 'string' || !w.approvedBy.trim()) {
-        errors.push(`${label}: missing mandatory human "approvedBy" field (Agents cannot self-approve waivers).`);
-      } else if (BOT_APPROVER_RE.test(w.approvedBy.trim())) {
-        errors.push(`${label}: "approvedBy" ("${w.approvedBy}") must be a human reviewer, never an AI agent.`);
-      }
-
-      const hasLink = (typeof w.issue === 'string' && w.issue.trim()) || (typeof w.traceId === 'string' && w.traceId.trim());
-      if (!hasLink) {
-        errors.push(`${label}: requires linked "issue" or "traceId" for audit traceability.`);
-      }
-
-      const baseMs = w.createdAt ? Date.parse(w.createdAt) : nowMs;
-      if (Number.isNaN(baseMs)) {
-        errors.push(`${label}: invalid ISO date in "createdAt": "${w.createdAt}".`);
-      } else {
-        const maxDurationMs = maxWaiverDays * 24 * 60 * 60 * 1000;
-        if (expMs - baseMs > maxDurationMs || expMs - nowMs > maxDurationMs) {
-          errors.push(
-            `${label}: waiver TTL exceeds maximum ${maxWaiverDays}-day governance limit (expiresAt=${w.expiresAt}).`
-          );
-        }
-      }
-    }
-
-    activeWaivers.push(w);
-  });
-
-  return { ok: errors.length === 0, errors, activeWaivers };
-}
-
-/** @param {{ file?: string, title?: string, testId?: string }} item @param {Array<Record<string, any>>} activeWaivers @param {string} [scope] @returns {Record<string, any> | null} */
-export function isCoveredByWaiver(item, activeWaivers, scope = 'test') {
-  for (const w of activeWaivers) {
-    if (w.scope && w.scope !== scope && w.scope !== 'all') continue;
-    if (w.testId) {
-      const itemNormFile = String(item.file || '').replace(/\\/g, '/');
-      const itemTestId = `${itemNormFile}::${item.title || ''}`;
-      if (itemTestId === w.testId || item.testId === w.testId) return w;
-      continue;
-    }
-    const titleOk = w.titlePattern ? String(item.title || '').includes(w.titlePattern) : true;
-    const fileOk = w.filePattern ? String(item.file || '').replace(/\\/g, '/').includes(w.filePattern) : true;
-    if (titleOk && fileOk) return w;
-  }
-  return null;
-}
-
-/**
- * Checks whether a test has genuine flaky evidence in `.aitest/runs/` ledger history (`T-06`).
- * @param {string} qaDir
- * @param {string} file
- * @param {string} title
- */
-function hasLedgerFlakyEvidence(qaDir, file, title) {
-  const indexPath = path.join(qaDir, '.aitest', 'runs', 'index.jsonl');
-  if (!fs.existsSync(indexPath)) return false;
-  const normFile = String(file || '').replace(/\\/g, '/');
-  const lines = fs
-    .readFileSync(indexPath, 'utf8')
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .slice(-20);
-
-  /** @type {Array<{ status?: string, retryPassed?: boolean }>} */
-  const observations = [];
-
-  for (const line of lines) {
-    try {
-      const row = JSON.parse(line);
-      const summaryPath = path.join(qaDir, '.aitest', 'runs', String(row.runId || ''), 'tests-summary.json');
-      if (!fs.existsSync(summaryPath)) continue;
-      const tests = JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
-      for (const t of tests) {
-        const tf = String(t.file || '').replace(/\\/g, '/');
-        if ((tf === normFile || tf.endsWith(`/${normFile}`) || normFile.endsWith(`/${tf}`)) && t.title === title) {
-          observations.push({ status: t.status, retryPassed: t.retryPassed });
-        }
-      }
-    } catch {
-      // skip malformed entry
-    }
-  }
-
-  const stats = computeFlakyStats(observations);
-  if (stats.totalRuns < 3) return false;
-  return stats.flakyRate >= 0.2;
-}
-
-/**
- * Strict Quarantine Validation (`T-06`):
- * Enforces <= 7-day TTL, max 5 entries, no @critical/@smoke, T1 MAC integrity, and Ledger flaky history evidence.
- * @param {string} qaDir
- * @param {number | { nowMs?: number, requireT1Mac?: boolean }} [nowOrOptions]
- */
-export function loadActiveQuarantine(qaDir, nowOrOptions = Date.now()) {
-  const nowMs = typeof nowOrOptions === 'number' ? nowOrOptions : nowOrOptions?.nowMs ?? Date.now();
-  const requireT1Mac = typeof nowOrOptions === 'object' && Boolean(nowOrOptions?.requireT1Mac);
-  const qPath = path.join(qaDir, '.aitest', 'quarantine.json');
-  if (!fs.existsSync(qPath)) return { ok: true, entries: [], errors: [] };
-
-  const MAX_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-  const MAX_ENTRIES = 5;
-
-  let parsed;
-  try {
-    parsed = JSON.parse(fs.readFileSync(qPath, 'utf8'));
-  } catch (err) {
-    return { ok: false, entries: [], errors: [`Invalid JSON in .aitest/quarantine.json: ${err instanceof Error ? err.message : String(err)}`] };
-  }
-
-  /** @type {string[]} */
-  const errors = [];
-  /** @type {Array<Record<string, any>>} */
-  const active = [];
-  const list = Array.isArray(parsed.entries) ? parsed.entries : [];
-
-  // Verify T1 HMAC if entries are non-empty (prevents hand-editing or MAC-stripping quarantine.json!)
-  if (list.length > 0) {
-    const macCheck = verifyPayloadT1('quarantine.json', parsed, parsed.mac, {
-      qaDir,
-      repoDir: path.dirname(qaDir),
-      requireMac: requireT1Mac || Boolean(parsed.mac),
-    });
-    if (!macCheck.ok) {
-      errors.push(`[Quarantine Tamper Blocked] ${macCheck.reason}`);
-    }
-  }
-
-  if (list.length > MAX_ENTRIES) {
-    errors.push(`[Quarantine Policy Blocked] Active quarantine count (${list.length}) exceeds maximum ${MAX_ENTRIES}.`);
-  }
-
-  for (const item of list) {
-    if (!item || typeof item !== 'object' || !item.title || !item.file) {
-      errors.push('[Quarantine Policy Blocked] Malformed quarantine entry (requires "file" and "title").');
-      continue;
-    }
-    if (/@critical|@smoke/i.test(String(item.title))) {
-      errors.push(`[Quarantine Policy Blocked] Critical/smoke test "${item.title}" cannot be quarantined.`);
-      continue;
-    }
-    const exp = Date.parse(item.expiresAt || '');
-    if (Number.isNaN(exp) || exp <= nowMs) {
-      errors.push(`[Quarantine Expired] Quarantined flaky test "${item.title}" expired at ${item.expiresAt}; fix or escalate.`);
-      continue;
-    }
-    const addedMs = item.addedAt ? Date.parse(item.addedAt) : nowMs;
-    if (Number.isNaN(addedMs) || exp - nowMs > MAX_TTL_MS || exp - addedMs > MAX_TTL_MS) {
-      errors.push(
-        `[Quarantine Policy Blocked] Quarantine TTL for "${item.title}" exceeds 7-day maximum (expiresAt=${item.expiresAt}).`
-      );
-      continue;
-    }
-    if (!hasLedgerFlakyEvidence(qaDir, item.file, item.title)) {
-      errors.push(
-        `[Quarantine Forgery Blocked] "${item.file}::${item.title}" has no historical flaky evidence (>=3 runs, >=20% flaky rate) in Run Ledger.`
-      );
-      continue;
-    }
-    active.push(item);
-  }
-
-  return { ok: errors.length === 0, entries: active, errors };
 }

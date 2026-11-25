@@ -1,0 +1,206 @@
+import { unwrapExpr } from './ts-loader.mjs';
+
+export const DOM_TAINT_READERS = new Set([
+  'textContent',
+  'innerText',
+  'innerHTML',
+  'inputValue',
+  'getAttribute',
+  'allTextContents',
+  'allInnerTexts',
+  'count',
+  'title',
+  'url',
+]);
+
+/**
+ * Checks whether an AST subtree directly invokes a Playwright DOM read or references a tainted local identifier.
+ * @param {any} ts
+ * @param {any} node
+ * @param {Set<string>} taintedKeys
+ * @param {string} scopeKey
+ */
+function exprContainsDomTaint(ts, node, taintedKeys, scopeKey) {
+  if (!node) return false;
+  const u = unwrapExpr(ts, node);
+  if (ts.isAwaitExpression(u)) return exprContainsDomTaint(ts, u.expression, taintedKeys, scopeKey);
+  if (ts.isIdentifier(u)) {
+    return taintedKeys.has(`${scopeKey}::${u.text}`) || taintedKeys.has(`<file>::${u.text}`);
+  }
+  if (
+    ts.isCallExpression(u) &&
+    ts.isPropertyAccessExpression(u.expression) &&
+    DOM_TAINT_READERS.has(u.expression.name.text)
+  ) {
+    return true;
+  }
+  let hit = false;
+  ts.forEachChild(u, (/** @type {any} */ child) => {
+    if (!hit && exprContainsDomTaint(ts, child, taintedKeys, scopeKey)) hit = true;
+  });
+  return hit;
+}
+
+/**
+ * Checks whether a function body subtree invokes `expect(...)` or `assert(...)`.
+ * @param {any} ts
+ * @param {any} bodyNode
+ */
+function bodyHasRealExpect(ts, bodyNode) {
+  if (!bodyNode) return false;
+  let found = false;
+  /** @param {any} n */
+  const scan = (n) => {
+    if (found || !n) return;
+    if (ts.isCallExpression(n)) {
+      const expr = n.expression;
+      if (ts.isIdentifier(expr) && (expr.text === 'expect' || expr.text === 'assert')) {
+        found = true;
+        return;
+      }
+      if (
+        ts.isPropertyAccessExpression(expr) &&
+        ts.isIdentifier(expr.expression) &&
+        expr.expression.text === 'expect'
+      ) {
+        found = true;
+        return;
+      }
+    }
+    ts.forEachChild(n, scan);
+  };
+  scan(bodyNode);
+  return found;
+}
+
+/**
+ * Extracts single-pass lexical symbol facts over a TS/JS spec `SourceFile` (`WU-05`):
+ * - `const` initializers (scoped to `<testTitle>::<name>` or `<file>::<name>`)
+ * - DOM-read taint variables (`const t = await el.textContent()`)
+ * - `expect` / `expect.soft` / `expect.configure({ soft })` / `expect.extend` aliases
+ * - 1-hop named `page.route` handlers (`function fn` / `const fn = ...`)
+ * - Locally defined assertion helpers & trusted relative/fixture helper imports
+ *
+ * @param {any} ts
+ * @param {any} sf
+ */
+export function buildSymbolTable(ts, sf) {
+  /** @type {Map<string, any>} */
+  const constMap = new Map();
+  /** @type {Set<string>} */
+  const shadowedConsts = new Set();
+  /** @type {Set<string>} */
+  const domTaintedVars = new Set();
+  /** @type {Map<string, { kind: 'expect' | 'soft' | 'extend', isSoft: boolean }>} */
+  const expectAliases = new Map();
+  /** @type {Map<string, any>} */
+  const namedRouteHandlers = new Map();
+  /** @type {Set<string>} */
+  const localAssertHelpers = new Set();
+  /** @type {Set<string>} */
+  const trustedHelperImports = new Set();
+
+  /** @param {any} n @returns {string} */
+  const getTextSafe = (n) => {
+    try {
+      return n ? n.getText(sf).trim() : '';
+    } catch {
+      return '';
+    }
+  };
+
+  /** @param {any} node @param {string} scopeKey */
+  const visit = (node, scopeKey) => {
+    let nextScope = scopeKey;
+
+    if (ts.isImportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+      const modText = node.moduleSpecifier.text;
+      if (/^(?:\.\.?\/|@?fixtures\/|.*fixtures\/base)/.test(modText) && node.importClause?.namedBindings) {
+        if (ts.isNamedImports(node.importClause.namedBindings)) {
+          for (const spec of node.importClause.namedBindings.elements) {
+            trustedHelperImports.add(spec.name.text);
+          }
+        }
+      }
+    }
+
+    if (ts.isCallExpression(node)) {
+      const calleeText = getTextSafe(node.expression).replace(/\s+/g, '');
+      if (/^(?:test|it)(?:\.(?:only|skip|fixme|fail|slow))?$/.test(calleeText) && node.arguments.length >= 2) {
+        const arg0 = unwrapExpr(ts, node.arguments[0]);
+        const title =
+          ts.isStringLiteral(arg0) || ts.isNoSubstitutionTemplateLiteral(arg0)
+            ? arg0.text
+            : getTextSafe(arg0).slice(0, 80);
+        if (title) nextScope = title;
+      }
+    }
+
+    if (ts.isFunctionDeclaration(node) && node.name && node.body) {
+      const fnName = node.name.text;
+      namedRouteHandlers.set(fnName, node);
+      if (bodyHasRealExpect(ts, node.body)) localAssertHelpers.add(fnName);
+    }
+
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      const idName = node.name.text;
+      const scopedId = `${scopeKey}::${idName}`;
+      const init = unwrapExpr(ts, node.initializer);
+      const isConstList = Boolean(node.parent && ts.isVariableDeclarationList(node.parent) && (node.parent.flags & ts.NodeFlags.Const) !== 0);
+
+      if (isConstList) {
+        if (constMap.has(scopedId)) {
+          shadowedConsts.add(scopedId);
+          constMap.delete(scopedId);
+        } else if (!shadowedConsts.has(scopedId)) {
+          constMap.set(scopedId, init);
+        }
+      }
+
+      if (exprContainsDomTaint(ts, init, domTaintedVars, scopeKey)) {
+        domTaintedVars.add(scopedId);
+      }
+
+      if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) {
+        namedRouteHandlers.set(idName, init);
+        if (bodyHasRealExpect(ts, init.body)) localAssertHelpers.add(idName);
+      }
+
+      const initText = getTextSafe(init).replace(/\s+/g, '');
+      if (initText === 'expect') {
+        expectAliases.set(idName, { kind: 'expect', isSoft: false });
+      } else if (initText === 'expect.soft') {
+        expectAliases.set(idName, { kind: 'soft', isSoft: true });
+      } else if (ts.isCallExpression(init)) {
+        const cal = getTextSafe(init.expression).replace(/\s+/g, '');
+        if (cal === 'expect.configure') {
+          const softOn = Boolean(init.arguments[0] && /\bsoft\s*:\s*true\b/.test(getTextSafe(init.arguments[0])));
+          expectAliases.set(idName, { kind: softOn ? 'soft' : 'expect', isSoft: softOn });
+        } else if (cal === 'expect.extend') {
+          expectAliases.set(idName, { kind: 'extend', isSoft: false });
+        }
+      }
+    }
+
+    ts.forEachChild(node, (/** @type {any} */ child) => visit(child, nextScope));
+  };
+
+  visit(sf, '<file>');
+
+  return {
+    expectAliases,
+    namedRouteHandlers,
+    localAssertHelpers,
+    trustedHelperImports,
+    /** @param {string | null | undefined} testTitle @param {string} idName */
+    getConstInit(testTitle, idName) {
+      const k = testTitle ? `${testTitle}::${idName}` : `<file>::${idName}`;
+      return constMap.get(k) || constMap.get(`<file>::${idName}`) || null;
+    },
+    /** @param {string | null | undefined} testTitle @param {string} idName */
+    isDomTainted(testTitle, idName) {
+      const k = testTitle ? `${testTitle}::${idName}` : `<file>::${idName}`;
+      return domTaintedVars.has(k) || domTaintedVars.has(`<file>::${idName}`);
+    },
+  };
+}

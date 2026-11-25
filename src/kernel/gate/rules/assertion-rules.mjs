@@ -60,6 +60,16 @@ function computeChangesetPoolMetrics(changesetContext, currentFile) {
 }
 
 /**
+ * Filters assertions to baseline-existing test blocks when `baselineTestTitles` is provided (`WU-04`).
+ * @param {any[]} assertions
+ * @param {Set<string> | null | undefined} baselineTestTitles
+ */
+function scopeAssertionsToBaseline(assertions, baselineTestTitles) {
+  if (!baselineTestTitles) return assertions;
+  return assertions.filter((a) => !a.testTitle || baselineTestTitles.has(a.testTitle));
+}
+
+/**
  * AITEST-G102: Net assertion deletion between base and head (with commit-level cross-file split pooling).
  */
 export const ruleG102 = {
@@ -70,14 +80,31 @@ export const ruleG102 = {
   defaultEnabled: true,
   /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
   evaluate(ctx) {
-    const { file = '', baseSum, headSum, canWaive = () => false, changesetContext } = ctx;
+    const {
+      file = '',
+      baseSum,
+      headSum,
+      canWaive = () => false,
+      changesetContext,
+      isBaselineNewSpec = false,
+      baselineTestTitles = null,
+      exemptBranchNewRegression = false,
+    } = ctx;
     if (!baseSum || !headSum) return [];
+    if (isBaselineNewSpec && exemptBranchNewRegression) return [];
 
-    const baseCount = baseSum.assertions.length;
-    const headCount = headSum.assertions.length;
-    const baseAriaCount = baseSum.assertions.filter((a) => a.isAriaSnapshot).length;
-    const headAriaCount = headSum.assertions.filter((a) => a.isAriaSnapshot).length;
-    const consolidatedIntoAria = headAriaCount > baseAriaCount && baseCount - headCount <= 2;
+    const scopeSet = exemptBranchNewRegression ? baselineTestTitles : null;
+    const baseAsserts = scopeAssertionsToBaseline(baseSum.assertions, scopeSet);
+    const headAsserts = scopeAssertionsToBaseline(headSum.assertions, scopeSet);
+
+    const baseCount = baseAsserts.length;
+    const rawHeadCount = headAsserts.length;
+    const baseHasCount = baseAsserts.some((a) => a.matcher === 'toHaveCount');
+    const implicitCredits = baseHasCount ? headAsserts.filter((a) => a.implicitCountCredit).length : 0;
+    const headCount = rawHeadCount + implicitCredits;
+    const baseAriaCount = baseAsserts.filter((a) => a.isAriaSnapshot).length;
+    const headAriaCount = headAsserts.filter((a) => a.isAriaSnapshot).length;
+    const consolidatedIntoAria = headAriaCount > baseAriaCount && baseCount - rawHeadCount <= 2;
 
     const pool = computeChangesetPoolMetrics(changesetContext, file);
     const relocatedToSibling =
@@ -95,10 +122,37 @@ export const ruleG102 = {
           code: 'AITEST-G102',
           severity: 'error',
           file,
-          message: `${file}: net assertion reduction detected (base ${baseCount} -> head ${headCount}).`,
-          evidence: { baseCount, headCount },
+          message: `${file}: net assertion reduction detected (base ${baseCount} -> head ${rawHeadCount}).`,
+          evidence: { baseCount, headCount: rawHeadCount },
         },
       ];
+    }
+
+    // Per-REQ test-block accounting: prevent padding one block after gutting a REQ-* block
+    const baseBlocks = baseSum.testBlocks || [];
+    const headBlocks = headSum.testBlocks || [];
+    if (!relocatedToSibling && !consolidatedIntoAria && baseBlocks.length > 1) {
+      for (const bBlock of baseBlocks) {
+        if (!bBlock.reqIds?.length || !bBlock.assertions?.length) continue;
+        const matchingHead = headBlocks.filter(
+          (/** @type {any} */ hb) =>
+            hb.title === bBlock.title || (hb.reqIds || []).some((/** @type {string} */ r) => bBlock.reqIds.includes(r))
+        );
+        const headReqAsserts = matchingHead.reduce((/** @type {number} */ n, /** @type {any} */ hb) => n + (hb.assertions?.length || 0), 0);
+        if (headReqAsserts === 0 && !canWaive('assertion-deletion') && !canWaive('AITEST-G102')) {
+          return [
+            {
+              code: 'AITEST-G102',
+              severity: 'error',
+              file,
+              line: bBlock.line,
+              testTitle: bBlock.title,
+              message: `${file}: requirement test block [${bBlock.reqIds.join(', ')}] lost all assertions or was deleted.`,
+              evidence: { reqIds: bBlock.reqIds, testTitle: bBlock.title },
+            },
+          ];
+        }
+      }
     }
     return [];
   },
@@ -115,23 +169,51 @@ export const ruleG103 = {
   defaultEnabled: true,
   /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
   evaluate(ctx) {
-    const { file = '', baseSum, headSum, canWaive = () => false, changesetContext } = ctx;
+    const {
+      file = '',
+      baseSum,
+      headSum,
+      canWaive = () => false,
+      changesetContext,
+      isBaselineNewSpec = false,
+      baselineTestTitles = null,
+      exemptBranchNewRegression = false,
+    } = ctx;
     if (!baseSum || !headSum) return [];
+    if (isBaselineNewSpec && exemptBranchNewRegression) return [];
 
-    const baseCount = baseSum.assertions.length;
-    const headCount = headSum.assertions.length;
+    const scopeSet = exemptBranchNewRegression ? baselineTestTitles : null;
+    const baseAsserts = scopeAssertionsToBaseline(baseSum.assertions, scopeSet);
+    const headAsserts = scopeAssertionsToBaseline(headSum.assertions, scopeSet);
+
+    const baseCount = baseAsserts.length;
+    const headCount = headAsserts.length;
     if (baseCount === 0 || headCount === 0) return [];
 
-    const baseAriaCount = baseSum.assertions.filter((a) => a.isAriaSnapshot).length;
-    const headAriaCount = headSum.assertions.filter((a) => a.isAriaSnapshot).length;
+    const baseAriaCount = baseAsserts.filter((a) => a.isAriaSnapshot).length;
+    const headAriaCount = headAsserts.filter((a) => a.isAriaSnapshot).length;
     const consolidatedIntoAria = headAriaCount > baseAriaCount && baseCount - headCount <= 2;
 
-    const baseMax = Math.max(...baseSum.assertions.map((a) => a.tier));
-    const headMax = Math.max(...headSum.assertions.map((a) => a.tier));
-    const baseSumTier = baseSum.assertions.reduce((s, a) => s + a.tier, 0);
-    const headSumTier = headSum.assertions.reduce((s, a) => s + a.tier, 0);
-    const baseNegated = baseSum.assertions.filter((a) => a.isNegated).length;
-    const headNegated = headSum.assertions.filter((a) => a.isNegated).length;
+    const baseMax = Math.max(...baseAsserts.map((a) => a.tier));
+    const headMax = Math.max(...headAsserts.map((a) => a.tier));
+    const baseSumTier = baseAsserts.reduce((s, a) => s + a.tier, 0);
+    const baseHasCount = baseAsserts.some((a) => a.matcher === 'toHaveCount');
+    const implicitStrengthCredit = baseHasCount
+      ? headAsserts.filter((a) => a.implicitCountCredit).length * 4
+      : 0;
+    const headSumTier = headAsserts.reduce((s, a) => s + a.tier, 0) + implicitStrengthCredit;
+    const baseNegated = baseAsserts.filter((a) => a.isNegated).length;
+    const headNegated = headAsserts.filter((a) => a.isNegated).length;
+
+    // Screenshot tolerance inflation or expectApiContract schema removal
+    const maxTol = (/** @type {any[]} */ list, /** @type {string} */ k) =>
+      Math.max(0, ...list.map((a) => Number(a.screenshotOptions?.[k] || 0)));
+    const screenshotRelaxed =
+      headAsserts.some((a) => a.screenshotOptions) &&
+      (['maxDiffPixelRatio', 'maxDiffPixels', 'threshold'].some((k) => maxTol(headAsserts, k) > maxTol(baseAsserts, k)));
+    const baseHadApiSchema = baseAsserts.some((a) => a.matcher === 'expectApiContract' && a.hasApiSchema);
+    const headHasApiSchema = headAsserts.some((a) => a.matcher === 'expectApiContract' && a.hasApiSchema);
+    const apiSchemaDropped = baseHadApiSchema && !headHasApiSchema;
 
     const pool = computeChangesetPoolMetrics(changesetContext, file);
     const strengthRelocatedToSibling =
@@ -142,6 +224,8 @@ export const ruleG103 = {
       headNegated <= baseNegated;
 
     const downgraded =
+      screenshotRelaxed ||
+      apiSchemaDropped ||
       (!consolidatedIntoAria && !strengthRelocatedToSibling && (headMax < baseMax || headSumTier < baseSumTier)) ||
       (headNegated > baseNegated && headSumTier <= baseSumTier);
 
@@ -151,8 +235,8 @@ export const ruleG103 = {
           code: 'AITEST-G103',
           severity: 'error',
           file,
-          message: `${file}: assertion strength downgraded (max tier S${baseMax} -> S${headMax}, total strength ${baseSumTier} -> ${headSumTier}${headNegated > baseNegated ? ', positive->negated flip' : ''}).`,
-          evidence: { baseMax, headMax, baseSumTier, headSumTier, baseNegated, headNegated },
+          message: `${file}: assertion strength downgraded (${screenshotRelaxed ? 'screenshot tolerance inflated' : apiSchemaDropped ? 'expectApiContract schema removed' : `max tier S${baseMax} -> S${headMax}, total strength ${baseSumTier} -> ${headSumTier}${headNegated > baseNegated ? ', positive->negated flip' : ''}`}).`,
+          evidence: { baseMax, headMax, baseSumTier, headSumTier, baseNegated, headNegated, screenshotRelaxed, apiSchemaDropped },
         },
       ];
     }
@@ -201,10 +285,35 @@ export const ruleG115 = {
   defaultEnabled: true,
   /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
   evaluate(ctx) {
-    const { file = '', baseSum, headSum, canWaive = () => false } = ctx;
+    const {
+      file = '',
+      baseSum,
+      headSum,
+      canWaive = () => false,
+      isBaselineNewSpec = false,
+      baselineTestTitles = null,
+      exemptBranchNewRegression = false,
+    } = ctx;
     if (!baseSum || !headSum) return [];
+    if (isBaselineNewSpec && exemptBranchNewRegression) return [];
+
+    let baseTagCount = baseSum.criticalTags.length;
+    let headTagCount = headSum.criticalTags.length;
+    if (exemptBranchNewRegression && baselineTestTitles) {
+      const countBranchNewBlockTags = (/** @type {any} */ sum) =>
+        (sum.testBlocks || [])
+          .filter((/** @type {any} */ tb) => !baselineTestTitles.has(tb.title))
+          .reduce(
+            (/** @type {number} */ n, /** @type {any} */ tb) =>
+              n + (String(tb.title || '').match(/@(?:critical|smoke)\b/gi) || []).length,
+            0
+          );
+      baseTagCount = Math.max(0, baseTagCount - countBranchNewBlockTags(baseSum));
+      headTagCount = Math.max(0, headTagCount - countBranchNewBlockTags(headSum));
+    }
+
     if (
-      headSum.criticalTags.length < baseSum.criticalTags.length &&
+      headTagCount < baseTagCount &&
       !canWaive('tag-removal') &&
       !canWaive('AITEST-G115')
     ) {
@@ -213,7 +322,7 @@ export const ruleG115 = {
           code: 'AITEST-G115',
           severity: 'error',
           file,
-          message: `${file}: @critical/@smoke tag removed from test title (${baseSum.criticalTags.length} -> ${headSum.criticalTags.length}).`,
+          message: `${file}: @critical/@smoke tag removed from test title (${baseTagCount} -> ${headTagCount}).`,
           evidence: { baseTags: baseSum.criticalTags, headTags: headSum.criticalTags },
         },
       ];

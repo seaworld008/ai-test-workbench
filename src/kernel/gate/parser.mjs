@@ -3,28 +3,29 @@ import {
   classifyExpectChainAst,
   extractExpectChainFromCall,
 } from './lattice.mjs';
+import { inspectNonAssertionCallEvents } from './parser-calls.mjs';
 import {
   BROWSER_EVAL_METHODS,
-  RUNTIME_CAPABILITY_RE,
-  SEMANTIC_LOCATOR_METHODS,
   SUCCESS_STATUS_CODES,
   extractStringLiteralText,
   hasExpectOrAssertCall,
-  hasThrowStatement,
   inspectEarlyReturnInBlock,
   inspectPropertyAssignment,
-  inspectRouteFulfillHandler,
   inspectTryStatement,
 } from './parser-inspectors.mjs';
+import { buildSymbolTable } from './symbol-table.mjs';
 import { getNodeLine, resolveTypeScriptCompiler, unwrapExpr } from './ts-loader.mjs';
 
 /**
  * @typedef {{
  *   tier: number; label: string; matcher: string; isSoft: boolean; isNegated: boolean;
  *   isTautology: boolean; isSelfReferential?: boolean; isVacuous?: boolean; isAriaSnapshot: boolean;
+ *   implicitCountCredit?: boolean; hasApiSchema?: boolean; screenshotOptions?: Record<string, number> | null;
+ *   isStatusCheck?: boolean; statusCodes?: number[]; isStatusRangeCheck?: boolean;
  *   numericExpected: number | null; actualExpr?: string; expectedArg?: string; raw: string;
  *   line: number; scopeKind: string; testTitle: string | null;
- *   insideIf: boolean; insideIfInTest: boolean; insideTernary: boolean; insideBrowserEvaluate: boolean;
+ *   insideIf: boolean; insideIfInTest: boolean; insideTernary: boolean;
+ *   insideDynamicLoop?: boolean; insideEventListener?: boolean; insideBrowserEvaluate: boolean;
  * }} AstAssertion
  * @typedef {{
  *   line: number; scopeKind: string; testTitle: string | null; snippet: string; message: string;
@@ -39,7 +40,7 @@ import { getNodeLine, resolveTypeScriptCompiler, unwrapExpr } from './ts-loader.
  *   file: string; usedAst: boolean; compilerUnavailable: boolean;
  *   assertions: AstAssertion[]; customAssertCalls: number; semanticLocators: number; genericLocators: number;
  *   successStatuses: number; serverErrorStatuses: number; criticalTags: string[];
- *   testBlocks: Array<{ title: string; line: number; assertions: AstAssertion[] }>;
+ *   testBlocks: Array<{ title: string; reqIds: string[]; line: number; assertions: AstAssertion[] }>;
  *   events: {
  *     configTamper: AstEvent[]; tautologies: AstEvent[]; skips: AstEvent[]; softAssertions: AstEvent[];
  *     swallowedCatches: AstEvent[]; forceTrue: AstEvent[]; timeoutOrRetry: AstEvent[];
@@ -49,13 +50,18 @@ import { getNodeLine, resolveTypeScriptCompiler, unwrapExpr } from './ts-loader.
  * }} AstSummary
  */
 
+/** @param {any} ts @param {any} node @returns {boolean} */
+function isStaticNonEmptyLoopNode(ts, node) {
+  if (ts.isForOfStatement(node)) {
+    const u = unwrapExpr(ts, node.expression);
+    return Boolean(u && ts.isArrayLiteralExpression(u) && u.elements.length > 0);
+  }
+  return false;
+}
+
 /**
- * Extracts a structured, scope-aware semantic summary of a TS/JS spec source using the TypeScript Compiler API.
- * Captures lexical scope (`top-level | describe | hook | test | browser-evaluate | catch`),
- * enclosing `test()` titles, line numbers, and structured event arrays for all pluggable gate rules.
- *
- * @param {string} fileLabel
- * @param {string} sourceText
+ * Extracts a structured, scope-aware semantic summary of a TS/JS spec source (`WU-05` SymbolTable enabled).
+ * @param {string} fileLabel @param {string} sourceText
  * @param {{ assertFunctionNames?: string[], qaDir?: string, wrapInAsyncFn?: boolean, tsCompiler?: any }} [options]
  * @returns {AstSummary}
  */
@@ -78,16 +84,8 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
     criticalTags: [],
     testBlocks: [],
     events: {
-      configTamper: [],
-      tautologies: [],
-      skips: [],
-      softAssertions: [],
-      swallowedCatches: [],
-      forceTrue: [],
-      timeoutOrRetry: [],
-      conditionalAssertions: [],
-      emptyHelpers: [],
-      routeFulfills: [],
+      configTamper: [], tautologies: [], skips: [], softAssertions: [], swallowedCatches: [],
+      forceTrue: [], timeoutOrRetry: [], conditionalAssertions: [], emptyHelpers: [], routeFulfills: [],
     },
     violations: [],
   };
@@ -96,7 +94,6 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
     summary.compilerUnavailable = true;
     return summary;
   }
-
   if (!sourceText || !sourceText.trim()) {
     summary.usedAst = true;
     return summary;
@@ -105,8 +102,9 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
   const codeToParse = options.wrapInAsyncFn ? `async function __aitest_hunk__() {\n${sourceText}\n}` : sourceText;
   const sf = ts.createSourceFile(fileLabel || 'spec.ts', codeToParse, ts.ScriptTarget.Latest, true);
   summary.usedAst = true;
+  const symbolTable = buildSymbolTable(ts, sf);
 
-  /** @param {string} code @param {string} message @param {string} [snippet] @param {{ line?: number, testTitle?: string | null, scopeKind?: string }} [meta] */
+  /** @param {string} code @param {string} message @param {string} [snippet] @param {Record<string, any>} [meta] */
   const pushViolation = (code, message, snippet = '', meta = {}) => {
     summary.violations.push({
       code,
@@ -118,44 +116,43 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
     });
   };
 
+  /** @type {Array<{ line: number, scopeKind: string, testTitle: string | null, snippet: string }>} */
+  const pendingLoopAssertions = [];
+  /** @type {Array<{ line: number, scopeKind: string, testTitle: string | null, snippet: string }>} */
+  const pendingAllSettledCalls = [];
+
   const state = {
     fileLabel,
     wrapInAsyncFn: Boolean(options.wrapInAsyncFn),
     isCustomAssertName,
+    symbolTable,
+    pendingAllSettledCalls,
     summary,
     pushViolation,
   };
 
-  /** @type {{ insideIf: boolean, insideIfInTest: boolean, insideTernary: boolean, insideBrowserEvaluate: boolean, scopeKind: string, testTitle: string | null }} */
   const initialCtx = {
     insideIf: false,
     insideIfInTest: false,
     insideTernary: false,
+    insideDynamicLoop: false,
+    insideEventListener: false,
     insideBrowserEvaluate: false,
     scopeKind: options.wrapInAsyncFn ? 'test' : 'top-level',
-    testTitle: null,
+    testTitle: /** @type {string | null} */ (null),
   };
 
   /** @param {any} node @param {typeof initialCtx} [ctx] */
   const visit = (node, ctx = initialCtx) => {
     const line = getNodeLine(ts, sf, node);
 
-    if (ts.isBlock(node)) {
-      inspectEarlyReturnInBlock(ts, sf, node, ctx, state);
-    }
+    if (ts.isBlock(node)) inspectEarlyReturnInBlock(ts, sf, node, ctx, state);
+    if (ts.isTryStatement(node)) inspectTryStatement(ts, sf, node, line, ctx, state);
 
-    if (ts.isTryStatement(node)) {
-      inspectTryStatement(ts, sf, node, line, ctx, state);
-    }
-
-    // Empty custom assertion helper (`AITEST-G113`)
     if (ts.isFunctionDeclaration(node) && node.name && isCustomAssertName(node.name.text) && node.body) {
       if (!hasExpectOrAssertCall(ts, sf, node.body, isCustomAssertName)) {
         const ev = {
-          line,
-          scopeKind: ctx.scopeKind,
-          testTitle: ctx.testTitle,
-          snippet: node.name.text,
+          line, scopeKind: ctx.scopeKind, testTitle: ctx.testTitle, snippet: node.name.text,
           message: `${fileLabel}: custom assertion helper "${node.name.text}" contains zero real expect() calls.`,
         };
         summary.events.emptyHelpers.push(ev);
@@ -163,18 +160,12 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
       }
     }
     if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      isCustomAssertName(node.name.text) &&
-      node.initializer &&
-      (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
+      ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && isCustomAssertName(node.name.text) &&
+      node.initializer && (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
     ) {
       if (!hasExpectOrAssertCall(ts, sf, node.initializer.body, isCustomAssertName)) {
         const ev = {
-          line,
-          scopeKind: ctx.scopeKind,
-          testTitle: ctx.testTitle,
-          snippet: node.name.text,
+          line, scopeKind: ctx.scopeKind, testTitle: ctx.testTitle, snippet: node.name.text,
           message: `${fileLabel}: custom assertion helper "${node.name.text}" contains zero real expect() calls.`,
         };
         summary.events.emptyHelpers.push(ev);
@@ -182,242 +173,62 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
       }
     }
 
-    if (ts.isPropertyAssignment(node)) {
-      inspectPropertyAssignment(ts, sf, node, line, ctx, state);
-    }
+    if (ts.isPropertyAssignment(node)) inspectPropertyAssignment(ts, sf, node, line, ctx, state);
 
-    // Call expressions (test/describe scopes, assertions, skip/fixme/fail/only, .catch, route.fulfill, locators)
     /** @type {Partial<typeof initialCtx> | null} */
     let childScopeOverride = null;
     if (ts.isCallExpression(node)) {
       const calleeText = node.expression.getText(sf).replace(/\s+/g, '');
 
-      if (
-        /^(?:test|it|test\.describe|describe)(?:\.[a-z]+)?$/.test(calleeText) &&
-        node.arguments.length >= 1
-      ) {
+      if (/^(?:test|it|test\.describe|describe)(?:\.[a-z]+)?$/.test(calleeText) && node.arguments.length >= 1) {
         const titleStr = extractStringLiteralText(ts, node.arguments[0]);
         if (titleStr) {
-          const tags = titleStr.match(/@(?:critical|smoke)\b/gi) || [];
-          for (const tag of tags) summary.criticalTags.push(tag.toLowerCase());
+          for (const tag of titleStr.match(/@(?:critical|smoke)\b/gi) || []) summary.criticalTags.push(tag.toLowerCase());
         }
         if (node.arguments.length >= 2 && ts.isObjectLiteralExpression(node.arguments[1])) {
-          const optText = node.arguments[1].getText(sf);
-          const objTags = optText.match(/@(?:critical|smoke)\b/gi) || [];
-          for (const tag of objTags) summary.criticalTags.push(tag.toLowerCase());
+          for (const objTag of node.arguments[1].getText(sf).match(/@(?:critical|smoke)\b/gi) || []) {
+            summary.criticalTags.push(objTag.toLowerCase());
+          }
         }
-
         const isDescribe = /^(?:test\.describe|describe)\b/.test(calleeText);
         const isHook = /^test\.(?:beforeEach|afterEach|beforeAll|afterAll)$/.test(calleeText);
-        const isTestDef =
-          !isDescribe &&
-          !isHook &&
-          /^(?:test|it)(?:\.(?:only|skip|fixme|fail|slow))?$/.test(calleeText) &&
-          node.arguments.length >= 2;
-
+        const isTestDef = !isDescribe && !isHook && /^(?:test|it)(?:\.(?:only|skip|fixme|fail|slow))?$/.test(calleeText) && node.arguments.length >= 2;
         if (isTestDef) {
           const testTitle = titleStr || (node.arguments[0] ? node.arguments[0].getText(sf).slice(0, 80) : '<unnamed>');
-          summary.testBlocks.push({ title: testTitle, line, assertions: [] });
-          childScopeOverride = { scopeKind: 'test', testTitle, insideIfInTest: false };
+          const reqIds = [...new Set(testTitle.match(/\bREQ-[A-Za-z0-9_-]+\b/g) || [])];
+          summary.testBlocks.push({ title: testTitle, reqIds, line, assertions: [] });
+          childScopeOverride = { scopeKind: 'test', testTitle, insideIfInTest: false, insideDynamicLoop: false, insideEventListener: false };
         } else if (isDescribe) {
           childScopeOverride = { scopeKind: 'describe' };
         } else if (isHook) {
-          childScopeOverride = { scopeKind: 'hook', insideIfInTest: false };
+          childScopeOverride = { scopeKind: 'hook', insideIfInTest: false, insideDynamicLoop: false, insideEventListener: false };
         }
       }
 
-      if (ts.isPropertyAccessExpression(node.expression) && BROWSER_EVAL_METHODS.has(node.expression.name.text)) {
-        childScopeOverride = {
-          ...(childScopeOverride || {}),
-          scopeKind: 'browser-evaluate',
-          insideBrowserEvaluate: true,
-        };
-      }
-
-      // Skip / fixme / only / fail (`AITEST-G105`)
-      if (
-        /^(?:test|it|describe|test\.describe)\.(?:skip|fixme|only)$/.test(calleeText) ||
-        /^(?:testInfo|info)\.(?:skip|fixme)$/.test(calleeText)
-      ) {
-        const rawCall = node.getText(sf);
-        const firstLine = rawCall.split(/\r?\n/)[0].trim();
-        const isStandaloneGuard =
-          /^(?:test|testInfo|info)\.skip$/.test(calleeText) &&
-          node.arguments.length >= 1 &&
-          !(node.arguments.length >= 2 && (ts.isArrowFunction(node.arguments[1]) || ts.isFunctionExpression(node.arguments[1]))) &&
-          !(node.arguments.length >= 3 && (ts.isArrowFunction(node.arguments[2]) || ts.isFunctionExpression(node.arguments[2])));
-        const condText = isStandaloneGuard ? node.arguments[0].getText(sf) : '';
-        const isCapabilityGuard = isStandaloneGuard && RUNTIME_CAPABILITY_RE.test(condText);
-        const ev = {
-          kind: calleeText.endsWith('.only') ? 'only' : 'skip',
-          calleeText,
-          line,
-          scopeKind: ctx.scopeKind,
-          testTitle: ctx.testTitle,
-          isStandaloneGuard,
-          isCapabilityGuard,
-          snippet: rawCall.slice(0, 160),
-          message: `${fileLabel}: added skip/fixme/only ("${firstLine}").`,
-        };
-        summary.events.skips.push(ev);
-        pushViolation('AITEST-G105', ev.message, rawCall, ev);
-      }
-      if (/^(?:test|it|describe|test\.describe|testInfo|info)\.fail$/.test(calleeText)) {
-        const rawCall = node.getText(sf);
-        const firstLine = rawCall.split(/\r?\n/)[0].trim();
-        const ev = {
-          kind: 'fail',
-          calleeText,
-          line,
-          scopeKind: ctx.scopeKind,
-          testTitle: ctx.testTitle,
-          isStandaloneGuard: false,
-          isCapabilityGuard: false,
-          snippet: rawCall.slice(0, 160),
-          message: `${fileLabel}: added expectation-inverting .fail() ("${firstLine}").`,
-        };
-        summary.events.skips.push(ev);
-        pushViolation('AITEST-G105', ev.message, rawCall, ev);
-      }
-
-      // `expect.configure({ soft: true })` (`AITEST-G106`)
-      if (calleeText === 'expect.configure' && node.arguments[0] && ts.isObjectLiteralExpression(node.arguments[0])) {
-        const hasSoftTrue = node.arguments[0].properties.some(
-          (/** @type {any} */ p) =>
-            ts.isPropertyAssignment(p) &&
-            ((ts.isIdentifier(p.name) && p.name.text === 'soft') ||
-              (ts.isStringLiteral(p.name) && p.name.text === 'soft')) &&
-            unwrapExpr(ts, p.initializer).kind === ts.SyntaxKind.TrueKeyword
-        );
-        if (hasSoftTrue) {
-          const ev = {
-            kind: 'expect.configure',
-            line,
-            scopeKind: ctx.scopeKind,
-            testTitle: ctx.testTitle,
-            snippet: node.getText(sf),
-            message: `${fileLabel}: expect.configure({ soft: true }) globally weakens assertions to soft mode.`,
-          };
-          summary.events.softAssertions.push(ev);
-          pushViolation('AITEST-G106', ev.message, ev.snippet, ev);
-        }
-      }
-
-      // `test.setTimeout(>=60000)` & `.toPass({ timeout: >=30000 })` (`AITEST-G109`)
-      if (calleeText === 'test.setTimeout' && node.arguments[0]) {
-        const arg0 = unwrapExpr(ts, node.arguments[0]);
-        if (ts.isNumericLiteral(arg0) && Number(arg0.text) >= 60_000) {
-          const ev = {
-            line,
-            scopeKind: ctx.scopeKind,
-            testTitle: ctx.testTitle,
-            snippet: node.getText(sf),
-            message: `${fileLabel}: excessive test.setTimeout(${arg0.text}ms >= 60000ms).`,
-          };
-          summary.events.timeoutOrRetry.push(ev);
-          pushViolation('AITEST-G109', ev.message, ev.snippet, ev);
-        }
-      }
-      if (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'toPass') {
-        const arg0 = node.arguments[0];
-        if (arg0 && ts.isObjectLiteralExpression(arg0)) {
-          for (const p of arg0.properties) {
-            if (
-              ts.isPropertyAssignment(p) &&
-              ts.isIdentifier(p.name) &&
-              p.name.text === 'timeout' &&
-              ts.isNumericLiteral(unwrapExpr(ts, p.initializer)) &&
-              Number(unwrapExpr(ts, p.initializer).text) >= 30_000
-            ) {
-              const ev = {
-                line,
-                scopeKind: ctx.scopeKind,
-                testTitle: ctx.testTitle,
-                snippet: node.getText(sf),
-                message: `${fileLabel}: inflated toPass({ timeout: ${unwrapExpr(ts, p.initializer).text} }) masks product latency/failure.`,
-              };
-              summary.events.timeoutOrRetry.push(ev);
-              pushViolation('AITEST-G109', ev.message, ev.snippet, ev);
-            }
-          }
-        }
-      }
-
-      // Swallowed `.catch(...)` without rethrow (`AITEST-G107`)
-      if (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'catch') {
-        const handler = node.arguments[0];
-        if (!handler || !hasThrowStatement(ts, handler)) {
-          const rawCall = node.getText(sf);
-          const ev = {
-            kind: 'dot-catch',
-            line,
-            scopeKind: ctx.scopeKind,
-            testTitle: ctx.testTitle,
-            insideBrowserEvaluate: ctx.insideBrowserEvaluate,
-            hasAssertionInCatch: handler ? hasExpectOrAssertCall(ts, sf, handler, isCustomAssertName) : false,
-            capturesErrorFlag: false,
-            snippet: rawCall.slice(0, 160),
-            message: `${fileLabel}: swallowed exception via non-rethrowing .catch() ("${rawCall.split(/\r?\n/)[0].trim()}").`,
-          };
-          summary.events.swallowedCatches.push(ev);
-          pushViolation('AITEST-G107', ev.message, rawCall, ev);
-        }
-      }
-
-      // Backend faking via `page.route(... r.fulfill(...))` (`AITEST-G114`)
-      if (
-        ts.isPropertyAccessExpression(node.expression) &&
-        node.expression.name.text === 'route' &&
-        node.arguments.length >= 2
-      ) {
-        const handler = node.arguments[1];
-        const meta = inspectRouteFulfillHandler(ts, sf, handler);
-        if (meta.hasFulfill) {
-          const firstLine = node.getText(sf).split(/\r?\n/)[0];
-          const urlPatternText = node.arguments[0].getText(sf);
-          const ev = {
-            line,
-            scopeKind: ctx.scopeKind,
-            testTitle: ctx.testTitle,
-            urlPatternText,
-            statusCodes: meta.statusCodes,
-            isFaultInjection: meta.isFaultInjection,
-            setsExternalTrapVar: meta.setsExternalTrapVar,
-            snippet: firstLine.slice(0, 160),
-            message: `${fileLabel}: mocking backend response via route.fulfill() in spec can fabricate fake-green oracles (requires waiver).`,
-          };
-          summary.events.routeFulfills.push(ev);
-          pushViolation('AITEST-G114', ev.message, firstLine, ev);
-        }
-      }
-
-      // Semantic vs generic locators (`AITEST-G111`)
       if (ts.isPropertyAccessExpression(node.expression)) {
-        const methodName = node.expression.name.text;
-        if (SEMANTIC_LOCATOR_METHODS.has(methodName)) summary.semanticLocators += 1;
-        if (methodName === 'locator' && node.arguments[0]) {
-          const sel = unwrapExpr(ts, node.arguments[0]);
-          if (
-            (ts.isStringLiteral(sel) || ts.isNoSubstitutionTemplateLiteral(sel)) &&
-            /^(body|html|\*|div)$/i.test(sel.text.trim())
-          ) {
-            summary.genericLocators += 1;
+        const mName = node.expression.name.text;
+        if (BROWSER_EVAL_METHODS.has(mName)) {
+          childScopeOverride = { ...(childScopeOverride || {}), scopeKind: 'browser-evaluate', insideBrowserEvaluate: true };
+        } else if ((mName === 'forEach' || mName === 'map') && node.arguments.length >= 1) {
+          const recv = unwrapExpr(ts, node.expression.expression);
+          if (!(recv && ts.isArrayLiteralExpression(recv) && recv.elements.length > 0)) {
+            childScopeOverride = { ...(childScopeOverride || {}), insideDynamicLoop: true };
           }
+        } else if ((mName === 'on' || mName === 'addListener') && node.arguments.length >= 2) {
+          childScopeOverride = { ...(childScopeOverride || {}), insideEventListener: true };
         }
       }
 
-      // Expect chain classification + S0/soft/conditional checks
-      const chain = extractExpectChainFromCall(ts, sf, node);
+      inspectNonAssertionCallEvents(ts, sf, node, calleeText, line, ctx, state);
+
+      const chain = extractExpectChainFromCall(ts, sf, node, symbolTable);
       if (chain) {
         const snippet = node.getText(sf).trim();
         const cls = {
-          ...classifyExpectChainAst(ts, sf, chain, snippet),
-          line,
-          scopeKind: ctx.scopeKind,
-          testTitle: ctx.testTitle,
-          insideIf: ctx.insideIf,
-          insideIfInTest: ctx.insideIfInTest,
-          insideTernary: ctx.insideTernary,
+          ...classifyExpectChainAst(ts, sf, chain, snippet, { symbolTable, testTitle: ctx.testTitle }),
+          line, scopeKind: ctx.scopeKind, testTitle: ctx.testTitle,
+          insideIf: ctx.insideIf, insideIfInTest: ctx.insideIfInTest, insideTernary: ctx.insideTernary,
+          insideDynamicLoop: ctx.insideDynamicLoop, insideEventListener: ctx.insideEventListener,
           insideBrowserEvaluate: ctx.insideBrowserEvaluate,
         };
         summary.assertions.push(cls);
@@ -425,19 +236,13 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
           const activeTest = summary.testBlocks[summary.testBlocks.length - 1];
           if (activeTest && activeTest.title === ctx.testTitle) activeTest.assertions.push(cls);
         }
-
         if (cls.numericExpected !== null) {
           if (SUCCESS_STATUS_CODES.has(cls.numericExpected)) summary.successStatuses += 1;
           if (cls.numericExpected >= 500 && cls.numericExpected < 600) summary.serverErrorStatuses += 1;
         }
-
         if (cls.isTautology) {
           const ev = {
-            line,
-            scopeKind: ctx.scopeKind,
-            testTitle: ctx.testTitle,
-            label: cls.label,
-            snippet,
+            line, scopeKind: ctx.scopeKind, testTitle: ctx.testTitle, label: cls.label, snippet,
             message: `${fileLabel}: ${cls.label} assertion forbidden ("${snippet.split(/\r?\n/)[0]}").`,
           };
           summary.events.tautologies.push(ev);
@@ -445,25 +250,16 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
         }
         if (cls.isSoft) {
           const ev = {
-            kind: 'expect.soft',
-            line,
-            scopeKind: ctx.scopeKind,
-            testTitle: ctx.testTitle,
-            snippet,
-            message: `${fileLabel}: soft assertion expect.soft() weakens gate enforcement ("${snippet.split(/\r?\n/)[0]}").`,
+            kind: 'expect.soft', line, scopeKind: ctx.scopeKind, testTitle: ctx.testTitle, snippet,
+            message: `${fileLabel}: soft assertion weakenings gate enforcement ("${snippet.split(/\r?\n/)[0]}").`,
           };
           summary.events.softAssertions.push(ev);
           pushViolation('AITEST-G106', ev.message, snippet, ev);
         }
         if (ctx.insideIf) {
           const ev = {
-            kind: 'if-wrap',
-            line,
-            scopeKind: ctx.scopeKind,
-            testTitle: ctx.testTitle,
-            insideIfInTest: ctx.insideIfInTest,
-            insideBrowserEvaluate: ctx.insideBrowserEvaluate,
-            snippet,
+            kind: 'if-wrap', line, scopeKind: ctx.scopeKind, testTitle: ctx.testTitle,
+            insideIfInTest: ctx.insideIfInTest, insideBrowserEvaluate: ctx.insideBrowserEvaluate, snippet,
             message: `${fileLabel}: wrapping expect() inside conditional if-block is forbidden.`,
           };
           summary.events.conditionalAssertions.push(ev);
@@ -471,37 +267,36 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
         }
         if (ctx.insideTernary) {
           const ev = {
-            kind: 'ternary-wrap',
-            line,
-            scopeKind: ctx.scopeKind,
-            testTitle: ctx.testTitle,
-            insideIfInTest: ctx.insideIfInTest,
-            insideBrowserEvaluate: ctx.insideBrowserEvaluate,
-            snippet,
+            kind: 'ternary-wrap', line, scopeKind: ctx.scopeKind, testTitle: ctx.testTitle,
+            insideIfInTest: ctx.insideIfInTest, insideBrowserEvaluate: ctx.insideBrowserEvaluate, snippet,
             message: `${fileLabel}: conditional ternary expect() is forbidden.`,
           };
           summary.events.conditionalAssertions.push(ev);
           pushViolation('AITEST-G110', ev.message, snippet, ev);
         }
+        if (ctx.insideEventListener && ctx.scopeKind === 'test') {
+          const ev = {
+            kind: 'event-listener', line, scopeKind: ctx.scopeKind, testTitle: ctx.testTitle,
+            insideIfInTest: true, insideBrowserEvaluate: ctx.insideBrowserEvaluate, snippet,
+            message: `${fileLabel}: expect() inside event listener (.on/.addListener) silently passes if event never fires.`,
+          };
+          summary.events.conditionalAssertions.push(ev);
+          pushViolation('AITEST-G110', ev.message, snippet, ev);
+        }
+        if (ctx.insideDynamicLoop && ctx.scopeKind === 'test') {
+          pendingLoopAssertions.push({ line, scopeKind: ctx.scopeKind, testTitle: ctx.testTitle, snippet });
+        }
       } else if (ts.isIdentifier(node.expression) && isCustomAssertName(node.expression.text)) {
         summary.customAssertCalls += 1;
+        const fnName = node.expression.text;
+        const isResolved = symbolTable.localAssertHelpers.has(fnName) || symbolTable.trustedHelperImports.has(fnName);
         const customAssertion = {
-          tier: 3,
-          label: 'S3-custom-helper',
-          matcher: node.expression.text,
-          isSoft: false,
-          isNegated: false,
-          isTautology: false,
-          isAriaSnapshot: false,
-          numericExpected: null,
-          line,
-          scopeKind: ctx.scopeKind,
-          testTitle: ctx.testTitle,
-          insideIf: ctx.insideIf,
-          insideIfInTest: ctx.insideIfInTest,
-          insideTernary: ctx.insideTernary,
-          insideBrowserEvaluate: ctx.insideBrowserEvaluate,
-          raw: node.getText(sf).trim(),
+          tier: isResolved ? 3 : 1,
+          label: isResolved ? 'S3-custom-helper' : 'S1-unresolved-custom-helper',
+          matcher: fnName, isSoft: false, isNegated: false, isTautology: false, isAriaSnapshot: false,
+          numericExpected: null, line, scopeKind: ctx.scopeKind, testTitle: ctx.testTitle,
+          insideIf: ctx.insideIf, insideIfInTest: ctx.insideIfInTest, insideTernary: ctx.insideTernary,
+          insideBrowserEvaluate: ctx.insideBrowserEvaluate, raw: node.getText(sf).trim(),
         };
         summary.assertions.push(customAssertion);
         if (ctx.testTitle) {
@@ -511,6 +306,10 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
       }
     }
 
+    const enteredDynamicLoop =
+      ts.isForStatement(node) || ts.isForInStatement(node) || ts.isWhileStatement(node) || ts.isDoStatement(node) ||
+      (ts.isForOfStatement(node) && !isStaticNonEmptyLoopNode(ts, node));
+
     const nextCtx = {
       insideIf: ctx.insideIf || ts.isIfStatement(node),
       insideIfInTest:
@@ -518,10 +317,16 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
           ? childScopeOverride.insideIfInTest
           : ctx.insideIfInTest || (ts.isIfStatement(node) && ctx.scopeKind === 'test'),
       insideTernary: ctx.insideTernary || ts.isConditionalExpression(node),
+      insideDynamicLoop:
+        childScopeOverride?.insideDynamicLoop !== undefined
+          ? childScopeOverride.insideDynamicLoop
+          : ctx.insideDynamicLoop || enteredDynamicLoop,
+      insideEventListener:
+        childScopeOverride?.insideEventListener !== undefined
+          ? childScopeOverride.insideEventListener
+          : ctx.insideEventListener,
       insideBrowserEvaluate:
-        childScopeOverride?.insideBrowserEvaluate !== undefined
-          ? childScopeOverride.insideBrowserEvaluate
-          : ctx.insideBrowserEvaluate,
+        childScopeOverride?.insideBrowserEvaluate !== undefined ? childScopeOverride.insideBrowserEvaluate : ctx.insideBrowserEvaluate,
       scopeKind: childScopeOverride?.scopeKind || ctx.scopeKind,
       testTitle: childScopeOverride?.testTitle !== undefined ? childScopeOverride.testTitle : ctx.testTitle,
     };
@@ -530,5 +335,49 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
   };
 
   visit(sf, initialCtx);
+
+  for (const lp of pendingLoopAssertions) {
+    const scoped = lp.testTitle
+      ? summary.assertions.filter((a) => a.testTitle === lp.testTitle)
+      : summary.assertions;
+    const hasCountGuard = scoped.some(
+      (a) =>
+        !a.insideDynamicLoop &&
+        ((a.matcher === 'toHaveCount' && (a.numericExpected === null || a.numericExpected > 0)) ||
+          (a.matcher === 'toBeGreaterThan' && (a.numericExpected ?? 0) >= 0) ||
+          (a.matcher === 'toBeGreaterThanOrEqual' && (a.numericExpected ?? 0) >= 1) ||
+          (a.matcher === 'toHaveLength' && (a.numericExpected === null || a.numericExpected > 0)))
+    );
+    if (!hasCountGuard) {
+      const ev = {
+        kind: 'loop-without-count-guard',
+        line: lp.line, scopeKind: lp.scopeKind, testTitle: lp.testTitle,
+        insideIfInTest: true, snippet: lp.snippet,
+        message: `${fileLabel}: expect() inside dynamic loop without preceding non-zero count guard silently passes on 0 iterations.`,
+      };
+      summary.events.conditionalAssertions.push(ev);
+      pushViolation('AITEST-G110', ev.message, lp.snippet, ev);
+    }
+  }
+
+  for (const asc of pendingAllSettledCalls) {
+    const scoped = asc.testTitle
+      ? summary.assertions.filter((a) => a.testTitle === asc.testTitle)
+      : summary.assertions;
+    const assertsFulfilled = scoped.some(
+      (a) => /\b(?:fulfilled|rejected|reason)\b/.test(a.raw || '') || a.matcher === 'toThrow'
+    );
+    if (!assertsFulfilled) {
+      const ev = {
+        kind: 'all-settled-swallow',
+        line: asc.line, scopeKind: asc.scopeKind, testTitle: asc.testTitle,
+        hasAssertionInCatch: false, capturesErrorFlag: false, snippet: asc.snippet,
+        message: `${fileLabel}: Promise.allSettled() inside test suppresses rejections without verifying every settled result is fulfilled.`,
+      };
+      summary.events.swallowedCatches.push(ev);
+      pushViolation('AITEST-G107', ev.message, asc.snippet, ev);
+    }
+  }
+
   return summary;
 }

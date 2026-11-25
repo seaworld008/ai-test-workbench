@@ -1,5 +1,6 @@
 // @ts-check
 import { redactSecrets } from '../core/redact.mjs';
+import { MAX_REDIRECT_HOPS, REDIRECT_STATUSES, computeNextRedirectRequest } from '../kernel/target-redirect.mjs';
 import { evaluateExploreRequestSafety } from '../origin-guard.mjs';
 import { detectEnvelopeBusinessError, detectUrlQueryAnomalies, redactEndpointUrl } from './safety.mjs';
 
@@ -49,15 +50,17 @@ export async function attachExploreObservers({ context, safety, guardConfig, ses
 
   await context.route('**/*', async (/** @type {any} */ route) => {
     const req = route.request();
-    const method = req.method().toUpperCase();
-    const url = req.url();
-    const postData = req.postData() || null;
-    const check = evaluateExploreRequestSafety(method, url, postData, guardConfig);
-    if (check.blocked) {
+    const curMethod = typeof req.method === 'function' ? req.method().toUpperCase() : 'GET';
+    const curUrl = typeof req.url === 'function' ? req.url() : '';
+    const curBody = typeof req.postData === 'function' ? req.postData() || null : null;
+    const curHeaders = typeof req.headers === 'function' ? { ...req.headers() } : {};
+    const resourceType = typeof req.resourceType === 'function' ? req.resourceType() : '';
+
+    const recordBlocked = (/** @type {string} */ m, /** @type {string} */ u, /** @type {string | null} */ reason) => {
       firewallAbortCount += 1;
-      if ((req.resourceType() === 'xhr' || req.resourceType() === 'fetch') && /allowlist|not in allowed/i.test(String(check.reason || ''))) {
+      if ((resourceType === 'xhr' || resourceType === 'fetch') && /allowlist|not in allowed/i.test(String(reason || ''))) {
         try {
-          const h = new URL(url).hostname.toLowerCase();
+          const h = new URL(u).hostname.toLowerCase();
           if (h && h !== new URL(safety.baseURL).hostname.toLowerCase()) blockedApiHostSet.add(h);
         } catch {
           // ignore
@@ -65,15 +68,63 @@ export async function attachExploreObservers({ context, safety, guardConfig, ses
       }
       if (topology.blockedWriteRequests.length < 50) {
         topology.blockedWriteRequests.push({
-          method,
-          endpoint: redactEndpointUrl(url),
-          reason: check.reason,
+          method: m,
+          endpoint: redactEndpointUrl(u),
+          reason,
         });
       }
+    };
+
+    const initCheck = evaluateExploreRequestSafety(curMethod, curUrl, curBody, guardConfig);
+    if (initCheck.blocked) {
+      recordBlocked(curMethod, curUrl, initCheck.reason);
       await route.abort('blockedbyclient');
       return;
     }
-    await route.continue();
+
+    if (!/^https?:/i.test(curUrl) || typeof route.fetch !== 'function') {
+      await route.continue();
+      return;
+    }
+
+    let redirectDepth = 0;
+    for (let r = typeof req.redirectedFrom === 'function' ? req.redirectedFrom() : null; r; r = r.redirectedFrom?.()) {
+      redirectDepth += 1;
+    }
+    if (redirectDepth > MAX_REDIRECT_HOPS) {
+      recordBlocked(curMethod, curUrl, `Blocked explore redirect loop exceeding ${MAX_REDIRECT_HOPS} hops`);
+      await route.abort('blockedbyclient');
+      return;
+    }
+
+    try {
+      const res = await route.fetch({ maxRedirects: 0, headers: curHeaders });
+      const status = res.status();
+      const location = res.headers()?.location;
+      if (REDIRECT_STATUSES.has(status) && location) {
+        if (redirectDepth >= MAX_REDIRECT_HOPS) {
+          recordBlocked(curMethod, curUrl, `Blocked explore redirect loop exceeding ${MAX_REDIRECT_HOPS} hops`);
+          await route.abort('blockedbyclient');
+          return;
+        }
+        const next = computeNextRedirectRequest(curMethod, status, location, curUrl, curHeaders);
+        const hopBody = next.dropBody ? null : curBody;
+        const hopCheck = evaluateExploreRequestSafety(next.method, next.url, hopBody, guardConfig);
+        if (hopCheck.blocked) {
+          recordBlocked(next.method, next.url, hopCheck.reason);
+          await route.abort('blockedbyclient');
+          return;
+        }
+      }
+      // Return checked 3xx/non-3xx response directly so Chromium natively tracks page.url() redirects
+      await route.fulfill({ response: res });
+    } catch {
+      try {
+        await route.abort('failed');
+      } catch {
+        // route already handled or browser closed
+      }
+    }
   });
 
   const page = await context.newPage();
@@ -129,9 +180,23 @@ export async function attachExploreObservers({ context, safety, guardConfig, ses
       if (status >= 200 && status < 400 && /application\/json/i.test(contentType)) {
         const capturedRoute = activeRouteLabel;
         const capturedMethod = res.request().method();
+        let capturedPathname = cleanEp;
+        try {
+          capturedPathname = new URL(url).pathname;
+        } catch {
+          capturedPathname = cleanEp;
+        }
         void res
           .json()
           .then((/** @type {any} */ body) => {
+            if (Array.isArray(topology.jsonCaptures) && topology.jsonCaptures.length < 60 && status >= 200 && status < 300) {
+              topology.jsonCaptures.push({
+                method: capturedMethod,
+                pathname: capturedPathname,
+                status,
+                sample: body,
+              });
+            }
             const envErr = detectEnvelopeBusinessError(status, body);
             if (envErr.isError && topology.envelopeErrors.length < 50) {
               topology.envelopeErrors.push({

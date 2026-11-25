@@ -7,6 +7,7 @@ import { redactEnvEntries } from './core/redact.mjs';
 import { SCHEMA_VERSIONS, WORKBENCH_VERSION } from './core/version.mjs';
 import {
   computeWorkspaceInputHash,
+  openTrustContext,
   resolveGitHeadSha,
   sha256Hex,
   signPayloadT1,
@@ -51,6 +52,7 @@ function summarizeResultsForLedger(resultsObj) {
       status: t.status,
       retryPassed: t.retryPassed,
       durationMs: t.durationMs,
+      attachments: t.attachments || [],
       errorSnippet: t.errorSnippet,
     })),
   };
@@ -95,8 +97,12 @@ export function beginRunLedger(qaDir, meta) {
     counts: null,
   };
 
-  const sig = signPayloadT1('ledger.manifest', coreManifest, { qaDir, repoDir, createIfMissing: true });
-  const manifest = { ...coreManifest, ...(sig.signed ? { mac: sig.mac } : {}) };
+  const trustContext = openTrustContext({ qaDir, repoDir, createKeyIfMissing: true });
+  const sig = signPayloadT1('ledger.manifest', coreManifest, { qaDir, repoDir, createIfMissing: true, trustContext });
+  const manifest = {
+    ...coreManifest,
+    ...(sig.signed ? { mac: sig.mac, macKeyId: sig.keyId } : {}),
+  };
 
   fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8');
   return { runId, runDir, manifest };
@@ -129,6 +135,8 @@ export function finalizeRunLedger(qaDir, runId, outcome) {
     exitCode: outcome.exitCode,
   };
   delete coreManifest.mac;
+  delete coreManifest.macs;
+  delete coreManifest.macKeyId;
 
   /** @type {ReturnType<typeof summarizeResultsForLedger> | null} */
   let summary = null;
@@ -145,8 +153,12 @@ export function finalizeRunLedger(qaDir, runId, outcome) {
     }
   }
 
-  const sig = signPayloadT1('ledger.manifest', coreManifest, { qaDir, repoDir, createIfMissing: true });
-  const manifest = { ...coreManifest, ...(sig.signed ? { mac: sig.mac } : {}) };
+  const trustContext = openTrustContext({ qaDir, repoDir, createKeyIfMissing: true });
+  const sig = signPayloadT1('ledger.manifest', coreManifest, { qaDir, repoDir, createIfMissing: true, trustContext });
+  const manifest = {
+    ...coreManifest,
+    ...(sig.signed ? { mac: sig.mac, macKeyId: sig.keyId } : {}),
+  };
 
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
   fs.writeFileSync(
@@ -160,7 +172,7 @@ export function finalizeRunLedger(qaDir, runId, outcome) {
         resultsSha256: manifest.resultsSha256,
         finishedAt,
         exitCode: outcome.exitCode,
-        ...(sig.signed ? { mac: sig.mac } : {}),
+        ...(sig.signed ? { mac: sig.mac, macKeyId: sig.keyId } : {}),
       },
       null,
       2

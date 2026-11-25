@@ -1,7 +1,7 @@
 import { test, expect } from '../fixtures/base';
 
 test.describe('Baseline Application Readiness E2E', () => {
-  test('landing page renders primary landmark without runtime crashes @critical', async ({ page }) => {
+  test('landing page renders primary landmark without runtime crashes @scaffold', async ({ page }) => {
     const response = await page.goto('/');
     expect(response?.status()).toBeLessThan(400);
 

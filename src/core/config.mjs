@@ -16,7 +16,11 @@ function resolveConfigLang(flagLang, env) {
 }
 
 /**
- * Default protected governance globs (single source of truth shared with `src/kernel/gate/policy.mjs`).
+ * Default protected referee-kernel governance globs (shared with `src/kernel/gate/policy.mjs`).
+ * Deliberately locks ONLY verifier infrastructure (`support/**`, `tests/fixtures/base.ts`, `eslint`,
+ * `playwright.config.*`, `aitest.config.json`, `waivers.json`) while keeping business adaptation files
+ * (`tests/setup/**`, `tests/auth.setup.*`, `tests/fixtures/custom/**`, `perf-budget.json`, `aitest.runtime.json`)
+ * open for autonomous Agent iteration (`WU-04`).
  */
 export const DEFAULT_CONFIG_PROTECTED_GLOBS = Object.freeze([
   'playwright.config.ts',
@@ -27,15 +31,12 @@ export const DEFAULT_CONFIG_PROTECTED_GLOBS = Object.freeze([
   'aitest.config.json',
   'waivers.json',
   'tsconfig.json',
-  'perf-budget.json',
   'impact-map.json',
   'package.json',
   '.gitignore',
   'support/**',
   'scripts/audit-results.mjs',
-  'tests/fixtures/**',
-  'tests/*.setup.ts',
-  'tests/*.setup.js',
+  'tests/fixtures/base.ts',
 ]);
 
 /**
@@ -316,6 +317,7 @@ function splitCsv(raw) {
  *   qaDir: string;
  *   repoDir?: string;
  *   env?: Record<string, string | undefined>;
+ *   caller?: 'human-cli' | 'mcp-child' | 'ci';
  *   overrides?: { baseUrl?: string; lang?: string; allowMutation?: boolean; egressMode?: string };
  * }} params
  */
@@ -363,10 +365,14 @@ export function loadWorkbenchConfig(params) {
 
   const ci = isCiEnvironment(mergedEnv);
   const lang = resolveConfigLang(params.overrides?.lang, mergedEnv);
+  const caller =
+    params.caller ||
+    (mergedEnv.AITEST_MCP_CHILD === '1' ? 'mcp-child' : ci ? 'ci' : 'human-cli');
 
   return Object.freeze({
     ok: errors.length === 0,
     errors,
+    caller,
     qaDir,
     repoDir,
     ci,

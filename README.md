@@ -1,10 +1,10 @@
 <div align="center">
 
-# AI Test Workbench (`v6.1.0`)
+# AI Test Workbench (`v6.2.0`)
 
 **面向 AI 编码 Agent 的独立可信验证内核与原生多协议 MCP 服务端**
 
-提供 **四层 fail-closed AST 防假绿门禁 (`S0–S5` + `AITEST-G101..G115`)** · **一键变更判决 (`verify-change` · in-toto v1 + `T0/T1/T2`)** · **原生零依赖 MCP 服务端 (`stdio` / `/mcp` / `/sse` · 17 权威工具 · 异步子进程作业)** · **防篡改自愈状态机** · **Import-Graph 影响分析** · **只读站点探索与代码地图** · **真实 `PerformanceObserver` Web Vitals**
+提供 **四层 fail-closed AST 防假绿门禁 (`S0–S5` + `AITEST-G101..G117` + 跨文件符号表 + Dieselgate 防护)** · **一键变更判决 (`verify-change` · in-toto v1 + `T0/T1/T2`)** · **原生零依赖 MCP 服务端 (`stdio` / `/mcp` / `/sse` · 16 权威工具 · 帧化子进程 IPC)** · **不可变 `TrustContext` 与粘性 T1** · **全自动零阻塞回环自举 (`aitest_bootstrap`)** · **只读站点探索与接口 Schema 推断** · **真实 `PerformanceObserver` Web Vitals**
 
 [English README](./README.en.md) · [v5→v6 升级指南](./docs/upgrade.md) · [治理与四层门禁](./docs/governance.md) · [AI Agent 快速上手](./docs/ai-agent-quickstart.md) · [AGENTS.md](./AGENTS.md) · [系统架构](./ARCHITECTURE.md) · [v6 重构评估报告](./docs/review/v6-refactor-assessment.md) · [更新日志](./CHANGELOG.md)
 
@@ -49,7 +49,7 @@
 ```yaml
 jobs:
   aitest-t2-verdict:
-    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.1.0
+    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.2.0
     permissions:
       id-token: write
       attestations: write
@@ -65,7 +65,7 @@ jobs:
 离线校验 T2 证书（默认 fail-closed，缺签名 / 仅 T1 / 身份不符 / 改动 1 字节均非 0 退出且 `trustLevel <= T1`）：
 
 ```bash
-npx ai-test-workbench@6.1.0 attest verify \
+npx ai-test-workbench@6.2.0 attest verify \
   --file attestation.json \
   --bundle attestation.sigstore.json \
   --expect-repo owner/repo \
@@ -77,16 +77,16 @@ npx ai-test-workbench@6.1.0 attest verify \
 
 ---
 
-## 2. v6.0.0 分层架构
+## 2. v6.2.0 分层架构
 
-v6.0.0 彻底消除了 `src/ -> templates/` 依赖倒置与全仓循环导入（`0` 违规边、`0` 环路），建立四层单向依赖架构（详见 [ARCHITECTURE.md](./ARCHITECTURE.md) 与 [ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.md)）：
+v6.2.0 在零循环四层单向依赖基础上引入稳定应用门面 (`src/app/index.mjs`) 与不可变 `TrustContext`，全仓所有 `src/**/*.mjs` 均控制在 `<= 500` 行内（详见 [ARCHITECTURE.md](./ARCHITECTURE.md) 与 [ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.md)）：
 
 ```mermaid
 flowchart TB
-    L4["Layer 4: 协议与交互层 — src/cli/ (按命令严格校验) · src/mcp/ (17 权威工具 + 异步作业)"]
-    L3["Layer 3: 领域子系统层 — trust · explore · codemap · perf · verdict · heal · diagnose · impact · workspace"]
-    L2["Layer 2: 权威验证内核 SSoT — src/kernel/ (target-guard · schema-validator · gate/ 可插拔规则引擎 G101..G115)"]
-    L1["Layer 1: 零依赖基础叶模块 — src/core/ (version · outcome · config · redact · glob · proc) · src/types/*.d.ts"]
+    L4["Layer 4: 协议与交互层 — src/cli/ (CommandResult v2) · src/mcp/ (16 权威工具 + 帧化 IPC 作业)"]
+    L3["Layer 3: 应用门面与领域子系统层 — src/app/ · trust · explore · codemap · perf · verdict · heal · diagnose · impact · bootstrap"]
+    L2["Layer 2: 权威验证内核 SSoT — src/kernel/ (target-guard · schema-validator · gate/ SymbolTable + G101..G117)"]
+    L1["Layer 1: 零依赖基础叶模块 — src/core/ (version · outcome · config · redact v3 · glob · proc) · src/types/*.d.ts"]
     TPL["脚手架分发镜像 (单向生成) — templates/playwright-qa/support/ (@generated + sha256 戳)"]
 
     L4 --> L3 --> L2 --> L1
@@ -101,19 +101,19 @@ flowchart TB
 ### 环境要求与供应链安全
 
 - **Node.js**：`>= 22.12.0`（推荐 `24 LTS` 或 `26 LTS`）；支持 Windows PowerShell (`pwsh`)、macOS、Linux。
-- **零运行时依赖**：根包 `package.json` 不含运行时 `dependencies`；请始终锁定精确版本 `npx ai-test-workbench@6.1.0 <cmd>`、全局安装后的短命令 `aitw <cmd>`（`npm i -g ai-test-workbench@6.1.0`），或源码直连 `node tools/aitest.mjs <cmd>`。
+- **零运行时依赖**：根包 `package.json` 不含运行时 `dependencies`；请始终锁定精确版本 `npx ai-test-workbench@6.2.0 <cmd>`、全局安装后的短命令 `aitw <cmd>`（`npm i -g ai-test-workbench@6.2.0`），或源码直连 `node tools/aitest.mjs <cmd>`。
 
 ### 注册原生 MCP 服务端（`stdio` / `/mcp` / `/sse`）
 
 - **Claude Code**：
   ```bash
-  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.1.0 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
+  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.2.0 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
   ```
 - **Codex CLI**（`.codex/config.toml`）：
   ```toml
   [mcp_servers.ai-test-workbench]
   command = "npx"
-  args = ["--package=ai-test-workbench@6.1.0", "ai-test-workbench", "mcp-serve"]
+  args = ["--package=ai-test-workbench@6.2.0", "ai-test-workbench", "mcp-serve"]
   ```
 - **Cursor / Windsurf / Antigravity / Gemini CLI**（`.mcp.json`）：
   ```json
@@ -121,14 +121,14 @@ flowchart TB
     "mcpServers": {
       "ai-test-workbench": {
         "command": "npx",
-        "args": ["--package=ai-test-workbench@6.1.0", "ai-test-workbench", "mcp-serve"]
+        "args": ["--package=ai-test-workbench@6.2.0", "ai-test-workbench", "mcp-serve"]
       }
     }
   }
   ```
 - **Streamable HTTP (`/mcp`) + Legacy SSE (`/sse`)**：
   ```bash
-  npx ai-test-workbench@6.1.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
+  npx ai-test-workbench@6.2.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
   ```
 
 ### 官方 MCP 协议合规性与三传输验证
@@ -136,25 +136,25 @@ flowchart TB
 - 零运行时依赖架构决策与重审触发条件见 [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md)。
 - 隔离在 `conformance/` 下的官方回归套件（不随 npm 包发布，由 CI `mcp-conformance` 执行）：
   - **`@modelcontextprotocol/conformance@0.1.16`**（Streamable HTTP `/mcp`，`active` 套件 30 场景）：`8/8` 协议通用场景全部通过，`22` 项预期未适用场景登记在 [`conformance/expected-failures.json`](./conformance/expected-failures.json)，`0` 项未登记失败。
-  - **`@modelcontextprotocol/sdk@1.32.2` 参考 `Client`**（`5/5` 通过）：覆盖 `stdio`、Streamable HTTP (`/mcp`) 与 Legacy SSE (`/sse` + `/messages`)，验证 `2024-11-05`..`2025-11-25` 版本协商、`tools/list` 精确 17 个工具与合法 Schema、`structuredContent`、`notifications/progress` 与 `AbortController` 取消请求。
+  - **`@modelcontextprotocol/sdk@1.32.2` 参考 `Client`**（`5/5` 通过）：覆盖 `stdio`、Streamable HTTP (`/mcp`) 与 Legacy SSE (`/sse` + `/messages`)，验证 `2024-11-05`..`2025-11-25` 版本协商、`tools/list` 精确 16 个工具与合法 Schema、`structuredContent`、`notifications/progress` 与 `AbortController` 取消请求。
 
 ### 标准 CLI 工作流与本地复现
 
 ```bash
 # 1. 体检、初始化与模板安全升级
-npx ai-test-workbench@6.1.0 doctor
-npx ai-test-workbench@6.1.0 init --name my-app --target "/path/to/your-repo" --loop codex
-npx ai-test-workbench@6.1.0 upgrade --target "/path/to/your-repo" --dry-run
+npx ai-test-workbench@6.2.0 doctor
+npx ai-test-workbench@6.2.0 init --name my-app --target "/path/to/your-repo" --loop codex
+npx ai-test-workbench@6.2.0 upgrade --target "/path/to/your-repo" --dry-run
 
 # 2. 登录态捕获 -> 只读探索 -> 代码地图 -> 锁版本外部 MCP
-npx ai-test-workbench@6.1.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
-npx ai-test-workbench@6.1.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
-npx ai-test-workbench@6.1.0 map --target "/path/to/your-repo"
-npx ai-test-workbench@6.1.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.1.0 mcp doctor --target "/path/to/your-repo" --lock
+npx ai-test-workbench@6.2.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
+npx ai-test-workbench@6.2.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
+npx ai-test-workbench@6.2.0 map --target "/path/to/your-repo"
+npx ai-test-workbench@6.2.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.2.0 mcp doctor --target "/path/to/your-repo" --lock
 
 # 3. 性能 SLO 与提交前一键变更判决
-npx ai-test-workbench@6.1.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
-npx ai-test-workbench@6.1.0 verify-change --target "/path/to/your-repo" --base origin/main
+npx ai-test-workbench@6.2.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
+npx ai-test-workbench@6.2.0 verify-change --target "/path/to/your-repo" --base origin/main
 ```
 
 本机克隆全量自检（零外部服务器）：
@@ -177,6 +177,7 @@ npm run check:vendor && npm run lint:docs && npm run typecheck && npm test && np
 |---|---|---|---|
 | `aitest_doctor` | 发现与初始化 | 是 | Environment, Browser & Gate Kernel Readiness Check |
 | `aitest_init` | 发现与初始化 | 否 | Initialize Isolated QA Workspace & Governance Lock |
+| `aitest_bootstrap` | 发现与初始化 | 否 | Zero-to-One Autonomous Loopback Bootstrapper |
 | `aitest_explore` | 发现与初始化 | 否 | Zero-to-One Default-Deny Read-Only Explorer |
 | `aitest_map_sync` | 发现与初始化 | 否 | Sync Convergent Living Code Map v4 |
 | `aitest_mcp_hub` | 发现与初始化 | 否 | Manage Pinned 7-Pillar MCP Presets & Supply-Chain Doctor |
@@ -187,13 +188,11 @@ npm run check:vendor && npm run lint:docs && npm run typecheck && npm test && np
 | `aitest_audit` | 执行与门禁验证 | 是 | Run 4-Layer Fail-Closed Anti-Fake-Green Quality Gate |
 | `aitest_diagnose` | 执行与门禁验证 | 否 | Generate Redacted Evidence-First A/B/C/D Diagnostics Report |
 | `aitest_perf` | 执行与门禁验证 | 否 | Run PerformanceObserver Web Vitals & Read-Only API SLO Benchmark |
-| `aitest_trace_matrix` | 执行与门禁验证 | 是 | Query Requirement <-> Spec Traceability Matrix (REQ-xxx) |
-| `aitest_flaky_report` | 执行与门禁验证 | 是 | Query Historical Flaky Telemetry & Quarantine List |
-| `aitest_report` | 执行与门禁验证 | 是 | Index Local Reports, Attestations, SARIF & Trace Artifacts |
-| `aitest_heal` | 有状态治理与作业 | 否 | Stateful A/B/C/D Heal Governance State Machine (begin \| attempt \| conclude) |
+| `aitest_report` | 执行与门禁验证 | 是 | Query Reports Index, Flaky Telemetry & Requirement Traceability |
+| `aitest_heal` | 有状态治理与作业 | 否 | Stateful A/B/C/D Heal Governance State Machine (begin \| attempt \| conclude \| discard) |
 | `aitest_job` | 有状态治理与作业 | 否 | Inspect, Await, or Cancel Async Background MCP Jobs (status \| result \| cancel) |
 
-> 自动生成自 `src/mcp/registry.mjs`（共 `17` 个权威工具；`governance approve` 仅限人类本地 CLI，永不注册为 MCP 工具；6 个 v5 旧名 `aitest_heal_*` / `aitest_job_*` 在 v6.x 中作为弃用转发别名保留）。
+> 自动生成自 `src/mcp/registry.mjs`（共 `16` 个权威工具；`governance approve` 仅限人类本地 CLI，永不注册为 MCP 工具；`v5`/`v6.1` 共 8 个旧工具名在 `v6.x` 中作为弃用转发别名保留，详见 `docs/upgrade.md`）。
 <!-- END:GENERATED_MCP_TOOLS -->
 
 以下高权限或交互式操作**仅限本地 CLI 执行，永不暴露为 MCP 工具**：

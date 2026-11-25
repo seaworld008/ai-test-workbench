@@ -5,7 +5,7 @@
 | Symptom | First Check | Resolution Principle |
 |---|---|---|
 | Browser missing or fails to launch | `cd qa && npx playwright --version`, `npx playwright install chromium` | Keep `@playwright/test` and Chromium cache matched |
-| Windows `.cmd` `spawn EINVAL` | `node -v`, `npx ai-test-workbench@6.1.0 doctor` | CLI invokes JS entrypoints via `process.execPath` with `shell: false` |
+| Windows `.cmd` `spawn EINVAL` | `node -v`, `npx ai-test-workbench@6.2.0 doctor` | CLI invokes JS entrypoints via `process.execPath` with `shell: false` |
 | WSL vs Windows browser mismatch | `which node` vs `where.exe node` | Maintain separate caches per OS environment |
 | `init` conflict exit `2` | Existing non-Playwright files in `<repo>/qa` | Pass `--qa-dir e2e-qa` |
 | `update-agents` exit `2` (`CONFLICT`) | `*.aitest-new` & `agents-manifest.json` | Review/merge manually or pass `--force` |

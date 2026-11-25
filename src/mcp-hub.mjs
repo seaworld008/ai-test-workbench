@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
+import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import { SCHEMA_VERSIONS } from './core/version.mjs';
 import {
   MCP_PILLARS,
@@ -290,20 +291,28 @@ export async function runMcpCommand(options = {}) {
 
   if (action === 'presets') {
     const summary = getMcpPresetsSummary();
-    if (options.json) {
-      console.log(JSON.stringify({ ok: true, exitCode: 0, ...summary }, null, 2));
-      return 0;
+    if (!options.json) {
+      console.log(
+        lang === 'zh'
+          ? '\n=== AI Test Workbench 7 大支柱全链路系统 MCP 预设清单 (已锁版本 & 风险分级) ==='
+          : '\n=== AI Test Workbench 7-Pillar Full-Link MCP Presets (Pinned & Risk-Graded) ==='
+      );
+      for (const [name, p] of Object.entries(MCP_PRESETS)) {
+        console.log(`  [${p.pillar.padEnd(13)} | ${p.riskLevel.padEnd(13)}] ${name.padEnd(18)} — ${p.description}`);
+      }
+      console.log(`\nProfiles: ${Object.keys(MCP_PROFILES).join(', ')}`);
     }
-    console.log(
-      lang === 'zh'
-        ? '\n=== AI Test Workbench 7 大支柱全链路系统 MCP 预设清单 (已锁版本 & 风险分级) ==='
-        : '\n=== AI Test Workbench 7-Pillar Full-Link MCP Presets (Pinned & Risk-Graded) ==='
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'mcp',
+        outcome: 'pass',
+        ok: true,
+        exitCode: 0,
+        summary: `Listed ${Object.keys(MCP_PRESETS).length} pinned MCP presets`,
+        data: summary,
+      }),
+      { asJson: Boolean(options.json) }
     );
-    for (const [name, p] of Object.entries(MCP_PRESETS)) {
-      console.log(`  [${p.pillar.padEnd(13)} | ${p.riskLevel.padEnd(13)}] ${name.padEnd(18)} — ${p.description}`);
-    }
-    console.log(`\nProfiles: ${Object.keys(MCP_PROFILES).join(', ')}`);
-    return 0;
   }
 
   if (!options.target) {
@@ -353,9 +362,7 @@ export async function runMcpCommand(options = {}) {
     }
 
     const exitCode = audit.ok ? 0 : 2;
-    if (options.json) {
-      console.log(JSON.stringify({ ...audit, exitCode, mcpLockPath: fs.existsSync(mcpLockPath) ? mcpLockPath : null }, null, 2));
-    } else {
+    if (!options.json) {
       console.log(
         lang === 'zh'
           ? `\n[MCP Doctor] 已审计 ${audit.checkedServers.length} 个 MCP 服务配置 (.mcp.json + .codex/config.toml)`
@@ -365,7 +372,19 @@ export async function runMcpCommand(options = {}) {
       for (const iss of audit.issues) console.error(`  [FAIL] ${iss}`);
       if (audit.ok) console.log('  [OK] All MCP configurations enforce supply-chain, read-only & secret hygiene guardrails.');
     }
-    return exitCode;
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'mcp',
+        outcome: audit.ok ? 'pass' : 'blocked',
+        ok: audit.ok,
+        exitCode,
+        summary: audit.ok
+          ? `MCP doctor audited ${audit.checkedServers.length} server(s): OK`
+          : audit.issues[0] || `MCP doctor blocked (${audit.issues.length} issue(s))`,
+        data: { ...audit, mcpLockPath: fs.existsSync(mcpLockPath) ? mcpLockPath : null },
+      }),
+      { asJson: Boolean(options.json) }
+    );
   }
 
   if (action === 'add') {
@@ -404,9 +423,7 @@ export async function runMcpCommand(options = {}) {
       fs.writeFileSync(envExamplePath, buildMcpEnvTemplate(selected), 'utf8');
     }
 
-    if (options.json) {
-      console.log(JSON.stringify({ ok: true, exitCode: 0, mcpJsonPath, codexTomlPath, envExamplePath, added: jsonMerge.added, kept: jsonMerge.kept }, null, 2));
-    } else {
+    if (!options.json) {
       console.log(
         lang === 'zh'
           ? `\n[MCP Hub] 已配置 ${selected.length} 项全链路系统 MCP (新增 ${jsonMerge.added.length} / 保留 ${jsonMerge.kept.length})`
@@ -416,7 +433,17 @@ export async function runMcpCommand(options = {}) {
       console.log(`  .codex/config    : ${codexTomlPath}`);
       console.log(`  .env.mcp.example : ${envExamplePath}`);
     }
-    return 0;
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'mcp',
+        outcome: 'pass',
+        ok: true,
+        exitCode: 0,
+        summary: `Configured ${selected.length} MCP preset(s) (added=${jsonMerge.added.length}, kept=${jsonMerge.kept.length})`,
+        data: { mcpJsonPath, codexTomlPath, envExamplePath, added: jsonMerge.added, kept: jsonMerge.kept },
+      }),
+      { asJson: Boolean(options.json) }
+    );
   }
 
   console.error(`Unknown mcp action "${action}". Use: presets | add | doctor | serve`);

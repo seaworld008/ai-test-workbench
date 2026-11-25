@@ -144,6 +144,9 @@ test('CLI `perf --mode browser` captures real non-null LCP via PerformanceObserv
     assert.equal(typeof rootMetrics.lcpMs, 'number', 'LCP must be a real number captured via PerformanceObserver, never null');
     assert.ok(rootMetrics.lcpMs >= 0);
     assert.equal(typeof rootMetrics.cls, 'number');
+    assert.ok('inpMs' in rootMetrics, 'PerformanceObserver report must track INP field (inpMs)');
+    assert.ok(rootMetrics.inpMs === null || (typeof rootMetrics.inpMs === 'number' && rootMetrics.inpMs >= 0));
+    assert.ok(typeof rootMetrics.domNodes === 'number' && rootMetrics.domNodes > 0);
   } finally {
     await demo.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });

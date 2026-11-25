@@ -1,257 +1,44 @@
 // @ts-check
-import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { buildCommandResult, emitCommandResult } from '../core/outcome.mjs';
 import { canonicalizeJson, sha256Hex, verifyPayloadT1 } from '../kernel/gate-kernel.mjs';
-import {
-  GITHUB_ACTIONS_OIDC_ISSUER,
-  computeDssePae,
-  extractFulcioOidcIssuerFromDer,
-  extractSanUris,
-  normalizeExpectedWorkflowPath,
-  parseGithubWorkflowSanUri,
-  verifyCertChainToTrustedRoot,
-} from './der-x509.mjs';
 import {
   INTOTO_STATEMENT_TYPE,
   LEGACY_VERDICT_PREDICATE_TYPES,
   TRUST_LEVEL_DEFINITIONS,
   VERDICT_PREDICATE_TYPE,
 } from './intoto.mjs';
+import { verifySigstoreBundleForAttestation } from './sigstore-verify.mjs';
 
 /**
- * Cryptographically verifies a Sigstore Bundle (`.sigstore.json`) against an `attestation.json` subject file.
- * @param {string} absAttestationPath
- * @param {string} absBundlePath
- * @param {{
- *   certificateOidcIssuer?: string,
- *   expectWorkflow?: string,
- *   expectRepo?: string,
- *   expectRef?: string,
- *   certificateIdentityRegexp?: string,
- *   trustedRootCertPath?: string,
- *   trustedRootCertPem?: string,
- * }} [options]
- * @returns {{
- *   ok: true,
- *   reasonCode: string,
- *   identity: { oidcIssuer: string, sanUri: string, repo: string, workflow: string, ref: string },
- *   signedPredicateType: string | null,
- * } | {
- *   ok: false,
- *   reasonCode: string,
- *   error: string,
- *   identity?: Record<string, any>,
- * }}
+ * Extracts the attested Git commit SHA and Git tree digest from an in-toto Statement v1 document.
+ * @param {Record<string, any>} doc
  */
-function verifySigstoreBundleForAttestation(absAttestationPath, absBundlePath, options = {}) {
-  const rawAttBytes = fs.readFileSync(absAttestationPath);
-  const actualFileSha256 = crypto.createHash('sha256').update(rawAttBytes).digest('hex').toLowerCase();
-
-  let bundle;
-  try {
-    bundle = JSON.parse(fs.readFileSync(absBundlePath, 'utf8'));
-  } catch (err) {
-    return {
-      ok: false,
-      reasonCode: 'INVALID_BUNDLE_JSON',
-      error: `Invalid Sigstore bundle JSON: ${err instanceof Error ? err.message : String(err)}`,
-    };
-  }
-
-  const envelope = bundle.dsseEnvelope;
-  if (!envelope || typeof envelope.payload !== 'string' || typeof envelope.payloadType !== 'string') {
-    return { ok: false, reasonCode: 'INVALID_DSSE_ENVELOPE', error: 'Sigstore bundle is missing a valid dsseEnvelope.' };
-  }
-
-  const sigEntry = Array.isArray(envelope.signatures) ? envelope.signatures[0] : null;
-  if (!sigEntry || typeof sigEntry.sig !== 'string') {
-    return { ok: false, reasonCode: 'MISSING_DSSE_SIGNATURE', error: 'Sigstore bundle dsseEnvelope contains no signature.' };
-  }
-
-  const vm = bundle.verificationMaterial || {};
-  const chainRawList = [];
-  if (vm.certificate?.rawBytes) {
-    chainRawList.push(Buffer.from(vm.certificate.rawBytes, 'base64'));
-  }
-  if (Array.isArray(vm.x509CertificateChain?.certificates)) {
-    for (const c of vm.x509CertificateChain.certificates) {
-      if (c?.rawBytes) chainRawList.push(Buffer.from(c.rawBytes, 'base64'));
-    }
-  }
-  if (chainRawList.length === 0) {
-    return { ok: false, reasonCode: 'MISSING_SIGNING_CERTIFICATE', error: 'Sigstore bundle contains no X.509 signing certificate.' };
-  }
-
-  let certs;
-  try {
-    certs = chainRawList.map((der) => new crypto.X509Certificate(der));
-  } catch (err) {
-    return {
-      ok: false,
-      reasonCode: 'INVALID_SIGNING_CERTIFICATE',
-      error: `Failed to parse X.509 certificate in Sigstore bundle: ${err instanceof Error ? err.message : String(err)}`,
-    };
-  }
-  const leafCert = certs[0];
-
-  // 1. Verify DSSE PAE cryptographic signature
-  const payloadBytes = Buffer.from(envelope.payload, 'base64');
-  const sigBytes = Buffer.from(sigEntry.sig, 'base64');
-  const pae = computeDssePae(envelope.payloadType, payloadBytes);
-
-  let sigValid = false;
-  try {
-    const keyType = leafCert.publicKey.asymmetricKeyType;
-    sigValid =
-      keyType === 'ed25519' || keyType === 'ed448'
-        ? crypto.verify(null, pae, leafCert.publicKey, sigBytes)
-        : crypto.verify('sha256', pae, leafCert.publicKey, sigBytes);
-  } catch {
-    sigValid = false;
-  }
-
-  if (!sigValid) {
-    return { ok: false, reasonCode: 'INVALID_DSSE_SIGNATURE', error: 'DSSE envelope cryptographic signature verification failed.' };
-  }
-
-  // 2. Verify signed in-toto payload subject SHA-256 matches exact attestation.json file bytes
-  let signedStatement;
-  try {
-    signedStatement = JSON.parse(payloadBytes.toString('utf8'));
-  } catch (err) {
-    return {
-      ok: false,
-      reasonCode: 'INVALID_DSSE_PAYLOAD',
-      error: `DSSE payload is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
-    };
-  }
-
-  const subjects = Array.isArray(signedStatement.subject) ? signedStatement.subject : [];
-  const digestMatched = subjects.some(
-    (/** @type {{ digest?: { sha256?: string } } | null} */ s) =>
-      String(s?.digest?.sha256 || '').toLowerCase() === actualFileSha256
-  );
-  if (!digestMatched) {
-    return {
-      ok: false,
-      reasonCode: 'DIGEST_MISMATCH',
-      error: `Signed bundle subject SHA-256 does not match attestation file digest (${actualFileSha256}). File was modified after signing.`,
-    };
-  }
-
-  // 3. Verify Fulcio OIDC Issuer
-  const expectedIssuer = options.certificateOidcIssuer || GITHUB_ACTIONS_OIDC_ISSUER;
-  const oidcIssuer = extractFulcioOidcIssuerFromDer(leafCert.raw);
-  if (!oidcIssuer || oidcIssuer !== expectedIssuer) {
-    return {
-      ok: false,
-      reasonCode: 'OIDC_ISSUER_MISMATCH',
-      error: `Certificate OIDC issuer "${oidcIssuer || 'missing'}" does not match required "${expectedIssuer}".`,
-      identity: { oidcIssuer, sanUris: extractSanUris(leafCert.subjectAltName) },
-    };
-  }
-
-  // 4. Verify SAN URI workflow identity
-  const sanUris = extractSanUris(leafCert.subjectAltName);
-  const parsedSans = sanUris.map(parseGithubWorkflowSanUri).filter((p) => p !== null);
-  if (parsedSans.length === 0) {
-    return {
-      ok: false,
-      reasonCode: 'WORKFLOW_IDENTITY_MISMATCH',
-      error: `Certificate SAN (${leafCert.subjectAltName || 'none'}) does not contain a valid GitHub Actions workflow URI.`,
-      identity: { oidcIssuer, sanUris },
-    };
-  }
-
-  const expectedWorkflowNorm = options.expectWorkflow ? normalizeExpectedWorkflowPath(options.expectWorkflow) : null;
-  const matchedSan = parsedSans.find((p) => {
-    if (options.expectRepo && p.repo.toLowerCase() !== String(options.expectRepo).trim().toLowerCase()) return false;
-    if (expectedWorkflowNorm && p.workflowPath !== expectedWorkflowNorm) return false;
-    if (options.expectRef && p.gitRef !== String(options.expectRef).trim()) return false;
-    if (options.certificateIdentityRegexp && !new RegExp(options.certificateIdentityRegexp).test(p.uri)) return false;
-    return true;
-  });
-
-  if (!matchedSan) {
-    return {
-      ok: false,
-      reasonCode: 'WORKFLOW_IDENTITY_MISMATCH',
-      error: `Certificate workflow identity [${sanUris.join(', ')}] does not match expected repo="${options.expectRepo || '*'}", workflow="${expectedWorkflowNorm || '*'}", ref="${options.expectRef || '*'}".`,
-      identity: { oidcIssuer, sanUris },
-    };
-  }
-
-  // 5. Verify certificate trust chain
-  if (options.trustedRootCertPath || options.trustedRootCertPem) {
-    try {
-      const rootPem = options.trustedRootCertPem
-        ? options.trustedRootCertPem
-        : options.trustedRootCertPath
-          ? fs.readFileSync(path.resolve(options.trustedRootCertPath), 'utf8')
-          : '';
-      const chainRes = verifyCertChainToTrustedRoot(leafCert, certs.slice(1), rootPem);
-      if (!chainRes.ok) {
-        return {
-          ok: false,
-          reasonCode: 'UNTRUSTED_CERT_CHAIN',
-          error: chainRes.reason || 'Certificate chain failed offline trusted-root verification.',
-          identity: { oidcIssuer, sanUri: matchedSan.uri, repo: matchedSan.repo, workflow: matchedSan.workflowPath, ref: matchedSan.gitRef },
-        };
-      }
-    } catch (err) {
-      return {
-        ok: false,
-        reasonCode: 'UNTRUSTED_CERT_CHAIN',
-        error: `Failed to verify certificate against trusted root: ${err instanceof Error ? err.message : String(err)}`,
-      };
-    }
-  } else {
-    const cosignArgs = [
-      'verify-blob-attestation',
-      '--bundle',
-      absBundlePath,
-      '--type',
-      signedStatement.predicateType || VERDICT_PREDICATE_TYPE,
-      '--certificate-oidc-issuer',
-      expectedIssuer,
-      '--certificate-identity',
-      matchedSan.uri,
-      absAttestationPath,
-    ];
-    const res = spawnSync('cosign', cosignArgs, {
-      shell: false,
-      encoding: 'utf8',
-      windowsHide: true,
-      timeout: 30_000,
-    });
-    if (res.status !== 0) {
-      return {
-        ok: false,
-        reasonCode: 'UNTRUSTED_CERT_CHAIN',
-        error: `Sigstore trust-root verification failed (install cosign for online Sigstore root verification or pass --trusted-root-cert for offline verification): ${(res.stderr || res.stdout || 'cosign unavailable').trim()}`,
-        identity: { oidcIssuer, sanUri: matchedSan.uri, repo: matchedSan.repo, workflow: matchedSan.workflowPath, ref: matchedSan.gitRef },
-      };
-    }
-  }
-
+function extractAttestedGitBindings(doc) {
+  const subjects = Array.isArray(doc.subject) ? doc.subject : [];
+  const treeSubj = subjects.find((s) => s?.name === 'git-tree');
+  const commitSubj = subjects.find((s) => s?.name === 'git-commit');
+  const gitCommitSha =
+    commitSubj?.digest?.gitCommit ||
+    commitSubj?.digest?.sha1 ||
+    doc.predicate?.environment?.sha ||
+    doc.predicate?.gitSha ||
+    null;
+  const treeDigest = treeSubj?.digest?.gitTree || treeSubj?.digest?.sha1 || treeSubj?.digest?.sha256 || null;
   return {
-    ok: true,
-    reasonCode: 'T2_VERIFIED',
-    identity: {
-      oidcIssuer,
-      sanUri: matchedSan.uri,
-      repo: matchedSan.repo,
-      workflow: matchedSan.workflowPath,
-      ref: matchedSan.gitRef,
-    },
-    signedPredicateType: signedStatement.predicateType || null,
+    gitCommitSha: gitCommitSha ? String(gitCommitSha).trim() : null,
+    treeDigest: treeDigest ? String(treeDigest).trim() : null,
   };
 }
 
 /**
  * Verifies an in-toto Statement v1 attestation file (`attest verify`, fail-closed T2 default).
+ * Enforces raw-byte digest integrity, T1 HMAC evidence when local, Sigstore bundle + trust root
+ * pinning (`trustRoot: 'sigstore' | 'pinned-custom' | 'custom'`), and `--expect-git-sha` /
+ * `--expect-tree-digest` bindings (`WU-03`).
+ *
  * @param {string} attestationPath
  * @param {Record<string, any>} [options]
  */
@@ -267,6 +54,7 @@ export function verifyAttestationFile(attestationPath, options = {}) {
       ok: false,
       trustLevel: 'T0',
       verifiedTier: 'T0',
+      trustRoot: 'none',
       mergeGradeGreen: false,
       reasonCode: 'ATTESTATION_NOT_FOUND',
       errors: [`Attestation file not found: ${absPath}`],
@@ -282,6 +70,7 @@ export function verifyAttestationFile(attestationPath, options = {}) {
       ok: false,
       trustLevel: 'T0',
       verifiedTier: 'T0',
+      trustRoot: 'none',
       mergeGradeGreen: false,
       reasonCode: 'INVALID_ATTESTATION_JSON',
       errors: [`Invalid JSON in attestation: ${err instanceof Error ? err.message : String(err)}`],
@@ -297,6 +86,7 @@ export function verifyAttestationFile(attestationPath, options = {}) {
       ok: false,
       trustLevel: 'T0',
       verifiedTier: 'T0',
+      trustRoot: 'none',
       mergeGradeGreen: false,
       reasonCode: 'UNSUPPORTED_FORMAT',
       errors,
@@ -325,12 +115,43 @@ export function verifyAttestationFile(attestationPath, options = {}) {
     );
   }
 
-  const macCheck = verifyPayloadT1(
-    'verdict.attestation',
-    { ...statementCore, statementDigest: doc.statementDigest },
-    doc.mac,
-    { requireMac: Boolean(options.requireT1Mac) }
-  );
+  const gitBindings = extractAttestedGitBindings(doc);
+  if (options.expectGitSha) {
+    const expectedSha = String(options.expectGitSha).trim().toLowerCase();
+    const actualSha = (gitBindings.gitCommitSha || '').toLowerCase();
+    if (!actualSha || (actualSha !== expectedSha && !actualSha.startsWith(expectedSha))) {
+      primaryReasonCode = primaryReasonCode || 'GIT_SHA_MISMATCH';
+      errors.push(`Attested gitCommitSha "${gitBindings.gitCommitSha || 'missing'}" != expected "${options.expectGitSha}".`);
+    }
+  }
+  if (options.expectTreeDigest) {
+    const normalizeDigest = (/** @type {string} */ s) => s.replace(/^sha256:/i, '').trim().toLowerCase();
+    const expectedTree = normalizeDigest(String(options.expectTreeDigest));
+    const actualTree = gitBindings.treeDigest ? normalizeDigest(gitBindings.treeDigest) : '';
+    if (!actualTree || actualTree !== expectedTree) {
+      primaryReasonCode = primaryReasonCode || 'TREE_DIGEST_MISMATCH';
+      errors.push(`Attested treeDigest "${gitBindings.treeDigest || 'missing'}" != expected "${options.expectTreeDigest}".`);
+    }
+  }
+
+  const hasLocalT1Sig =
+    Boolean(doc.mac) ||
+    Boolean(doc.macs && typeof doc.macs === 'object' && Object.keys(doc.macs).length > 0);
+  const macCheck =
+    options.bundlePath && !options.requireT1Mac && !hasLocalT1Sig
+      ? {
+          ok: true,
+          verified: false,
+          foreign: false,
+          trustTier: /** @type {'T0' | 'T1'} */ ('T0'),
+          reason: 'Sigstore bundle mode: skipping local T1 MAC check when no local T1 signature is attached.',
+        }
+      : verifyPayloadT1(
+          'verdict.attestation',
+          { ...statementCore, statementDigest: doc.statementDigest },
+          doc.mac,
+          { requireMac: Boolean(options.requireT1Mac), macs: doc.macs || null, trustContext: options.trustContext || null }
+        );
   if (!macCheck.ok) {
     primaryReasonCode = primaryReasonCode || 'T1_MAC_INVALID';
     errors.push(macCheck.reason);
@@ -342,6 +163,10 @@ export function verifyAttestationFile(attestationPath, options = {}) {
 
   let sigstoreVerified = false;
   let verifiedIdentity = null;
+  /** @type {'sigstore' | 'pinned-custom' | 'custom' | 'none'} */
+  let trustRoot = 'none';
+  /** @type {string | null} */
+  let trustedRootFingerprint = null;
 
   if (options.bundlePath) {
     const absBundle = path.resolve(options.bundlePath);
@@ -350,7 +175,9 @@ export function verifyAttestationFile(attestationPath, options = {}) {
       errors.push(`Sigstore bundle not found: ${absBundle}`);
     } else {
       const sigRes = verifySigstoreBundleForAttestation(absPath, absBundle, options);
+      if (sigRes.trustRoot) trustRoot = sigRes.trustRoot;
       if (sigRes.ok) {
+        trustedRootFingerprint = sigRes.trustedRootSha256;
         if (doc.predicate?.verdict !== 'pass') {
           primaryReasonCode = primaryReasonCode || 'VERDICT_NOT_PASS';
           errors.push(`Signed verdict is "${doc.predicate?.verdict || 'unknown'}", not "pass"; cannot grant T2 green.`);
@@ -376,6 +203,12 @@ export function verifyAttestationFile(attestationPath, options = {}) {
 
   const trustLevel = sigstoreVerified && errors.length === 0 ? 'T2' : localIntegrityLevel;
   const ok = errors.length === 0 && (sigstoreVerified || Boolean(options.allowT1));
+  const mergeGradeGreen = trustLevel === 'T2' && ok && trustRoot !== 'custom';
+  if (trustRoot === 'custom' && sigstoreVerified && ok) {
+    warnings.push(
+      'Verified using unpinned custom --trusted-root-cert without --trusted-root-sha256; trustRoot="custom" cannot grant mergeGradeGreen=true.'
+    );
+  }
   const reasonCode = ok ? (sigstoreVerified ? 'T2_VERIFIED' : 'T1_INTEGRITY_VERIFIED') : primaryReasonCode || 'VERIFICATION_FAILED';
   const def = TRUST_LEVEL_DEFINITIONS[trustLevel] || TRUST_LEVEL_DEFINITIONS.T0;
 
@@ -383,12 +216,16 @@ export function verifyAttestationFile(attestationPath, options = {}) {
     ok,
     trustLevel,
     verifiedTier: trustLevel,
-    mergeGradeGreen: trustLevel === 'T2' && ok,
+    trustRoot,
+    trustedRootSha256: trustedRootFingerprint,
+    mergeGradeGreen,
     trustLevelDefinition: { zh: def.zh, en: def.en },
     reasonCode,
     declaredTier: doc.predicate?.trustLevel || doc.predicate?.trustTier || 'T0',
     verdict: doc.predicate?.verdict || 'unknown',
     runId: doc.predicate?.runId || null,
+    gitCommitSha: gitBindings.gitCommitSha,
+    treeDigest: gitBindings.treeDigest,
     statementDigest: recomputedDigest,
     cosignVerified: sigstoreVerified,
     sigstoreVerified,
@@ -397,6 +234,16 @@ export function verifyAttestationFile(attestationPath, options = {}) {
     errors,
     warnings,
   };
+}
+
+/**
+ * Computes SHA-256 fingerprint of a PEM X.509 certificate for pinning helpers.
+ * @param {string} certPemOrPath
+ */
+export function computeCertPemSha256(certPemOrPath) {
+  const pem = fs.existsSync(certPemOrPath) ? fs.readFileSync(certPemOrPath, 'utf8') : certPemOrPath;
+  const cert = new crypto.X509Certificate(pem);
+  return crypto.createHash('sha256').update(cert.raw).digest('hex').toLowerCase();
 }
 
 /**
@@ -419,22 +266,36 @@ export async function runAttestCommand(options = {}) {
     expectRepo: options.expectRepo,
     expectWorkflow: options.expectWorkflow,
     expectRef: options.expectRef,
+    expectGitSha: options.expectGitSha,
+    expectTreeDigest: options.expectTreeDigest,
     trustedRootCertPath: options.trustedRootCert,
+    trustedRootSha256: options.trustedRootSha256,
     requireT1Mac: Boolean(options.requireMac),
     allowT1: false,
   });
-  if (options.json) {
-    console.log(JSON.stringify(res, null, 2));
-    return res.ok ? 0 : 1;
+  if (!options.json) {
+    for (const w of res.warnings) console.warn(`[WARN] ${w}`);
+    if (!res.ok) {
+      console.error(`[Attestation REJECTED] trustLevel=${res.trustLevel} reasonCode=${res.reasonCode} mergeGradeGreen=false`);
+      for (const e of res.errors) console.error(`[FAIL] ${e}`);
+    } else {
+      console.log(
+        `[Attestation OK] trustLevel=${res.trustLevel} trustRoot=${res.trustRoot} reasonCode=${res.reasonCode} mergeGradeGreen=${res.mergeGradeGreen} verdict=${res.verdict} runId=${res.runId || 'none'}`
+      );
+    }
   }
-  for (const w of res.warnings) console.warn(`[WARN] ${w}`);
-  if (!res.ok) {
-    console.error(`[Attestation REJECTED] trustLevel=${res.trustLevel} reasonCode=${res.reasonCode} mergeGradeGreen=false`);
-    for (const e of res.errors) console.error(`[FAIL] ${e}`);
-    return 1;
-  }
-  console.log(
-    `[Attestation OK] trustLevel=${res.trustLevel} reasonCode=${res.reasonCode} mergeGradeGreen=${res.mergeGradeGreen} verdict=${res.verdict} runId=${res.runId || 'none'}`
+  const exitCode = res.ok ? 0 : 1;
+  return emitCommandResult(
+    buildCommandResult({
+      tool: 'attest',
+      outcome: res.ok ? 'pass' : 'fail',
+      ok: res.ok,
+      exitCode,
+      summary: res.ok
+        ? `Attestation verified (${res.trustLevel}, trustRoot=${res.trustRoot}, reasonCode=${res.reasonCode})`
+        : res.errors[0] || `Attestation rejected (${res.reasonCode})`,
+      data: res,
+    }),
+    { asJson: Boolean(options.json) }
   );
-  return 0;
 }

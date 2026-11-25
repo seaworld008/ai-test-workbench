@@ -1,6 +1,6 @@
 # AI Test Workbench v5.0 深度优化验收评分卡 (`Scorecard`)
 
-> [English Version](./v5-verification-scorecard.en.md) · [审查报告 (2026-11)](./v4-architecture-code-review-2026-11.md) · [优化路线图](./v5-optimization-roadmap-2026-2027.md) · [机器基准原始数据](../../bench/scorecard.json)
+> [English Version](./v5-verification-scorecard.en.md) · [审查报告 (2026-11)](./v4-architecture-code-review-2026-11.md) · [优化路线图](./v5-optimization-roadmap-2026-2027.md) · [基准运行脚本](../../scripts/run-bench.mjs)
 
 本文档记录基于《架构与代码审查报告》与《分阶段优化路线图》完成 `v5.0.0` 全量深度重构后的**实测北极星指标对比**与**全项闭环核验清单**。所有数据均可通过仓库内置命令 `npm test`、`npm run demo:verify` 与 `npm run bench` 在本机确定性复现。
 

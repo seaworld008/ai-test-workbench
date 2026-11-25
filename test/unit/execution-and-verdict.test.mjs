@@ -212,8 +212,8 @@ test('audit, flaky, diagnose, codemap CLI commands & MCP resources/prompts/tools
     );
     finalizeRunLedger(qaDir, began.runId, { exitCode: 0, resultsPath });
 
-    assert.equal(await runAuditCommand({ target: tmpRepo, json: true, lang: 'en' }), 0);
-    assert.equal(await runAuditCommand({ target: tmpRepo, json: false, lang: 'zh' }), 0);
+    assert.equal(await runAuditCommand({ target: tmpRepo, json: true, requireCompilers: false, lang: 'en' }), 0);
+    assert.equal(await runAuditCommand({ target: tmpRepo, json: false, requireCompilers: false, lang: 'zh' }), 0);
     assert.equal(await runFlakyCommand({ target: tmpRepo, json: true, syncQuarantine: true, lang: 'en' }), 0);
     assert.equal(await runFlakyCommand({ target: tmpRepo, json: false, lang: 'zh' }), 0);
     assert.equal(await runDiagnoseCommand({ target: tmpRepo, json: true, dryRun: true, lang: 'en' }), 0);

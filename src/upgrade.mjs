@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
+import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import { REPO_ROOT, SCHEMA_VERSIONS, WORKBENCH_VERSION } from './core/version.mjs';
 import { GATE_KERNEL_VERSION, isProtectedDiffPath } from './kernel/gate-kernel.mjs';
 
@@ -215,13 +216,21 @@ export function upgradeQaWorkspace(qaDir, options = {}) {
     files: Object.fromEntries(Object.entries(nextManifestFiles).sort(([a], [b]) => a.localeCompare(b))),
   };
 
-  if (!dryRun) {
+  const conflicts = actions.filter((a) => a.action === 'CONFLICT');
+  const changedCount = actions.filter((a) => ['CREATE', 'UPDATE', 'REMOVE_STALE'].includes(a.action)).length;
+
+  const manifestUnchanged =
+    prevManifest &&
+    changedCount === 0 &&
+    conflicts.length === 0 &&
+    prevManifest.workbenchVersion === WORKBENCH_VERSION &&
+    prevManifest.gateKernelVersion === GATE_KERNEL_VERSION &&
+    JSON.stringify(prevFiles) === JSON.stringify(nextManifest.files);
+
+  if (!dryRun && !manifestUnchanged) {
     fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
     fs.writeFileSync(manifestPath, JSON.stringify(nextManifest, null, 2) + '\n', 'utf8');
   }
-
-  const conflicts = actions.filter((a) => a.action === 'CONFLICT');
-  const changedCount = actions.filter((a) => ['CREATE', 'UPDATE', 'REMOVE_STALE'].includes(a.action)).length;
 
   return {
     ok: conflicts.length === 0,
@@ -264,41 +273,42 @@ export async function runUpgradeCommand(options = {}) {
     scope,
   });
 
-  if (options.json) {
+  const exitCode = res.ok ? 0 : 1;
+  if (!options.json) {
     console.log(
-      JSON.stringify(
-        {
-          ...res,
-          exitCode: res.ok ? 0 : 1,
-        },
-        null,
-        2
-      )
+      `\n=== ${lang === 'zh' ? 'AI Test Workbench 模板内核安全升级 (upgrade)' : 'AI Test Workbench Kernel Upgrade'}${res.dryRun ? ' [DRY-RUN]' : ''} ===`
     );
-    return res.ok ? 0 : 1;
+    console.log(`QA Dir: ${res.qaDir} · Scope: ${res.scope} · Version: ${res.fromVersion} -> ${res.toVersion}`);
+    for (const act of res.actions) {
+      console.log(`  [${act.action}] ${act.file}${act.sidecar ? ` -> ${act.sidecar}` : ''}`);
+    }
+    if (res.conflictCount > 0) {
+      console.warn(
+        lang === 'zh'
+          ? `\n[CONFLICT] 检测到 ${res.conflictCount} 处本地自定义文件冲突，已写入 *.aitest-new 保留人工修改；确认后可手动合并或使用 --force 覆盖。`
+          : `\n[CONFLICT] ${res.conflictCount} customized file(s) preserved; incoming copies written to *.aitest-new. Merge manually or pass --force.`
+      );
+    }
+    if (res.requiresGovernanceApprove) {
+      console.log(
+        lang === 'zh'
+          ? `\n[NEXT] 受保护的内核文件已变更；请在终端由人类审批更新治理锁：\n  npx ai-test-workbench@${WORKBENCH_VERSION} governance approve --target "${target}" --by <你的姓名> --reason "upgrade kernel to v${WORKBENCH_VERSION}"`
+          : `\n[NEXT] Protected kernel files changed; a human must approve the governance lock in terminal:\n  npx ai-test-workbench@${WORKBENCH_VERSION} governance approve --target "${target}" --by <your-name> --reason "upgrade kernel to v${WORKBENCH_VERSION}"`
+      );
+    }
+    console.log('');
   }
-
-  console.log(
-    `\n=== ${lang === 'zh' ? 'AI Test Workbench 模板内核安全升级 (upgrade)' : 'AI Test Workbench Kernel Upgrade'}${res.dryRun ? ' [DRY-RUN]' : ''} ===`
+  return emitCommandResult(
+    buildCommandResult({
+      tool: 'upgrade',
+      outcome: res.ok ? 'pass' : 'fail',
+      ok: res.ok,
+      exitCode,
+      summary: res.ok
+        ? `Upgraded QA workspace (${res.scope}: ${res.fromVersion} -> ${res.toVersion})`
+        : `Upgrade had ${res.conflictCount} conflict(s); inspect *.aitest-new or pass --force`,
+      data: res,
+    }),
+    { asJson: Boolean(options.json) }
   );
-  console.log(`QA Dir: ${res.qaDir} · Scope: ${res.scope} · Version: ${res.fromVersion} -> ${res.toVersion}`);
-  for (const act of res.actions) {
-    console.log(`  [${act.action}] ${act.file}${act.sidecar ? ` -> ${act.sidecar}` : ''}`);
-  }
-  if (res.conflictCount > 0) {
-    console.warn(
-      lang === 'zh'
-        ? `\n[CONFLICT] 检测到 ${res.conflictCount} 处本地自定义文件冲突，已写入 *.aitest-new 保留人工修改；确认后可手动合并或使用 --force 覆盖。`
-        : `\n[CONFLICT] ${res.conflictCount} customized file(s) preserved; incoming copies written to *.aitest-new. Merge manually or pass --force.`
-    );
-  }
-  if (res.requiresGovernanceApprove) {
-    console.log(
-      lang === 'zh'
-        ? `\n[NEXT] 受保护的内核文件已变更；请在终端由人类审批更新治理锁：\n  npx ai-test-workbench@${WORKBENCH_VERSION} governance approve --target "${target}" --by <你的姓名> --reason "upgrade kernel to v${WORKBENCH_VERSION}"`
-        : `\n[NEXT] Protected kernel files changed; a human must approve the governance lock in terminal:\n  npx ai-test-workbench@${WORKBENCH_VERSION} governance approve --target "${target}" --by <your-name> --reason "upgrade kernel to v${WORKBENCH_VERSION}"`
-    );
-  }
-  console.log('');
-  return res.ok ? 0 : 1;
 }
