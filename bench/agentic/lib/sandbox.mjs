@@ -29,15 +29,35 @@ export const TEMPLATE_MODULES_DIR = path.join(REPO_ROOT, 'templates', 'playwrigh
  * @param {Record<string, string | undefined>} [env]
  */
 export function gitExec(cwd, args, env) {
-  const res = spawnSync('git', ['-c', 'core.quotePath=off', '-c', 'core.hooksPath=.aitest-no-hooks', '-c', 'core.fsmonitor=false', ...args], {
-    cwd,
-    env: env || process.env,
-    shell: false,
-    encoding: 'utf8',
-    windowsHide: true,
-    timeout: 20_000,
-    maxBuffer: 16 * 1024 * 1024,
-  });
+  const effectiveEnv = {
+    ...(env || process.env),
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_ASKPASS: '',
+    GCM_INTERACTIVE: 'never',
+  };
+  const res = spawnSync(
+    'git',
+    [
+      '-c',
+      'core.quotePath=off',
+      '-c',
+      'core.hooksPath=.aitest-no-hooks',
+      '-c',
+      'core.fsmonitor=false',
+      '-c',
+      'gc.auto=0',
+      ...args,
+    ],
+    {
+      cwd,
+      env: effectiveEnv,
+      shell: false,
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 120_000,
+      maxBuffer: 16 * 1024 * 1024,
+    }
+  );
   return res;
 }
 
@@ -310,7 +330,11 @@ export async function createTrialSandbox(task, options = {}) {
   gitExec(workspaceDir, ['remote', 'add', 'origin', originBareDir]);
   const pushRes = gitExec(workspaceDir, ['push', '-u', 'origin', 'main']);
   if (pushRes.status !== 0) {
-    throw new Error(`Failed to push protected baseline to bare origin: ${pushRes.stderr || pushRes.stdout}`);
+    const detail =
+      (pushRes.stderr || pushRes.stdout || '').trim() ||
+      pushRes.error?.message ||
+      `status=${pushRes.status}, signal=${pushRes.signal}`;
+    throw new Error(`Failed to push protected baseline to bare origin: ${detail}`);
   }
 
   // 4. Branch `redteam/<taskId>` and inject the real planted product defect in `app/server.mjs`
