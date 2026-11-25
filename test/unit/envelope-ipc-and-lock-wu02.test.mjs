@@ -123,13 +123,22 @@ test('WU-02: readEnvFileIfPresent is pure, loadWorkbenchConfig exposes explicit 
     assert.equal(ws.repoDir, tmpRepo);
     assert.equal(ws.qaDir, qaDir);
 
-    const cfgCli = loadWorkbenchConfig({ qaDir, env: { ...process.env } });
+    const cleanEnv = { ...process.env };
+    delete cleanEnv.CI;
+    delete cleanEnv.GITHUB_ACTIONS;
+    delete cleanEnv.GITLAB_CI;
+    delete cleanEnv.TF_BUILD;
+    delete cleanEnv.BUILDKITE;
+    delete cleanEnv.CIRCLECI;
+    delete cleanEnv.AITEST_MCP_CHILD;
+
+    const cfgCli = loadWorkbenchConfig({ qaDir, env: cleanEnv });
     assert.equal(cfgCli.caller, 'human-cli');
 
-    const cfgMcp = loadWorkbenchConfig({ qaDir, env: { ...process.env, AITEST_MCP_CHILD: '1' } });
+    const cfgMcp = loadWorkbenchConfig({ qaDir, env: { ...cleanEnv, AITEST_MCP_CHILD: '1' } });
     assert.equal(cfgMcp.caller, 'mcp-child');
 
-    const cfgCi = loadWorkbenchConfig({ qaDir, env: { ...process.env, CI: 'true' } });
+    const cfgCi = loadWorkbenchConfig({ qaDir, env: { ...cleanEnv, CI: 'true' } });
     assert.equal(cfgCi.caller, 'ci');
   } finally {
     delete process.env.WU02_PURE_ENV_TEST;
