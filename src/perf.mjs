@@ -5,6 +5,7 @@ import { resolveQaDirectory } from './agents.mjs';
 import { syncLivingCodeMap } from './codemap.mjs';
 import { loadWorkbenchConfig } from './core/config.mjs';
 import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
+import { loadRuntimeConfig } from './core/runtime-config.mjs';
 import {
   DEFAULT_BLOCKED_ENDPOINTS,
   checkOutgoingRequestSafety,
@@ -35,33 +36,70 @@ function readJsonSafe(p) {
 /** @param {Record<string, any>} [options] */
 export async function runPerfCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
+  const asJson = Boolean(options.json);
+  /** @param {number} exitCode @param {string} msg @param {'fail' | 'blocked' | 'usage'} [outcome] */
+  const failPerf = (exitCode, msg, outcome = exitCode === 2 ? 'blocked' : exitCode === 64 ? 'usage' : 'fail') => {
+    if (!asJson) console.error(msg);
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'perf',
+        outcome,
+        ok: false,
+        exitCode,
+        summary: msg,
+        blockerKind: exitCode === 2 ? 'TARGET_OR_CONFIG_BLOCKED' : exitCode === 64 ? 'USAGE_ERROR' : null,
+        data: { error: msg },
+      }),
+      { asJson, compatSpreadData: false }
+    );
+  };
   if (!options.target) {
-    console.error(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
-    return 1;
+    return failPerf(1, lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
   }
 
   const qaDir = resolveQaDirectory(options.target, options.qaDir);
   if (!qaDir) {
-    console.error(lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
-    return 1;
+    return failPerf(1, lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
   }
 
-  loadWorkbenchConfig({ qaDir });
+  const wbCfg = loadWorkbenchConfig({ qaDir });
+  if (!wbCfg.ok) {
+    return failPerf(2, `[Config Blocked] ${wbCfg.errors.join('; ') || 'Invalid workbench config.'}`, 'blocked');
+  }
+  const runtimeCfgRes = loadRuntimeConfig(qaDir);
+  if (!runtimeCfgRes.ok) {
+    return failPerf(2, `[Runtime Config Blocked] ${runtimeCfgRes.errors.join('; ') || 'Invalid aitest.runtime.json.'}`, 'blocked');
+  }
   /** @type {Record<string, string>} */
   const overrides = {};
   if (options.baseUrl) overrides.TEST_BASE_URL = options.baseUrl;
   const mergedEnv = loadMergedQaEnv(qaDir, { ...process.env, ...overrides });
+  if (!mergedEnv.TEST_BASE_URL && runtimeCfgRes.config?.baseURL) {
+    mergedEnv.TEST_BASE_URL = runtimeCfgRes.config.baseURL;
+  }
   const safety = evaluateTargetSafety(mergedEnv);
   if (!safety.ok || !safety.baseURL) {
     const errs = safety.errors.length > 0 ? safety.errors : ['TEST_BASE_URL is required for perf.'];
-    for (const err of errs) console.error(`[Target Guard Blocked] ${err}`);
-    return 2;
+    if (!asJson) {
+      for (const err of errs) console.error(`[Target Guard Blocked] ${err}`);
+    }
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'perf',
+        outcome: 'blocked',
+        ok: false,
+        exitCode: 2,
+        summary: `[Target Guard Blocked] ${errs[0]}`,
+        blockerKind: 'TARGET_GUARD_BLOCKED',
+        data: { error: errs.join('; '), errors: errs },
+      }),
+      { asJson, compatSpreadData: false }
+    );
   }
 
   const mode = (options.mode || 'all').toLowerCase();
   if (!['all', 'browser', 'api'].includes(mode)) {
-    console.error(`Invalid --mode "${mode}". Use: all | browser | api`);
-    return 1;
+    return failPerf(64, `Invalid --mode "${mode}". Use: all | browser | api`, 'usage');
   }
 
   const existingCm = readJsonSafe(path.join(qaDir, 'knowledge', 'code-map.json'));
@@ -93,8 +131,7 @@ export async function runPerfCommand(options = {}) {
     const resolvedRouteUrl = new URL(rPath, safety.baseURL).toString();
     const rCheck = checkOutgoingRequestSafety('GET', resolvedRouteUrl, perfGuardConfig);
     if (rCheck.blocked) {
-      console.error(`[Target Guard Blocked] Perf route "${rPath}" blocked: ${rCheck.reason}`);
-      return 2;
+      return failPerf(2, `[Target Guard Blocked] Perf route "${rPath}" blocked: ${rCheck.reason}`, 'blocked');
     }
   }
 
@@ -115,8 +152,7 @@ export async function runPerfCommand(options = {}) {
     const epUrl = new URL(ep, safety.baseURL).toString();
     const epCheck = checkOutgoingRequestSafety('GET', epUrl, perfGuardConfig);
     if (epCheck.blocked) {
-      console.error(`[Target Guard Blocked] Perf endpoint "${ep}" blocked: ${epCheck.reason}`);
-      return 2;
+      return failPerf(2, `[Target Guard Blocked] Perf endpoint "${ep}" blocked: ${epCheck.reason}`, 'blocked');
     }
     apiBenchmark = await runReadOnlyApiBenchmark(epUrl, concurrency, iterations, perfGuardConfig);
   }

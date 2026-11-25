@@ -34,8 +34,17 @@ export async function acquireDiskLock(lockDir, timeoutMs = 15_000) {
     return { ok: true, release: () => {} };
   }
   const aitestDir = path.join(lockDir, '.aitest');
-  if (!fs.existsSync(aitestDir)) {
-    return { ok: true, release: () => {} };
+  const createdAitestDir = !fs.existsSync(aitestDir);
+  if (createdAitestDir) {
+    try {
+      fs.mkdirSync(aitestDir, { recursive: true });
+    } catch (err) {
+      return {
+        ok: false,
+        reason: 'WORKSPACE_LOCK_BUSY',
+        error: `Unable to create lock directory "${aitestDir}": ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
   }
 
   const lockFile = path.join(aitestDir, '.write.lock');
@@ -64,6 +73,12 @@ export async function acquireDiskLock(lockDir, timeoutMs = 15_000) {
               const cur = JSON.parse(fs.readFileSync(lockFile, 'utf8'));
               if (Number(cur?.pid) === process.pid) {
                 fs.unlinkSync(lockFile);
+              }
+            }
+            if (createdAitestDir && fs.existsSync(aitestDir)) {
+              const remaining = fs.readdirSync(aitestDir);
+              if (remaining.length === 0) {
+                fs.rmdirSync(aitestDir);
               }
             }
           } catch {

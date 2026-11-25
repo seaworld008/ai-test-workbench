@@ -1,26 +1,53 @@
 // @ts-check
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { resolveQaDirectory } from './agents.mjs';
-import { buildCommandResult, emitCommandResult, isCiEnvironment } from './core/outcome.mjs';
+import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import { SCHEMA_VERSIONS } from './core/version.mjs';
 import {
   BOT_APPROVER_RE,
   GATE_KERNEL_VERSION,
   PROTECTED_GOVERNANCE_REL_FILES,
   computeProtectedFileHashes,
+  computeTemplateManifestDigest,
   isBotApprover,
   loadAitestConfig,
   loadAndValidateWaivers,
   openTrustContext,
+  recordWorkspaceStickyKey,
   resolveGitIdentity,
   signPayloadT1,
   verifyGovernanceLockInQaDir,
 } from './kernel/gate-kernel.mjs';
 
 export { PROTECTED_GOVERNANCE_REL_FILES, computeProtectedFileHashes, hasWorkspaceGovernanceTrace, verifyGovernanceLockInQaDir };
+
+const AGENT_SESSION_ENV_VARS = Object.freeze([
+  'AITEST_MCP_CHILD',
+  'AITEST_MCP_CAPTURED_STDIO',
+  'ANTIGRAVITY_CONVERSATION_ID',
+  'CLAUDECODE',
+  'CODEX_CI',
+  'CODEX_SANDBOX',
+  'CURSOR_TRACE_ID',
+  'AIDER_MODEL',
+]);
+
+/**
+ * Detects whether the current process environment indicates an AI coding agent session.
+ * @param {Record<string, string | undefined>} env
+ * @returns {string | null}
+ */
+function detectAgentSessionEnvVar(env) {
+  for (const key of AGENT_SESSION_ENV_VARS) {
+    const val = env?.[key];
+    if (typeof val === 'string' && val.trim() !== '' && val.trim() !== '0' && val.trim().toLowerCase() !== 'false') {
+      return key;
+    }
+  }
+  return null;
+}
 
 /**
  * @param {string} qaDir
@@ -124,6 +151,9 @@ export function writeGovernanceLock(qaDir, meta) {
   };
 
   fs.writeFileSync(lockPath, JSON.stringify(lockPayload, null, 2) + '\n', 'utf8');
+  if (sig.signed && sig.keyId) {
+    recordWorkspaceStickyKey(trustContext, qaDir);
+  }
 
   const auditLogPath = path.join(aitestDir, 'governance-audit.jsonl');
   fs.appendFileSync(
@@ -179,9 +209,9 @@ export function ensureInitialGovernanceLock(qaDir, options = {}) {
   if (fs.existsSync(manifestPath)) {
     try {
       const rawManifest = fs.readFileSync(manifestPath, 'utf8');
-      templateManifestDigest = `sha256:${crypto.createHash('sha256').update(rawManifest.replace(/\r\n/g, '\n'), 'utf8').digest('hex')}`;
+      const parsedManifest = JSON.parse(rawManifest);
+      templateManifestDigest = computeTemplateManifestDigest(parsedManifest);
       if (!expectedHashes) {
-        const parsedManifest = JSON.parse(rawManifest);
         if (parsedManifest?.files && typeof parsedManifest.files === 'object') {
           expectedHashes = parsedManifest.files;
         }
@@ -265,23 +295,44 @@ export async function runGovernanceCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   const action = String(options.action || 'verify').toLowerCase();
   const env = options.env || process.env;
+  const asJson = Boolean(options.json);
+
+  /**
+   * @param {number} exitCode
+   * @param {string} message
+   * @param {string | null} [blockerKind]
+   * @param {Record<string, unknown>} [extraData]
+   */
+  const failGov = (exitCode, message, blockerKind = null, extraData = {}) => {
+    if (!asJson) console.error(message);
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'governance',
+        outcome: exitCode === 64 ? 'usage' : exitCode === 2 ? 'blocked' : 'fail',
+        ok: false,
+        exitCode,
+        summary: message,
+        blockerKind: blockerKind || (exitCode === 2 ? 'GOVERNANCE_SECURITY_BLOCKED' : null),
+        data: { action, error: message, ...extraData },
+      }),
+      { asJson }
+    );
+  };
 
   if (!options.target) {
-    console.error(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
-    return 1;
+    return failGov(64, lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option', 'USAGE_ERROR');
   }
 
   const qaDir = resolveQaDirectory(path.resolve(options.target), options.qaDir);
   if (!qaDir) {
-    console.error(lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
-    return 1;
+    return failGov(1, lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
   }
 
   if (action === 'status' || action === 'verify') {
     const trustContext = openTrustContext({ qaDir, repoDir: path.dirname(qaDir), env, createKeyIfMissing: false });
     const check = verifyGovernanceLockInQaDir(qaDir, { trustContext });
     const exitCode = check.ok ? 0 : check.status === 'blocked' ? 2 : 1;
-    if (!options.json) {
+    if (!asJson) {
       for (const w of check.warnings || []) console.warn(`[WARN] ${w}`);
       if (!check.ok) {
         for (const e of check.errors) console.error(`[FAIL] ${e}`);
@@ -306,58 +357,64 @@ export async function runGovernanceCommand(options = {}) {
         recoverySteps: exitCode === 0 ? [] : check.errors.slice(0, 3),
         data: check,
       }),
-      { asJson: Boolean(options.json) }
+      { asJson }
     );
   }
 
   if (action === 'approve') {
-    if (env.AITEST_MCP_CHILD === '1' || env.AITEST_MCP_CAPTURED_STDIO === '1') {
-      console.error(
-        '[Governance Security Blocked] "governance approve" cannot be invoked from an MCP server context. A human must run it directly in terminal or CI.'
+    const agentEnvVar = detectAgentSessionEnvVar(env);
+    if (agentEnvVar) {
+      return failGov(
+        2,
+        `[Governance Security Blocked] "governance approve" cannot be invoked from an AI agent or MCP context (detected ${agentEnvVar}). A human must run it directly in an interactive terminal.`,
+        'AGENT_SELF_APPROVAL_BLOCKED',
+        { detectedEnvVar: agentEnvVar }
       );
-      return 2;
     }
 
     const by = String(options.by || env.AITEST_GOVERNANCE_APPROVER || '').trim();
     const reason = String(options.reason || '').trim();
     if (!by || !reason) {
-      console.error(
+      return failGov(
+        1,
         lang === 'zh'
           ? '审批治理变更必须显式传入人类审批人与原因：--by <姓名/工号> --reason "<审批原因>"'
           : 'Governance approval requires human attribution: --by <human-reviewer> --reason "<why>"'
       );
-      return 1;
     }
     if (isBotApprover(by) || BOT_APPROVER_RE.test(by)) {
-      console.error(`[Governance Security Blocked] Approver "${by}" matches a reserved AI/bot identifier. Human reviewer required.`);
-      return 2;
+      return failGov(
+        2,
+        `[Governance Security Blocked] Approver "${by}" matches a reserved AI/bot identifier. Human reviewer required.`,
+        'BOT_APPROVER_BLOCKED'
+      );
     }
 
     const changes = summarizeProtectedLockChanges(qaDir);
     const isTty = options.isTTY !== undefined ? Boolean(options.isTTY) : Boolean(process.stdin.isTTY && process.stdout.isTTY);
-    const hasNonInteractiveGrant =
-      Boolean(options.yes) || isCiEnvironment(env) || env.AITEST_APPROVE_NON_INTERACTIVE === '1';
+    const hasNonInteractiveGrant = Boolean(options.yes) && env.AITEST_APPROVE_NON_INTERACTIVE === '1';
 
     if (!isTty && !hasNonInteractiveGrant) {
-      console.error(
-        '[Governance Confirmation Required] Non-interactive governance approve requires explicit --yes (or CI environment) after reviewing protected file changes.'
+      return failGov(
+        2,
+        '[Governance Confirmation Required] Non-interactive governance approve requires a human TTY (or explicit AITEST_APPROVE_NON_INTERACTIVE=1 with --yes outside agent sessions). CI=1 and --yes alone are rejected.',
+        'GOVERNANCE_CONFIRMATION_REQUIRED'
       );
-      return 2;
     }
 
-    if (isTty && !options.yes && !options.json) {
-      console.log('\n[Governance Approval Preview]');
-      console.log(`  Approver : ${by}`);
-      console.log(`  Reason   : ${reason}`);
-      console.log(`  Added    : ${changes.added.length ? changes.added.join(', ') : '(none)'}`);
-      console.log(`  Modified : ${changes.modified.length ? changes.modified.join(', ') : '(none)'}`);
-      console.log(`  Removed  : ${changes.removed.length ? changes.removed.join(', ') : '(none)'}`);
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    if (isTty && !options.yes) {
+      const promptStream = asJson ? process.stderr : process.stdout;
+      promptStream.write('\n[Governance Approval Preview]\n');
+      promptStream.write(`  Approver : ${by}\n`);
+      promptStream.write(`  Reason   : ${reason}\n`);
+      promptStream.write(`  Added    : ${changes.added.length ? changes.added.join(', ') : '(none)'}\n`);
+      promptStream.write(`  Modified : ${changes.modified.length ? changes.modified.join(', ') : '(none)'}\n`);
+      promptStream.write(`  Removed  : ${changes.removed.length ? changes.removed.join(', ') : '(none)'}\n`);
+      const rl = readline.createInterface({ input: process.stdin, output: promptStream });
       try {
         const answer = (await rl.question('Approve and re-sign .aitest/governance.lock? [y/N] ')).trim().toLowerCase();
         if (answer !== 'y' && answer !== 'yes') {
-          console.error('[Governance Approval Aborted] Cancelled by user.');
-          return 2;
+          return failGov(2, '[Governance Approval Aborted] Cancelled by user.', 'GOVERNANCE_APPROVAL_ABORTED');
         }
       } finally {
         rl.close();
@@ -370,10 +427,12 @@ export async function runGovernanceCommand(options = {}) {
       maxWaivers: cfg.maxWaivers,
     });
     if (!waiverRes.ok) {
-      for (const err of waiverRes.errors) {
-        console.error(`[Governance Waiver Validation Failed] ${err}`);
-      }
-      return 1;
+      return failGov(
+        1,
+        waiverRes.errors.map((e) => `[Governance Waiver Validation Failed] ${e}`).join('\n'),
+        null,
+        { errors: waiverRes.errors }
+      );
     }
 
     const trustContext = openTrustContext({ qaDir, repoDir: path.dirname(qaDir), env, createKeyIfMissing: true });
@@ -389,7 +448,7 @@ export async function runGovernanceCommand(options = {}) {
       protectedCount: Object.keys(written.lock.files).length,
       changes,
     };
-    if (!options.json) {
+    if (!asJson) {
       console.log(
         `[Governance Approved] Locked ${out.protectedCount} protected QA file(s) by "${out.approvedBy}" (${out.trustTier}) -> ${out.lockPath}`
       );
@@ -403,10 +462,9 @@ export async function runGovernanceCommand(options = {}) {
         summary: `Governance lock approved by ${out.approvedBy} (${out.protectedCount} files, ${out.trustTier})`,
         data: out,
       }),
-      { asJson: Boolean(options.json) }
+      { asJson }
     );
   }
 
-  console.error(`Unknown governance action "${action}". Use: verify | status | approve`);
-  return 1;
+  return failGov(64, `Unknown governance action "${action}". Use: verify | status | approve`, 'USAGE_ERROR');
 }

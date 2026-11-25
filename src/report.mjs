@@ -47,15 +47,25 @@ export async function runReportCommand(options = {}) {
     });
   }
   const lang = options.lang === 'zh' ? 'zh' : 'en';
+  const asJson = Boolean(options.json);
+  /** @param {number} exitCode @param {string} msg @param {'fail' | 'usage'} [outcome] */
+  const failReport = (exitCode, msg, outcome = exitCode === 64 ? 'usage' : 'fail') => {
+    if (!asJson) console.error(msg);
+    return emitCommandResult(
+      buildCommandResult({ tool: 'report', outcome, ok: false, exitCode, summary: msg, data: { error: msg } }),
+      { asJson, compatSpreadData: false }
+    );
+  };
+  if (view !== 'artifacts') {
+    return failReport(64, `Invalid --view "${view}". Use: artifacts | flaky | traceability`, 'usage');
+  }
   if (!options.target) {
-    console.error(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
-    return 1;
+    return failReport(1, lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
   }
 
   const qaDir = resolveQaDirectory(options.target, options.qaDir);
   if (!qaDir) {
-    console.error(lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
-    return 1;
+    return failReport(1, lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
   }
 
   const htmlReport = path.join(qaDir, 'playwright-report', 'index.html');

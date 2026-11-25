@@ -1,14 +1,14 @@
-# v5.x to v6.2.0 Upgrade & Migration Guide (`upgrade.en.md`)
+# v5.x to v6.2.1 Upgrade & Migration Guide (`upgrade.en.md`)
 
 > [简体中文 (默认)](./upgrade.md) · [Version Compatibility Matrix](../VERSION.en.md) · [Governance Guide](./governance.en.md) · [Changelog](../CHANGELOG.en.md)
 
-This guide documents all breaking changes from **`v5.1.1` / `v6.1.0`** to **`v6.2.0`**, backward-compatibility aliases retained throughout `v6.x` (removed in `v7.0.0`), the automated `upgrade` workflow, and `@playwright/test` maintenance steps.
+This guide documents all breaking changes from **`v5.1.1` / `v6.1.0`** to **`v6.2.1`**, backward-compatibility aliases retained throughout `v6.x` (removed in `v7.0.0`), the automated `upgrade` workflow, and `@playwright/test` maintenance steps.
 
 ---
 
-## 1. Breaking Changes Summary (`v5.x / v6.1 -> v6.2.0`)
+## 1. Breaking Changes Summary (`v5.x / v6.1 -> v6.2.1`)
 
-| Area | `v5.1.1` / `v6.1.0` Behavior | `v6.2.0` Behavior | Compatibility & Removal Window |
+| Area | `v5.1.1` / `v6.1.0` Behavior | `v6.2.1` Behavior | Compatibility & Removal Window |
 |---|---|---|---|
 | **MCP Tool Surface (21 -> 16)** | Separate `aitest_heal_*`, `aitest_job_*`, `aitest_flaky_report`, `aitest_trace_matrix` | Consolidated into **`aitest_heal`** (with `discard`), **`aitest_job`**, and **`aitest_report`** (`view: "summary" \| "flaky" \| "traceability"`), plus **`aitest_bootstrap`**; `tools/list` exposes **16 canonical tools** | `tools/call` forwards all **8 legacy names** throughout `v6.x` with `structuredContent.data._deprecation` and summary warnings (removed in `v7.0.0`) |
 | **Per-Command Strict CLI Flags** | Single 89-flag global bag silently ignored unrelated options | Every subcommand (including `bootstrap` and `report --view`) declares exact flags in `src/cli/commands.mjs`; `--json` usage errors exit **`64`** | `governance approve` retains `--approver` -> `--by`; `flaky` / `trace-matrix` remain forwarded to `report --view` (`v7.0.0` removal) |
@@ -42,17 +42,17 @@ Update prompts, scripts, or agent rules referencing legacy v5 tool names as foll
 
 ```bash
 # 1. Preview planned updates and any local conflicts
-npx ai-test-workbench@6.2.0 upgrade --target /path/to/repo --dry-run
+npx ai-test-workbench@6.2.1 upgrade --target /path/to/repo --dry-run
 
 # 2. Apply upgrade (defaults to support/** and scripts/audit-results.mjs; pass --scope all for full template check)
-npx ai-test-workbench@6.2.0 upgrade --target /path/to/repo
+npx ai-test-workbench@6.2.1 upgrade --target /path/to/repo
 
 # 3. Review changes and re-seal governance.lock locally as a human reviewer
-npx ai-test-workbench@6.2.0 governance status --target /path/to/repo
-npx ai-test-workbench@6.2.0 governance approve --target /path/to/repo --by "alice@team" --reason "Upgrade to ai-test-workbench v6.0.0 kernel"
+npx ai-test-workbench@6.2.1 governance status --target /path/to/repo
+npx ai-test-workbench@6.2.1 governance approve --target /path/to/repo --by "alice@team" --reason "Upgrade to ai-test-workbench v6.0.0 kernel"
 
 # 4. Verify zero kernel version drift
-npx ai-test-workbench@6.2.0 doctor --target /path/to/repo
+npx ai-test-workbench@6.2.1 doctor --target /path/to/repo
 ```
 
 ---
@@ -66,8 +66,8 @@ npx ai-test-workbench@6.2.0 doctor --target /path/to/repo
    ```
 3. Preview and sync official Test Agents definitions:
    ```bash
-   npx ai-test-workbench@6.2.0 update-agents --target /path/to/repo --loop codex,claude --dry-run
-   npx ai-test-workbench@6.2.0 update-agents --target /path/to/repo --loop codex,claude
+   npx ai-test-workbench@6.2.1 update-agents --target /path/to/repo --loop codex,claude --dry-run
+   npx ai-test-workbench@6.2.1 update-agents --target /path/to/repo --loop codex,claude
    ```
 4. If an agent file was customized locally, the incoming template is written to `<file>.aitest-new` (exit code `2`). Merge and remove `.aitest-new` (or pass `--force` explicitly).
 5. Run `npm run typecheck && npm run lint`, offline `smoke`, and target regressions, then re-seal via human `governance approve`.

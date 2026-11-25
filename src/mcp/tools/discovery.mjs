@@ -256,6 +256,7 @@ export const DISCOVERY_TOOLS = [
         target: { type: 'string', description: 'Target repository or QA directory' },
         repo: { type: 'string', description: 'Optional host source directory path' },
         qaDir: { type: 'string', description: 'Optional QA subdirectory name or path' },
+        force: { type: 'boolean', description: 'Force rewrite of code-map.json and SYSTEM_MAP.md even if unchanged' },
         noSyncImpact: { type: 'boolean', description: 'Skip auto-updating impact-map.auto.json suggestions' },
         lang: { type: 'string', enum: ['zh', 'en'], description: 'Output language code (zh or en)' },
       },
@@ -274,6 +275,7 @@ export const DISCOVERY_TOOLS = [
       pushOpt(a, '--target', target);
       pushOpt(a, '--repo', args.repo);
       pushOpt(a, '--qa-dir', args.qaDir);
+      pushBool(a, '--force', args.force);
       pushBool(a, '--no-sync-impact', args.noSyncImpact);
       return a;
     },

@@ -1,6 +1,7 @@
 // @ts-check
 import { parseArgs } from 'node:util';
 import { CLI_COMMANDS, CLI_COMMAND_NAMES } from './cli/commands.mjs';
+import { validateCliOptionValues } from './cli/opts.mjs';
 import { detectLang, t } from './core/i18n.mjs';
 import { EXIT_CODES, buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import { WORKBENCH_VERSION } from './core/version.mjs';
@@ -206,9 +207,18 @@ export async function runCli(argv = process.argv.slice(2)) {
   const lang = detectLang(typeof v.lang === 'string' ? v.lang : located.langHint);
 
   if (v.help) {
+    if (v.json) {
+      return emitCommandResult(
+        buildCommandResult({ tool: cmd, outcome: 'pass', ok: true, exitCode: EXIT_CODES.PASS, summary: `Help for "${cmd}"`, data: { command: cmd, options: Object.keys(spec.options) } }),
+        { asJson: true }
+      );
+    }
     printCommandHelp(cmd, spec, lang);
     return 0;
   }
+
+  const valErr = validateCliOptionValues(cmd, v);
+  if (valErr) return failUsage(cmd, valErr, Boolean(v.json), [`Run "aitw ${cmd} --help" for valid options.`]);
 
   if (spec.requireTarget && !v.target) {
     const msg = lang === 'zh' ? `命令 "${cmd}" 缺少必填参数 --target <path>` : `Command "${cmd}" missing mandatory --target <path>`;

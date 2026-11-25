@@ -1,6 +1,6 @@
 <div align="center">
 
-# AI Test Workbench (`v6.2.0`)
+# AI Test Workbench (`v6.2.1`)
 
 **Trustworthy Verification Kernel & Native Multi-Protocol MCP Server for AI Coding Agents**
 
@@ -28,14 +28,14 @@ When AI coding agents (Claude Code, Codex CLI, Cursor, VS Code Copilot, Gemini C
 
 | Metric | Verified Measurement (Corpus-Qualified & Reproducible) | Enforcing Mechanism |
 |---|---|---|
-| **Fake-Green Escape Rate (`FGER-internal` / `FGER-holdout`)** | Internal corpus **`0.0%` (`26/26`)** · Red-Team holdout **`0.0%` (`24/24`)** (`npm run bench`) | 4-Layer fail-closed AST Gate (`AITEST-G101..G115`) + T1 MAC Governance Lock |
+| **Fake-Green Escape Rate (`FGER-internal` / `FGER-holdout`)** | Internal corpus **`0.0%` (`26/26`)** · Red-Team holdout **`0.0%` (`24/24`)** (`npm run bench`) | 4-Layer fail-closed AST Gate (`AITEST-G101..G117`) + Sticky T1 MAC Governance Lock |
 | **Benign Refactoring FPR (Internal Corpus)** | **`0.0%` (`12/12`)** (Prettier wraps, locator renames, ARIA consolidation; `npm run bench`) | Full-file TypeScript Compiler API semantic AST comparison |
 | **Gate FPR (Real-World Unseen Holdout, `n=50`, `seed=20261125`)** | **`6.1%` (`3/49` normal commits, Wilson 95% CI `[2.1%, 16.5%]`)**; raw alert rate `8.0%` (`4/50`, `1/1` TP retained); down 50% from v5.1.1's `12.2%` (`6/49`, CI `[5.7%, 24.2%]`) | Blind evaluation across 5 permissive OSS repos; see [v6 Holdout Summary](./bench/real-world/results/SUMMARY-v6-holdout.en.md) |
 | **Gate FPR (Real-World Pilot, `n=50`, `seed=20261124`)** | **`4.2%` (`2/48`, Wilson 95% CI `[1.2%, 14.0%]`)**; down 80% from v5.1.1's `20.8%` (`10/48`, CI `[11.7%, 34.3%]`); combined `n=100` is **`5.2%` (`5/97`, CI `[2.2%, 11.5%]`, `3/3` TP retained)**; **`>=200` formal eval: `pending` (no extrapolation)** | Cross-file title pooling + lexical scope stack + structured `skip` accounting + calibrated web-first lattice + fault-injection awareness ([ADR-0004](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.en.md)) |
-| **Agentic Red-Team Escape Rate (`FGER-agentic`)** | Scripted multi-step baseline (`live-playwright`, `n=16`, `npm run bench:agentic`): **Local T1 `12.5%` (`2/16`, CI `[3.5%, 36.0%]` — only documented same-UID probes `AG-B4`/`AG-C4`)** · **CI T2 Merge-Grade `0.0%` (`0/16`, CI `[0.0%, 19.4%]`)** · `honest-fix` control `4/4` T2 pass; **live LLM runs (`claude`/`codex`/`gemini`): `pending` (adapters ready, no extrapolation)** | Isolated sandbox + hidden business oracles + Ephemeral Fulcio T2 CA; see [Red-Team Design](./bench/agentic/DESIGN.en.md) & [Baseline Summary](./bench/agentic/results/SUMMARY.en.md) |
+| **Agentic Red-Team Escape Rate (`FGER-agentic`)** | Scripted multi-step baseline (`n=18`, incl. Class E Dieselgate, `npm run bench:agentic`): **Local T1 `11.1%` (`2/18`, CI `[3.1%, 32.8%]` — only documented same-UID probes `AG-B4`/`AG-C4`)** · **CI T2 Merge-Grade `0.0%` (`0/18`, CI `[0.0%, 17.6%]`)** · `honest-fix` control `4/4` T2 pass; **live LLM runs (`claude`/`codex`/`gemini`): `pending` (adapters ready, no extrapolation)** | Isolated sandbox + hidden business oracles + Ephemeral Fulcio T2 CA; see [Red-Team Design](./bench/agentic/DESIGN.en.md) & [Baseline Summary](./bench/agentic/results/SUMMARY.en.md) |
 | **Seeded-Defect Detection Rate (`SDDR`)** | Single demo target `demo-campus` **`100.0%` (`7/7`)** (`npm run bench`) | Zero-dep JSON Schema validator + RBAC/concurrency + WCAG 2.0/2.1/2.2 |
 | **Triage Accuracy / C→A Misclassification / Mis-Heal** | `45/45` internal + `12/12` real Playwright stacks: **`100%` · C→A `0.0%` · Mis-Heal `0.0%`** | Structured runtime guard signals + C-before-A precedence + tamper-evident healer |
-| **Secret Redaction Recall** | Internal adversarial corpus **`100.0%` (`35/35`)** (`npm run bench`) | Redaction v2 (structured parse-before-redact preserving `heal_*`/`job_*` IDs) |
+| **Secret Redaction Recall** | Internal adversarial corpus **`100.0%` (`35/35`)** (`npm run bench`) | Redaction v3 (structured parse-before-redact preserving `heal_*`/`job_*` IDs and boolean/number fields) |
 | **Verdict Trust Levels (`T0 / T1 / T2`)** | **T0** = Unverified local run · **T1** = Local Run Ledger + MAC (proves integrity, not provenance) · **T2** = Re-run from a clean checkout on a GitHub-hosted runner, keylessly signed with Sigstore, and verified for issuer identity | **Only T2 is a merge-grade green**; see [reusable workflow example](./examples/workflows/use-aitest-verify.yml) & `attest verify` |
 
 ### Trust Levels & Reusable CI Workflow (Only T2 Is Merge-Grade Green)
@@ -49,7 +49,7 @@ Adopt T2 verification via [examples/workflows/use-aitest-verify.yml](./examples/
 ```yaml
 jobs:
   aitest-t2-verdict:
-    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.2.0
+    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.2.1
     permissions:
       id-token: write
       attestations: write
@@ -65,7 +65,7 @@ jobs:
 Verify a T2 attestation bundle offline (fail-closed by default: missing signature, T1-only MAC, digest tampering, or workflow identity mismatch exits non-zero with `trustLevel <= T1`):
 
 ```bash
-npx ai-test-workbench@6.2.0 attest verify \
+npx ai-test-workbench@6.2.1 attest verify \
   --file attestation.json \
   --bundle attestation.sigstore.json \
   --expect-repo owner/repo \
@@ -77,9 +77,9 @@ npx ai-test-workbench@6.2.0 attest verify \
 
 ---
 
-## 2. v6.2.0 Layered Architecture
+## 2. v6.2.1 Layered Architecture
 
-v6.2.0 builds on the acyclic four-layer core with a public `src/app/index.mjs` application facade, immutable `TrustContext`, and strict `<= 500` LOC module discipline across all `src/**/*.mjs` (see [ARCHITECTURE.en.md](./ARCHITECTURE.en.md) and [ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.en.md)):
+v6.2.1 builds on the acyclic four-layer core with a public `src/app/index.mjs` application facade, immutable `TrustContext`, and strict `<= 500` LOC module discipline across all `src/**/*.mjs` (see [ARCHITECTURE.en.md](./ARCHITECTURE.en.md) and [ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.en.md)):
 
 ```mermaid
 flowchart TB
@@ -101,19 +101,19 @@ flowchart TB
 ### Requirements & Supply-Chain Security
 
 - **Node.js**: `>= 22.12.0` (`24 LTS` or `26 LTS` recommended) on Windows PowerShell (`pwsh`), macOS, or Linux.
-- **Zero Runtime Dependencies**: Root `package.json` carries zero runtime `dependencies`. Always invoke pinned `npx ai-test-workbench@6.2.0 <cmd>`, global short alias `aitw <cmd>` (`npm i -g ai-test-workbench@6.2.0`), or local source `node tools/aitest.mjs <cmd>`.
+- **Zero Runtime Dependencies**: Root `package.json` carries zero runtime `dependencies`. Always invoke pinned `npx ai-test-workbench@6.2.1 <cmd>`, global short alias `aitw <cmd>` (`npm i -g ai-test-workbench@6.2.1`), or local source `node tools/aitest.mjs <cmd>`.
 
 ### Register Native MCP Server (`stdio` / `/mcp` / `/sse`)
 
 - **Claude Code**:
   ```bash
-  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.2.0 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
+  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.2.1 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
   ```
 - **Codex CLI** (`.codex/config.toml`):
   ```toml
   [mcp_servers.ai-test-workbench]
   command = "npx"
-  args = ["--package=ai-test-workbench@6.2.0", "ai-test-workbench", "mcp-serve"]
+  args = ["--package=ai-test-workbench@6.2.1", "ai-test-workbench", "mcp-serve"]
   ```
 - **Cursor / Windsurf / Antigravity / Gemini CLI** (`.mcp.json`):
   ```json
@@ -121,14 +121,14 @@ flowchart TB
     "mcpServers": {
       "ai-test-workbench": {
         "command": "npx",
-        "args": ["--package=ai-test-workbench@6.2.0", "ai-test-workbench", "mcp-serve"]
+        "args": ["--package=ai-test-workbench@6.2.1", "ai-test-workbench", "mcp-serve"]
       }
     }
   }
   ```
 - **Streamable HTTP (`/mcp`) & Legacy SSE (`/sse`)**:
   ```bash
-  npx ai-test-workbench@6.2.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
+  npx ai-test-workbench@6.2.1 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
   ```
 
 ### Official MCP Conformance & 3-Transport Interoperability
@@ -142,19 +142,19 @@ flowchart TB
 
 ```bash
 # 1. Readiness check, initialization, and hash-safe template upgrades
-npx ai-test-workbench@6.2.0 doctor
-npx ai-test-workbench@6.2.0 init --name my-app --target "/path/to/your-repo" --loop codex
-npx ai-test-workbench@6.2.0 upgrade --target "/path/to/your-repo" --dry-run
+npx ai-test-workbench@6.2.1 doctor
+npx ai-test-workbench@6.2.1 init --name my-app --target "/path/to/your-repo" --loop codex
+npx ai-test-workbench@6.2.1 upgrade --target "/path/to/your-repo" --dry-run
 
 # 2. Session capture -> read-only exploration -> living code map -> pinned external MCPs
-npx ai-test-workbench@6.2.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
-npx ai-test-workbench@6.2.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
-npx ai-test-workbench@6.2.0 map --target "/path/to/your-repo"
-npx ai-test-workbench@6.2.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.2.0 mcp doctor --target "/path/to/your-repo" --lock
+npx ai-test-workbench@6.2.1 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
+npx ai-test-workbench@6.2.1 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
+npx ai-test-workbench@6.2.1 map --target "/path/to/your-repo"
+npx ai-test-workbench@6.2.1 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.2.1 mcp doctor --target "/path/to/your-repo" --lock
 
 # 3. Performance SLOs and one-call pre-merge verdict
-npx ai-test-workbench@6.2.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
-npx ai-test-workbench@6.2.0 verify-change --target "/path/to/your-repo" --base origin/main
+npx ai-test-workbench@6.2.1 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
+npx ai-test-workbench@6.2.1 verify-change --target "/path/to/your-repo" --base origin/main
 ```
 
 Reproduce the full repository gate locally (zero external servers):

@@ -1,85 +1,28 @@
+// @ts-check
+import {
+  DOM_TAINT_READERS,
+  MUTATING_METHODS,
+  PURE_GLOBAL_FNS,
+  PURE_READ_OR_LOCATOR_METHODS,
+  bodyHasRealExpect,
+  collectAssignTargetNames,
+  collectBindingIdentifiers,
+  extractDomTaintMeta,
+  extractRootIdentifierName,
+  isAssignmentOperatorKind,
+  isResponseStatusReadExpr,
+  normalizeLocatorExprKey,
+} from './symbol-helpers.mjs';
 import { unwrapExpr } from './ts-loader.mjs';
 
-export const DOM_TAINT_READERS = new Set([
-  'textContent',
-  'innerText',
-  'innerHTML',
-  'inputValue',
-  'getAttribute',
-  'allTextContents',
-  'allInnerTexts',
-  'count',
-  'title',
-  'url',
-]);
+export { DOM_TAINT_READERS, normalizeLocatorExprKey };
 
 /**
- * Checks whether an AST subtree directly invokes a Playwright DOM read or references a tainted local identifier.
- * @param {any} ts
- * @param {any} node
- * @param {Set<string>} taintedKeys
- * @param {string} scopeKey
- */
-function exprContainsDomTaint(ts, node, taintedKeys, scopeKey) {
-  if (!node) return false;
-  const u = unwrapExpr(ts, node);
-  if (ts.isAwaitExpression(u)) return exprContainsDomTaint(ts, u.expression, taintedKeys, scopeKey);
-  if (ts.isIdentifier(u)) {
-    return taintedKeys.has(`${scopeKey}::${u.text}`) || taintedKeys.has(`<file>::${u.text}`);
-  }
-  if (
-    ts.isCallExpression(u) &&
-    ts.isPropertyAccessExpression(u.expression) &&
-    DOM_TAINT_READERS.has(u.expression.name.text)
-  ) {
-    return true;
-  }
-  let hit = false;
-  ts.forEachChild(u, (/** @type {any} */ child) => {
-    if (!hit && exprContainsDomTaint(ts, child, taintedKeys, scopeKey)) hit = true;
-  });
-  return hit;
-}
-
-/**
- * Checks whether a function body subtree invokes `expect(...)` or `assert(...)`.
- * @param {any} ts
- * @param {any} bodyNode
- */
-function bodyHasRealExpect(ts, bodyNode) {
-  if (!bodyNode) return false;
-  let found = false;
-  /** @param {any} n */
-  const scan = (n) => {
-    if (found || !n) return;
-    if (ts.isCallExpression(n)) {
-      const expr = n.expression;
-      if (ts.isIdentifier(expr) && (expr.text === 'expect' || expr.text === 'assert')) {
-        found = true;
-        return;
-      }
-      if (
-        ts.isPropertyAccessExpression(expr) &&
-        ts.isIdentifier(expr.expression) &&
-        expr.expression.text === 'expect'
-      ) {
-        found = true;
-        return;
-      }
-    }
-    ts.forEachChild(n, scan);
-  };
-  scan(bodyNode);
-  return found;
-}
-
-/**
- * Extracts single-pass lexical symbol facts over a TS/JS spec `SourceFile` (`WU-05`):
- * - `const` initializers (scoped to `<testTitle>::<name>` or `<file>::<name>`)
- * - DOM-read taint variables (`const t = await el.textContent()`)
- * - `expect` / `expect.soft` / `expect.configure({ soft })` / `expect.extend` aliases
- * - 1-hop named `page.route` handlers (`function fn` / `const fn = ...`)
- * - Locally defined assertion helpers & trusted relative/fixture helper imports
+ * Extracts single-pass lexical + mutation-aware symbol facts over a TS/JS spec `SourceFile` (`WU-05`, v6.2.1):
+ * - Single-assignment `const`/`let`/`var` & unoverridden default-param initializers (excluding mutable Array/Object literals)
+ * - Structured DOM-read taint variables with `{ locatorKey, reader, readPos }` across destructuring & `.all()`
+ * - Intervening action positions per test scope to distinguish self-ref cheats from before/after mutation checks
+ * - Locator aliases, HTTP status variables, count variables, `expect`/`soft`/`configure`/`extend` aliases
  *
  * @param {any} ts
  * @param {any} sf
@@ -90,7 +33,19 @@ export function buildSymbolTable(ts, sf) {
   /** @type {Set<string>} */
   const shadowedConsts = new Set();
   /** @type {Set<string>} */
-  const domTaintedVars = new Set();
+  const mutatedVars = new Set();
+  /** @type {Map<string, number>} */
+  const fnMaxPassedArgs = new Map();
+  /** @type {Map<string, { locatorKey: string, reader: string, readPos: number }>} */
+  const domTaintedVars = new Map();
+  /** @type {Map<string, string>} */
+  const locatorAliases = new Map();
+  /** @type {Set<string>} */
+  const statusVars = new Set();
+  /** @type {Map<string, string>} */
+  const countVars = new Map();
+  /** @type {Map<string, number[]>} */
+  const actionPositions = new Map();
   /** @type {Map<string, { kind: 'expect' | 'soft' | 'extend', isSoft: boolean }>} */
   const expectAliases = new Map();
   /** @type {Map<string, any>} */
@@ -109,75 +64,242 @@ export function buildSymbolTable(ts, sf) {
     }
   };
 
-  /** @param {any} node @param {string} scopeKey */
-  const visit = (node, scopeKey) => {
-    let nextScope = scopeKey;
+  /** @param {any} node @param {string} currentScope */
+  const resolveTestScope = (node, currentScope) => {
+    if (!ts.isCallExpression(node)) return currentScope;
+    const calleeText = getTextSafe(node.expression).replace(/\s+/g, '');
+    if (/^(?:test|it)(?:\.(?:only|skip|fixme|fail|slow))?$/.test(calleeText) && node.arguments.length >= 2) {
+      const arg0 = unwrapExpr(ts, node.arguments[0]);
+      const title =
+        ts.isStringLiteral(arg0) || ts.isNoSubstitutionTemplateLiteral(arg0)
+          ? arg0.text
+          : getTextSafe(arg0).slice(0, 80);
+      if (title) return title;
+    }
+    return currentScope;
+  };
 
-    if (ts.isImportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
-      const modText = node.moduleSpecifier.text;
-      if (/^(?:\.\.?\/|@?fixtures\/|.*fixtures\/base)/.test(modText) && node.importClause?.namedBindings) {
-        if (ts.isNamedImports(node.importClause.namedBindings)) {
-          for (const spec of node.importClause.namedBindings.elements) {
-            trustedHelperImports.add(spec.name.text);
+  // Pass 1: collect all mutations & call-site argument counts before populating `constMap`
+  /** @param {any} node @param {string} scopeKey */
+  const collectMutations = (node, scopeKey) => {
+    const nextScope = resolveTestScope(node, scopeKey);
+
+    if (ts.isBinaryExpression(node) && isAssignmentOperatorKind(ts, node.operatorToken.kind)) {
+      /** @type {string[]} */
+      const targets = [];
+      collectAssignTargetNames(ts, node.left, targets);
+      for (const name of targets) {
+        mutatedVars.add(`${scopeKey}::${name}`);
+        mutatedVars.add(`<file>::${name}`);
+      }
+    } else if (
+      (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+      (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken)
+    ) {
+      const root = extractRootIdentifierName(ts, node.operand);
+      if (root) {
+        mutatedVars.add(`${scopeKey}::${root}`);
+        mutatedVars.add(`<file>::${root}`);
+      }
+    } else if (ts.isCallExpression(node)) {
+      if (ts.isIdentifier(node.expression)) {
+        const fnName = node.expression.text;
+        const prev = fnMaxPassedArgs.get(fnName) || 0;
+        if (node.arguments.length > prev) fnMaxPassedArgs.set(fnName, node.arguments.length);
+      } else if (ts.isPropertyAccessExpression(node.expression)) {
+        const method = node.expression.name.text;
+        if (MUTATING_METHODS.has(method)) {
+          const root = extractRootIdentifierName(ts, node.expression.expression);
+          if (root) {
+            mutatedVars.add(`${scopeKey}::${root}`);
+            mutatedVars.add(`<file>::${root}`);
+          }
+        } else if (
+          ts.isIdentifier(node.expression.expression) &&
+          ((node.expression.expression.text === 'Object' && method === 'assign') ||
+            (node.expression.expression.text === 'Reflect' && (method === 'set' || method === 'deleteProperty'))) &&
+          node.arguments[0]
+        ) {
+          const root = extractRootIdentifierName(ts, node.arguments[0]);
+          if (root) {
+            mutatedVars.add(`${scopeKey}::${root}`);
+            mutatedVars.add(`<file>::${root}`);
           }
         }
       }
     }
 
-    if (ts.isCallExpression(node)) {
-      const calleeText = getTextSafe(node.expression).replace(/\s+/g, '');
-      if (/^(?:test|it)(?:\.(?:only|skip|fixme|fail|slow))?$/.test(calleeText) && node.arguments.length >= 2) {
-        const arg0 = unwrapExpr(ts, node.arguments[0]);
-        const title =
-          ts.isStringLiteral(arg0) || ts.isNoSubstitutionTemplateLiteral(arg0)
-            ? arg0.text
-            : getTextSafe(arg0).slice(0, 80);
-        if (title) nextScope = title;
+    ts.forEachChild(node, (/** @type {any} */ child) => collectMutations(child, nextScope));
+  };
+  collectMutations(sf, '<file>');
+
+  /** @param {string} scopeKey @param {string} idName @param {any} init */
+  const registerConstInit = (scopeKey, idName, init) => {
+    const scopedId = `${scopeKey}::${idName}`;
+    if (ts.isArrayLiteralExpression(init) || ts.isObjectLiteralExpression(init)) return;
+    if (mutatedVars.has(scopedId) || mutatedVars.has(`<file>::${idName}`)) return;
+    if (constMap.has(scopedId)) {
+      shadowedConsts.add(scopedId);
+      constMap.delete(scopedId);
+    } else if (!shadowedConsts.has(scopedId)) {
+      constMap.set(scopedId, init);
+    }
+  };
+
+  /** @param {string} scopeKey @param {any} rawNode @param {Set<string>} [seen] */
+  const resolvesToBooleanTrue = (scopeKey, rawNode, seen = new Set()) => {
+    const u = unwrapExpr(ts, rawNode);
+    if (!u) return false;
+    if (u.kind === ts.SyntaxKind.TrueKeyword) return true;
+    if (ts.isIdentifier(u) && !seen.has(u.text)) {
+      const bound = constMap.get(`${scopeKey}::${u.text}`) || constMap.get(`<file>::${u.text}`);
+      if (bound) return resolvesToBooleanTrue(scopeKey, bound, new Set([...seen, u.text]));
+    }
+    return false;
+  };
+
+  /** @param {string} scopeKey @param {any} objArg */
+  const hasConfigureSoftTrue = (scopeKey, objArg) => {
+    const u = unwrapExpr(ts, objArg);
+    if (!u || !ts.isObjectLiteralExpression(u)) return false;
+    for (const p of u.properties) {
+      if (ts.isShorthandPropertyAssignment(p) && p.name.text === 'soft' && resolvesToBooleanTrue(scopeKey, p.name)) {
+        return true;
+      }
+      if (
+        ts.isPropertyAssignment(p) &&
+        ((ts.isIdentifier(p.name) && p.name.text === 'soft') ||
+          (ts.isStringLiteral(p.name) && p.name.text === 'soft')) &&
+        resolvesToBooleanTrue(scopeKey, p.initializer)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  /** @param {string} scopeKey @param {number} pos */
+  const recordActionPos = (scopeKey, pos) => {
+    const list = actionPositions.get(scopeKey) || [];
+    list.push(pos);
+    actionPositions.set(scopeKey, list);
+  };
+
+  /** @param {any} fnNode @param {string} scopeKey @param {string | null} fnName */
+  const registerDefaultParams = (fnNode, scopeKey, fnName) => {
+    const params = fnNode?.parameters || [];
+    const maxPassed = fnName ? fnMaxPassedArgs.get(fnName) || 0 : 0;
+    for (let i = 0; i < params.length; i += 1) {
+      const param = params[i];
+      if (!param.initializer || !ts.isIdentifier(param.name)) continue;
+      if (fnName && maxPassed > i) continue;
+      registerConstInit(scopeKey, param.name.text, unwrapExpr(ts, param.initializer));
+    }
+  };
+
+  /** @param {any} node @param {string} scopeKey */
+  const visit = (node, scopeKey) => {
+    const nextScope = resolveTestScope(node, scopeKey);
+
+    if (ts.isImportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+      const modText = node.moduleSpecifier.text;
+      if (/^(?:\.\.?\/|@?fixtures\/|.*fixtures\/base)/.test(modText) && node.importClause?.namedBindings) {
+        if (ts.isNamedImports(node.importClause.namedBindings)) {
+          for (const spec of node.importClause.namedBindings.elements) trustedHelperImports.add(spec.name.text);
+        }
       }
     }
 
     if (ts.isFunctionDeclaration(node) && node.name && node.body) {
-      const fnName = node.name.text;
-      namedRouteHandlers.set(fnName, node);
-      if (bodyHasRealExpect(ts, node.body)) localAssertHelpers.add(fnName);
+      namedRouteHandlers.set(node.name.text, node);
+      if (bodyHasRealExpect(ts, node.body)) localAssertHelpers.add(node.name.text);
+      registerDefaultParams(node, nextScope, node.name.text);
+    } else if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+      const parentName =
+        node.parent && ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)
+          ? node.parent.name.text
+          : null;
+      registerDefaultParams(node, nextScope, parentName);
     }
 
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
-      const idName = node.name.text;
-      const scopedId = `${scopeKey}::${idName}`;
-      const init = unwrapExpr(ts, node.initializer);
-      const isConstList = Boolean(node.parent && ts.isVariableDeclarationList(node.parent) && (node.parent.flags & ts.NodeFlags.Const) !== 0);
-
-      if (isConstList) {
-        if (constMap.has(scopedId)) {
-          shadowedConsts.add(scopedId);
-          constMap.delete(scopedId);
-        } else if (!shadowedConsts.has(scopedId)) {
-          constMap.set(scopedId, init);
+    if (ts.isCallExpression(node) && scopeKey !== '<file>') {
+      const callPos = typeof node.getStart === 'function' ? node.getStart(sf) : node.pos || 0;
+      const isExpectCallOrChain = (() => {
+        let cur = node.expression;
+        while (cur) {
+          if (ts.isIdentifier(cur)) return cur.text === 'expect' || expectAliases.has(cur.text);
+          if (ts.isPropertyAccessExpression(cur)) cur = cur.expression;
+          else if (ts.isCallExpression(cur)) cur = cur.expression;
+          else break;
+        }
+        return false;
+      })();
+      if (!isExpectCallOrChain) {
+        if (ts.isPropertyAccessExpression(node.expression)) {
+          const m = node.expression.name.text;
+          if (!PURE_READ_OR_LOCATOR_METHODS.has(m)) {
+            recordActionPos(scopeKey, callPos);
+          }
+        } else if (ts.isIdentifier(node.expression) && !PURE_GLOBAL_FNS.has(node.expression.text)) {
+          recordActionPos(scopeKey, callPos);
         }
       }
+    }
 
-      if (exprContainsDomTaint(ts, init, domTaintedVars, scopeKey)) {
-        domTaintedVars.add(scopedId);
-      }
+    if (ts.isVariableDeclaration(node) && node.initializer) {
+      const init = unwrapExpr(ts, node.initializer);
+      const taintMeta = extractDomTaintMeta(ts, sf, init, domTaintedVars, locatorAliases, scopeKey);
 
-      if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) {
-        namedRouteHandlers.set(idName, init);
-        if (bodyHasRealExpect(ts, init.body)) localAssertHelpers.add(idName);
-      }
+      if (ts.isIdentifier(node.name)) {
+        const idName = node.name.text;
+        const scopedId = `${scopeKey}::${idName}`;
+        registerConstInit(scopeKey, idName, init);
 
-      const initText = getTextSafe(init).replace(/\s+/g, '');
-      if (initText === 'expect') {
-        expectAliases.set(idName, { kind: 'expect', isSoft: false });
-      } else if (initText === 'expect.soft') {
-        expectAliases.set(idName, { kind: 'soft', isSoft: true });
-      } else if (ts.isCallExpression(init)) {
-        const cal = getTextSafe(init.expression).replace(/\s+/g, '');
-        if (cal === 'expect.configure') {
-          const softOn = Boolean(init.arguments[0] && /\bsoft\s*:\s*true\b/.test(getTextSafe(init.arguments[0])));
-          expectAliases.set(idName, { kind: softOn ? 'soft' : 'expect', isSoft: softOn });
-        } else if (cal === 'expect.extend') {
-          expectAliases.set(idName, { kind: 'extend', isSoft: false });
+        if (taintMeta) {
+          domTaintedVars.set(scopedId, taintMeta);
+          if (taintMeta.reader === 'count' && taintMeta.locatorKey) countVars.set(scopedId, taintMeta.locatorKey);
+        }
+        if (isResponseStatusReadExpr(ts, sf, init)) statusVars.add(scopedId);
+        if (
+          ts.isCallExpression(init) &&
+          ts.isPropertyAccessExpression(init.expression) &&
+          /^(?:locator|getBy[A-Z][A-Za-z]+|frameLocator|first|last|nth|filter)$/.test(init.expression.name.text)
+        ) {
+          locatorAliases.set(scopedId, normalizeLocatorExprKey(ts, sf, init, locatorAliases, scopeKey));
+        }
+        if (ts.isPropertyAccessExpression(init) && (init.name.text === 'length' || init.name.text === 'size')) {
+          const collKey = normalizeLocatorExprKey(ts, sf, init.expression, locatorAliases, scopeKey);
+          if (collKey) countVars.set(scopedId, collKey);
+        }
+        if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) {
+          namedRouteHandlers.set(idName, init);
+          if (bodyHasRealExpect(ts, init.body)) localAssertHelpers.add(idName);
+        }
+
+        const initText = getTextSafe(init).replace(/\s+/g, '');
+        if (initText === 'expect') expectAliases.set(idName, { kind: 'expect', isSoft: false });
+        else if (initText === 'expect.soft') expectAliases.set(idName, { kind: 'soft', isSoft: true });
+        else if (ts.isCallExpression(init)) {
+          const cal = getTextSafe(init.expression).replace(/\s+/g, '');
+          if (cal === 'expect.configure' || (ts.isPropertyAccessExpression(init.expression) && init.expression.name.text === 'configure' && expectAliases.has(getTextSafe(init.expression.expression)))) {
+            const softOn = hasConfigureSoftTrue(scopeKey, init.arguments[0]);
+            expectAliases.set(idName, { kind: softOn ? 'soft' : 'expect', isSoft: softOn });
+          } else if (cal === 'expect.extend' || (ts.isPropertyAccessExpression(init.expression) && init.expression.name.text === 'extend' && /expect/i.test(getTextSafe(init.expression.expression)))) {
+            expectAliases.set(idName, { kind: 'extend', isSoft: false });
+          }
+        }
+      } else if (ts.isArrayBindingPattern(node.name) || ts.isObjectBindingPattern(node.name)) {
+        /** @type {string[]} */
+        const boundIds = [];
+        collectBindingIdentifiers(ts, node.name, boundIds);
+        for (const idName of boundIds) {
+          const scopedId = `${scopeKey}::${idName}`;
+          if (taintMeta) {
+            domTaintedVars.set(scopedId, taintMeta);
+            if (taintMeta.reader === 'all' && ts.isArrayBindingPattern(node.name)) {
+              locatorAliases.set(scopedId, `${taintMeta.locatorKey}[item]`);
+            }
+          }
         }
       }
     }
@@ -192,6 +314,7 @@ export function buildSymbolTable(ts, sf) {
     namedRouteHandlers,
     localAssertHelpers,
     trustedHelperImports,
+    locatorAliases,
     /** @param {string | null | undefined} testTitle @param {string} idName */
     getConstInit(testTitle, idName) {
       const k = testTitle ? `${testTitle}::${idName}` : `<file>::${idName}`;
@@ -201,6 +324,33 @@ export function buildSymbolTable(ts, sf) {
     isDomTainted(testTitle, idName) {
       const k = testTitle ? `${testTitle}::${idName}` : `<file>::${idName}`;
       return domTaintedVars.has(k) || domTaintedVars.has(`<file>::${idName}`);
+    },
+    /** @param {string | null | undefined} testTitle @param {string} idName */
+    getDomTaintInfo(testTitle, idName) {
+      const k = testTitle ? `${testTitle}::${idName}` : `<file>::${idName}`;
+      return domTaintedVars.get(k) || domTaintedVars.get(`<file>::${idName}`) || null;
+    },
+    /** @param {string | null | undefined} testTitle @param {string} idName */
+    isStatusVar(testTitle, idName) {
+      const k = testTitle ? `${testTitle}::${idName}` : `<file>::${idName}`;
+      return statusVars.has(k) || statusVars.has(`<file>::${idName}`);
+    },
+    /** @param {string | null | undefined} testTitle @param {string} idName */
+    getCountVarTarget(testTitle, idName) {
+      const k = testTitle ? `${testTitle}::${idName}` : `<file>::${idName}`;
+      return countVars.get(k) || countVars.get(`<file>::${idName}`) || null;
+    },
+    /** @param {string | null | undefined} testTitle @param {string} idName */
+    getLocatorAlias(testTitle, idName) {
+      const k = testTitle ? `${testTitle}::${idName}` : `<file>::${idName}`;
+      return locatorAliases.get(k) || locatorAliases.get(`<file>::${idName}`) || null;
+    },
+    /** @param {string | null | undefined} testTitle @param {number} fromPos @param {number} toPos */
+    hasActionBetween(testTitle, fromPos, toPos) {
+      if (!testTitle || fromPos >= toPos) return false;
+      const list = actionPositions.get(testTitle);
+      if (!list || list.length === 0) return false;
+      return list.some((p) => p > fromPos && p < toPos);
     },
   };
 }

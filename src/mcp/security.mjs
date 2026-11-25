@@ -294,14 +294,19 @@ export function verifyBearerTokenConstantTime(authHeader, expectedToken) {
   return crypto.timingSafeEqual(actualHash, expectedHash);
 }
 
-/** @param {string | null | undefined} originHeader @param {string[]} [extraOrigins] @returns {boolean} */
-export function isAllowedHttpOrigin(originHeader, extraOrigins = []) {
+/**
+ * Validates HTTP `Origin` header for DNS-rebinding & cross-port CSRF protection (`VULN-10`, v6.2.1).
+ * When running without `AITEST_MCP_TOKEN`, forbids cross-port loopback browser origins (must match `listenPort` or explicit allowlist).
+ * @param {string | null | undefined} originHeader
+ * @param {string[]} [extraOrigins]
+ * @param {{ listenPort?: number | null, hasAuthToken?: boolean }} [options]
+ * @returns {boolean}
+ */
+export function isAllowedHttpOrigin(originHeader, extraOrigins = [], options = {}) {
   if (!originHeader) return true;
   try {
     const parsed = new URL(originHeader);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-    const hostname = parsed.hostname.toLowerCase();
-    if (['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname)) return true;
     const configured = [
       ...extraOrigins,
       ...String(process.env.AITEST_MCP_ALLOWED_ORIGINS || '')
@@ -309,7 +314,20 @@ export function isAllowedHttpOrigin(originHeader, extraOrigins = []) {
         .map((s) => s.trim())
         .filter(Boolean),
     ];
-    return configured.some((allowed) => parsed.origin.toLowerCase() === allowed.toLowerCase());
+    if (configured.some((allowed) => parsed.origin.toLowerCase() === allowed.toLowerCase())) {
+      return true;
+    }
+    const hostname = parsed.hostname.toLowerCase();
+    if (['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname)) {
+      if (options.hasAuthToken) return true;
+      const port = options.listenPort && Number.isInteger(options.listenPort) ? String(options.listenPort) : null;
+      if (port) {
+        const originPort = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+        return originPort === port;
+      }
+      return false;
+    }
+    return false;
   } catch {
     return false;
   }

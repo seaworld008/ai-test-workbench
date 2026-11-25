@@ -8,28 +8,116 @@ export const MAX_JOB_OUTPUT_BYTES = 1024 * 1024; // 1MB bounded ring buffer per 
 export const DEFAULT_MAX_CONCURRENT_JOBS = 4;
 
 /**
- * Environment variables that belong strictly to the MCP server host and MUST NEVER leak
- * into child CLI processes (`M-12`). Note: `AITEST_HMAC_KEY_FILE` is preserved so CLI and
- * MCP children share the same host T1 key store; Playwright/app child envs are stripped in `runner.mjs`.
+ * Strict safe allowlist of environment variables permitted to pass from the MCP host into
+ * isolated child CLI processes (`M-12`, hardened v6.2.1).
+ * Note: `AITEST_HMAC_KEY_FILE` is preserved so CLI and MCP children share the host T1 key store;
+ * Playwright/target-app child envs strip `AITEST_HMAC_KEY*` separately in `runner.mjs`.
  */
-const STRIPPED_CHILD_ENV_KEYS = new Set([
-  'AITEST_MCP_TOKEN',
-  'AITEST_MCP_ALLOWED_ORIGINS',
-  'AITEST_MCP_WORKSPACE_ROOTS',
-  'AITEST_HMAC_KEY',
-  'NPM_TOKEN',
-  'NODE_AUTH_TOKEN',
-  'GITHUB_TOKEN',
-  'GH_TOKEN',
-  'OPENAI_API_KEY',
-  'ANTHROPIC_API_KEY',
-  'GEMINI_API_KEY',
-  'AWS_SECRET_ACCESS_KEY',
-  'AWS_SESSION_TOKEN',
+const SAFE_CHILD_ENV_ALLOWLIST_EXACT = new Set([
+  'PATH',
+  'Path',
+  'HOME',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'LOCALAPPDATA',
+  'APPDATA',
+  'XDG_CONFIG_HOME',
+  'XDG_CACHE_HOME',
+  'XDG_DATA_HOME',
+  'TMP',
+  'TEMP',
+  'TMPDIR',
+  'SYSTEMROOT',
+  'SystemRoot',
+  'COMSPEC',
+  'ComSpec',
+  'PATHEXT',
+  'SystemDrive',
+  'WINDIR',
+  'windir',
+  'SHELL',
+  'TERM',
+  'LANG',
+  'LC_ALL',
+  'LC_MESSAGES',
+  'TZ',
+  'OS',
+  'ProgramFiles',
+  'ProgramFiles(x86)',
+  'CommonProgramFiles',
+  'NUMBER_OF_PROCESSORS',
+  'PROCESSOR_ARCHITECTURE',
+  'NODE_ENV',
+  'NODE_EXTRA_CA_CERTS',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'NPM_CONFIG_CACHE',
+  'npm_config_cache',
+  'UV_CACHE_DIR',
+  'CI',
+  'GITHUB_ACTIONS',
+  'GITHUB_WORKSPACE',
+  'GITHUB_SHA',
+  'GITHUB_REF',
+  'GITHUB_BASE_REF',
+  'GITHUB_REPOSITORY',
+  'GITHUB_STEP_SUMMARY',
+  'GITLAB_CI',
+  'BUILDKITE',
+  'CIRCLECI',
+  'TF_BUILD',
+  'REQUIRE_TEST_TARGET',
+  'DEBUG',
+  'NO_COLOR',
+  'FORCE_COLOR',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'no_proxy',
+  'DISPLAY',
+  'WAYLAND_DISPLAY',
+  'XAUTHORITY',
+  'DBUS_SESSION_BUS_ADDRESS',
+  'AITEST_HMAC_KEY_FILE',
+  'AITEST_LANG',
+  'AITEST_DEFAULT_BRANCH',
+  'AITEST_DISABLE_WEBSERVER',
+  'AITEST_ACTIVE_SUITE',
+  'AITEST_RUN_ID',
+  'AITEST_HYGIENE_BLOCKLIST_FILE',
 ]);
 
+const SAFE_CHILD_ENV_ALLOWLIST_PREFIXES = ['PLAYWRIGHT_', 'PW_', 'TEST_', 'E2E_', 'FAIL_ON_'];
+const SENSITIVE_ENV_KEY_RE =
+  /^(?:AITEST_HMAC_KEY$|AITEST_MCP_|AITEST_APPROVE_NON_INTERACTIVE$|ACTIONS_ID_TOKEN_|ACTIONS_RUNTIME_TOKEN$|DATABASE_URL$)|(?:^|_)(?:SECRET|TOKEN|API_KEY|PASSWORD|PASSWD|PRIVATE_KEY)(?:$|_)/i;
+const PROXY_ENV_KEYS = new Set(['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']);
+
 /**
- * Builds a sanitized child process environment stripping host MCP / cloud credentials (`M-12`).
+ * Strips embedded `user:pass@` credentials from proxy URLs before forwarding to child processes.
+ * @param {string} rawVal
+ * @returns {string}
+ */
+export function sanitizeProxyUrlEnvValue(rawVal) {
+  const s = String(rawVal || '').trim();
+  if (!s) return s;
+  try {
+    const parsed = new URL(s);
+    if (parsed.username || parsed.password) {
+      parsed.username = '';
+      parsed.password = '';
+      return parsed.toString();
+    }
+    return s;
+  } catch {
+    return s.replace(/(\/\/)[^/@\s]+@/, '$1');
+  }
+}
+
+/**
+ * Builds a strictly allowlisted child process environment stripping host MCP / OIDC / DB / cloud credentials (`M-12`).
  * @param {NodeJS.ProcessEnv} [baseEnv]
  * @param {string} [resultFilePath]
  */
@@ -38,8 +126,12 @@ export function buildSafeChildEnv(baseEnv = process.env, resultFilePath = undefi
   const clean = {};
   for (const [k, v] of Object.entries(baseEnv || {})) {
     if (v === undefined) continue;
-    if (STRIPPED_CHILD_ENV_KEYS.has(k)) continue;
-    clean[k] = String(v);
+    if (!k.startsWith('E2E_') && SENSITIVE_ENV_KEY_RE.test(k)) continue;
+    const allowed =
+      SAFE_CHILD_ENV_ALLOWLIST_EXACT.has(k) ||
+      SAFE_CHILD_ENV_ALLOWLIST_PREFIXES.some((p) => k.startsWith(p));
+    if (!allowed) continue;
+    clean[k] = PROXY_ENV_KEYS.has(k) ? sanitizeProxyUrlEnvValue(String(v)) : String(v);
   }
   clean.AITEST_MCP_CHILD = '1';
   if (resultFilePath) {

@@ -417,9 +417,14 @@ export async function computeImpact(targetDir, options = {}) {
  */
 export async function runImpactCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
+  const asJson = Boolean(options.json);
   if (!options.target) {
-    console.error(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
-    return 1;
+    const msg = lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option';
+    if (!asJson) console.error(msg);
+    return emitCommandResult(
+      buildCommandResult({ tool: 'impact', outcome: 'fail', ok: false, exitCode: 1, summary: msg, data: { error: msg } }),
+      { asJson, compatSpreadData: false }
+    );
   }
 
   const explicitFiles = options.files

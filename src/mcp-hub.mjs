@@ -188,8 +188,8 @@ export function auditMcpSafety(mcpJsonObj, codexTomlText = '', options = {}) {
     const env = cfg.env || {};
     riskByServer[name] = PRESETS_BY_NAME[name]?.riskLevel || 'unknown';
 
-    if (/@latest\b/i.test(argsStr)) {
-      issues.push(`[MCP Supply Chain] Server "${name}" uses floating "@latest" tag; pin an exact semver version.`);
+    if (/@latest\b/i.test(argsStr) || /:latest(?:\s|$)/i.test(argsStr)) {
+      issues.push(`[MCP Supply Chain] Server "${name}" uses floating "@latest"/":latest" tag; pin an exact semver version.`);
     }
     if (/@modelcontextprotocol\/server-postgres\b/i.test(argsStr)) {
       warnings.push(
@@ -231,8 +231,8 @@ export function auditMcpSafety(mcpJsonObj, codexTomlText = '', options = {}) {
     if (/\[mcp_servers\.[^\]]*grafana[^\]]*\][\s\S]{0,200}?args\s*=\s*\[(?![^\]]*--disable-write)/i.test(codexTomlText)) {
       issues.push('[MCP Safety] Grafana MCP entry in .codex/config.toml is missing "--disable-write".');
     }
-    if (/@latest\b/i.test(codexTomlText)) {
-      issues.push('[MCP Supply Chain] .codex/config.toml uses floating "@latest" tag.');
+    if (/@latest\b/i.test(codexTomlText) || /:latest(?:["'\s]|$)/i.test(codexTomlText)) {
+      issues.push('[MCP Supply Chain] .codex/config.toml uses floating "@latest"/":latest" tag.');
     }
   }
 
@@ -288,10 +288,28 @@ function buildMcpEnvTemplate(serverNames) {
 export async function runMcpCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   const action = (options.action || 'presets').toLowerCase();
+  const asJson = Boolean(options.json);
+
+  /** @param {number} exitCode @param {string} msg */
+  const failMcp = (exitCode, msg) => {
+    if (!asJson) console.error(msg);
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'mcp',
+        outcome: exitCode === 64 ? 'usage' : exitCode === 2 ? 'blocked' : 'fail',
+        ok: false,
+        exitCode,
+        blockerKind: exitCode === 64 ? 'USAGE_ERROR' : null,
+        summary: msg,
+        data: { action, error: msg },
+      }),
+      { asJson }
+    );
+  };
 
   if (action === 'presets') {
     const summary = getMcpPresetsSummary();
-    if (!options.json) {
+    if (!asJson) {
       console.log(
         lang === 'zh'
           ? '\n=== AI Test Workbench 7 大支柱全链路系统 MCP 预设清单 (已锁版本 & 风险分级) ==='
@@ -311,19 +329,17 @@ export async function runMcpCommand(options = {}) {
         summary: `Listed ${Object.keys(MCP_PRESETS).length} pinned MCP presets`,
         data: summary,
       }),
-      { asJson: Boolean(options.json) }
+      { asJson }
     );
   }
 
   if (!options.target) {
-    console.error(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
-    return 1;
+    return failMcp(64, lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
   }
 
   const qaDir = resolveQaDirectory(options.target, options.qaDir);
   if (!qaDir) {
-    console.error(lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
-    return 1;
+    return failMcp(1, lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
   }
 
   const mcpJsonPath = path.join(qaDir, '.mcp.json');
@@ -398,16 +414,14 @@ export async function runMcpCommand(options = {}) {
     } else {
       const profileName = (options.profile || 'full-link').toLowerCase();
       if (!PROFILES_BY_NAME[profileName]) {
-        console.error(`Unknown MCP profile "${profileName}". Valid: ${Object.keys(MCP_PROFILES).join(', ')}`);
-        return 1;
+        return failMcp(64, `Unknown MCP profile "${profileName}". Valid: ${Object.keys(MCP_PROFILES).join(', ')}`);
       }
       selected = PROFILES_BY_NAME[profileName];
     }
 
     const unknown = selected.filter((s) => !PRESETS_BY_NAME[s]);
     if (unknown.length > 0) {
-      console.error(`Unknown MCP preset(s): ${unknown.join(', ')}. Valid: ${Object.keys(MCP_PRESETS).join(', ')}`);
-      return 1;
+      return failMcp(64, `Unknown MCP preset(s): ${unknown.join(', ')}. Valid: ${Object.keys(MCP_PRESETS).join(', ')}`);
     }
 
     const curJson = fs.existsSync(mcpJsonPath) ? JSON.parse(fs.readFileSync(mcpJsonPath, 'utf8')) : {};
@@ -446,6 +460,5 @@ export async function runMcpCommand(options = {}) {
     );
   }
 
-  console.error(`Unknown mcp action "${action}". Use: presets | add | doctor | serve`);
-  return 1;
+  return failMcp(64, `Unknown mcp action "${action}". Use: presets | add | doctor | serve`);
 }

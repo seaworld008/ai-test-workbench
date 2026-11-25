@@ -33,6 +33,36 @@ function sha256Normalized(content) {
 }
 
 /**
+ * Deterministic Unicode code-unit comparator (locale-independent across OSes).
+ * @param {string} a
+ * @param {string} b
+ * @returns {number}
+ */
+function compareCodeUnit(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * Order-independent deep equality check on `{ [relPath]: sha256 }` manifest maps.
+ * @param {Record<string, string> | null | undefined} a
+ * @param {Record<string, string> | null | undefined} b
+ * @returns {boolean}
+ */
+export function areManifestFileMapsEqual(a, b) {
+  const left = a && typeof a === 'object' ? a : {};
+  const right = b && typeof b === 'object' ? b : {};
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  for (const key of leftKeys) {
+    if (!Object.prototype.hasOwnProperty.call(right, key) || left[key] !== right[key]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * @param {string} dir
  * @param {string} [base]
  * @param {string[]} [acc]
@@ -52,20 +82,20 @@ function walkTemplateFiles(dir, base = dir, acc = []) {
       acc.push(rel === 'gitignore' ? '.gitignore' : rel);
     }
   }
-  return acc.sort();
+  return acc.sort(compareCodeUnit);
 }
 
 /**
  * Writes `.aitest/template-manifest.json` recording per-file SHA-256 hashes of scaffolded template files.
- * Enables deterministic 3-way merge upgrades and accurate kernel drift detection in `doctor`.
+ * Preserves the existing manifest untouched (including `updatedAt`) when file hashes have not changed.
  * @param {string} qaDir
  * @param {string[]} [managedRels]
- * @returns {{ manifestPath: string, manifest: { schemaVersion: number, workbenchVersion: string, gateKernelVersion: string, updatedAt: string, files: Record<string, string> } }}
+ * @returns {{ manifestPath: string, manifest: { schemaVersion: number, workbenchVersion: string, gateKernelVersion: string, updatedAt: string, files: Record<string, string> }, unchanged?: boolean }}
  */
 export function writeTemplateManifest(qaDir, managedRels) {
   const rels =
     Array.isArray(managedRels) && managedRels.length > 0
-      ? [...managedRels].sort()
+      ? [...managedRels].sort(compareCodeUnit)
       : walkTemplateFiles(TEMPLATE_DIR).filter((rel) => KERNEL_SCOPE_RELS(rel) || ALL_UPGRADEABLE_RELS(rel));
 
   /** @type {Record<string, string>} */
@@ -77,6 +107,18 @@ export function writeTemplateManifest(qaDir, managedRels) {
     }
   }
 
+  const manifestPath = path.join(qaDir, '.aitest', 'template-manifest.json');
+  const existing = readTemplateManifest(qaDir);
+  if (existing && areManifestFileMapsEqual(existing.files, files)) {
+    return {
+      manifestPath,
+      manifest: /** @type {{ schemaVersion: number, workbenchVersion: string, gateKernelVersion: string, updatedAt: string, files: Record<string, string> }} */ (
+        existing
+      ),
+      unchanged: true,
+    };
+  }
+
   const manifest = {
     schemaVersion: SCHEMA_VERSIONS.templateManifest,
     workbenchVersion: WORKBENCH_VERSION,
@@ -85,10 +127,9 @@ export function writeTemplateManifest(qaDir, managedRels) {
     files,
   };
 
-  const manifestPath = path.join(qaDir, '.aitest', 'template-manifest.json');
   fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
-  return { manifestPath, manifest };
+  return { manifestPath, manifest, unchanged: false };
 }
 
 /**
@@ -208,24 +249,25 @@ export function upgradeQaWorkspace(qaDir, options = {}) {
   }
 
   const manifestPath = path.join(qaDir, '.aitest', 'template-manifest.json');
+  const sortedNextFiles = Object.fromEntries(
+    Object.entries(nextManifestFiles).sort(([a], [b]) => compareCodeUnit(a, b))
+  );
   const nextManifest = {
     schemaVersion: SCHEMA_VERSIONS.templateManifest,
     workbenchVersion: WORKBENCH_VERSION,
     gateKernelVersion: GATE_KERNEL_VERSION,
     updatedAt: new Date().toISOString(),
-    files: Object.fromEntries(Object.entries(nextManifestFiles).sort(([a], [b]) => a.localeCompare(b))),
+    files: sortedNextFiles,
   };
 
   const conflicts = actions.filter((a) => a.action === 'CONFLICT');
   const changedCount = actions.filter((a) => ['CREATE', 'UPDATE', 'REMOVE_STALE'].includes(a.action)).length;
 
   const manifestUnchanged =
-    prevManifest &&
+    Boolean(prevManifest) &&
     changedCount === 0 &&
     conflicts.length === 0 &&
-    prevManifest.workbenchVersion === WORKBENCH_VERSION &&
-    prevManifest.gateKernelVersion === GATE_KERNEL_VERSION &&
-    JSON.stringify(prevFiles) === JSON.stringify(nextManifest.files);
+    areManifestFileMapsEqual(prevFiles, sortedNextFiles);
 
   if (!dryRun && !manifestUnchanged) {
     fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
@@ -254,16 +296,33 @@ export function upgradeQaWorkspace(qaDir, options = {}) {
  */
 export async function runUpgradeCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
+  const asJson = Boolean(options.json);
+  /** @param {number} exitCode @param {string} msg */
+  const failUpgrade = (exitCode, msg) => {
+    if (!asJson) console.error(msg);
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'upgrade',
+        outcome: exitCode === 64 ? 'usage' : exitCode === 2 ? 'blocked' : 'fail',
+        ok: false,
+        exitCode,
+        summary: msg,
+        data: { error: msg },
+      }),
+      { asJson }
+    );
+  };
   const target = options.target ? path.resolve(options.target) : null;
   if (!target) {
-    console.error(lang === 'zh' ? '缺少必填参数 --target <业务仓库或QA目录路径>' : 'Missing required --target <repo-or-qa-path>');
-    return 1;
+    return failUpgrade(
+      1,
+      lang === 'zh' ? '缺少必填参数 --target <业务仓库或QA目录路径>' : 'Missing required --target <repo-or-qa-path>'
+    );
   }
 
   const qaDir = resolveQaDirectory(target, options.qaDir);
   if (!qaDir) {
-    console.error(lang === 'zh' ? `未在 ${target} 找到 QA 目录` : `QA directory not found at ${target}`);
-    return 1;
+    return failUpgrade(1, lang === 'zh' ? `未在 ${target} 找到 QA 目录` : `QA directory not found at ${target}`);
   }
 
   const scope = options.scope === 'all' ? 'all' : 'kernel';

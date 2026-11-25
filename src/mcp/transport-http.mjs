@@ -88,16 +88,19 @@ export function createMcpHttpServer(options = {}) {
     }
   };
 
-  // Evict LRU ONLY when allocating a new session (`M-09`)!
-  /** @template T @param {Map<string, T>} map @param {(entry: T | undefined) => void} closeEntry */
+  // Reject new unauthenticated sessions at capacity (429) instead of evicting active victim sessions (`VULN-10`)
+  /** @template T @param {Map<string, T>} map @param {(entry: T | undefined) => void} closeEntry @returns {boolean} */
   const ensureCapacityForNewSession = (map, closeEntry) => {
     pruneExpiredSessions();
+    if (map.size < maxSessions) return true;
+    if (!authToken) return false;
     while (map.size >= maxSessions) {
       const oldestId = map.keys().next().value;
       if (!oldestId) break;
       closeEntry(map.get(oldestId));
       map.delete(oldestId);
     }
+    return true;
   };
 
   const server = http.createServer(async (req, res) => {
@@ -112,8 +115,8 @@ export function createMcpHttpServer(options = {}) {
       const reqUrl = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`);
       const pathname = reqUrl.pathname;
 
-      if (!isAllowedHttpOrigin(req.headers.origin, options.allowedOrigins)) {
-        sendJson(res, 403, { error: 'Origin not allowed (DNS rebinding protection)' });
+      if (!isAllowedHttpOrigin(req.headers.origin, options.allowedOrigins, { listenPort, hasAuthToken: Boolean(authToken) })) {
+        sendJson(res, 403, { error: 'Origin not allowed (DNS rebinding / cross-port protection)' });
         return;
       }
 
@@ -144,12 +147,16 @@ export function createMcpHttpServer(options = {}) {
 
       // Legacy 2024-11-05 HTTP+SSE Transport: GET /sse & POST /messages?sessionId=...
       if (pathname === '/sse' && req.method === 'GET') {
-        ensureCapacityForNewSession(legacySseSessions, (s) => {
+        const hasSlot = ensureCapacityForNewSession(legacySseSessions, (s) => {
           if (s) {
             clearInterval(s.keepalive);
             if (s.res && !s.res.writableEnded) s.res.end();
           }
         });
+        if (!hasSlot) {
+          sendJson(res, 429, { error: 'Too Many Requests: active MCP SSE session capacity reached' });
+          return;
+        }
         const sessionId = crypto.randomUUID();
         res.writeHead(200, {
           'Content-Type': 'text/event-stream; charset=utf-8',
@@ -308,10 +315,14 @@ export function createMcpHttpServer(options = {}) {
           let session;
 
           if (isInitCall) {
-            ensureCapacityForNewSession(streamableSessions, (s) => {
+            const hasSlot = ensureCapacityForNewSession(streamableSessions, (s) => {
               if (s?.sseKeepalive) clearInterval(s.sseKeepalive);
               if (s?.sseRes && !s.sseRes.writableEnded) s.sseRes.end();
             });
+            if (!hasSlot) {
+              sendJson(res, 429, { error: 'Too Many Requests: active MCP session capacity reached' });
+              return;
+            }
             sid = crypto.randomUUID();
             /** @type {any} */
             const sessionEntry = {
@@ -472,6 +483,9 @@ export function createMcpHttpServer(options = {}) {
     }
     streamableSessions.clear();
   };
+  server.headersTimeout = 15_000;
+  server.requestTimeout = 120_000;
+  server.keepAliveTimeout = 5_000;
   server.on('close', cleanup);
 
   return server;

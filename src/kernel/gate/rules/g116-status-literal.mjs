@@ -1,10 +1,12 @@
+// @ts-check
 /**
  * @typedef {import('./governance-rules.mjs').GateFinding} GateFinding
  * @typedef {import('./governance-rules.mjs').RuleEvalCtx} RuleEvalCtx
  */
 
 /**
- * Maps an HTTP status code to its coarse equivalence class (`2xx`, `3xx`, `401_403`, `404`, `409_422`, `5xx`, or generic `4xx`).
+ * Maps an HTTP status code to its coarse equivalence class (`2xx`, `3xx`, `401_403`, `404`, `400_409_422`, `4xx_other`, `5xx`).
+ * Keeps auth (`401_403`) and not-found (`404`) strictly distinct while grouping client validation/conflict (`400`, `409`, `422`) (`G2-L01`).
  * @param {number} code
  * @returns {string | null}
  */
@@ -14,7 +16,7 @@ export function classifyHttpStatusEquivalence(code) {
   if (code >= 300 && code < 400) return '3xx';
   if (code === 401 || code === 403) return '401_403';
   if (code === 404) return '404';
-  if (code === 409 || code === 422) return '409_422';
+  if (code === 400 || code === 409 || code === 422) return '400_409_422';
   if (code >= 400 && code < 500) return '4xx_other';
   if (code >= 500 && code < 600) return '5xx';
   return null;
@@ -52,13 +54,14 @@ function summarizeStatusClasses(assertions) {
 }
 
 /**
- * AITEST-G116 (`WU-05`): Blocks cross-class HTTP status expectation shifts (e.g. `403 -> 200`, `200 -> 404`, `409 -> 201`)
- * and widening an exact HTTP status check into broad ranges/arrays (`res.status() < 500`, `[200, 404].includes`).
+ * AITEST-G116 (`WU-05`, v6.2.1): Blocks cross-class HTTP status expectation shifts (e.g. `403 -> 200`, `200 -> 404`),
+ * dropping/disguising an existing status oracle class (unless relocated to an executable sibling spec),
+ * and widening an exact HTTP status check into broad ranges/arrays (`res.status() < 500`, `String(res.status())[0]`).
  */
 export const ruleG116 = {
   code: 'AITEST-G116',
   name: 'no-status-class-or-contract-drift',
-  description: 'Blocks shifting HTTP status oracles across equivalence classes (2xx/3xx/401-403/404/409-422/5xx) or widening exact status assertions into ranges.',
+  description: 'Blocks shifting, dropping, or widening HTTP status oracles across equivalence classes (2xx/3xx/401-403/404/400-409-422/5xx).',
   waiverKey: 'status-class-drift',
   defaultEnabled: true,
   /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
@@ -71,6 +74,7 @@ export const ruleG116 = {
       isBaselineNewSpec = false,
       baselineTestTitles = null,
       exemptBranchNewRegression = false,
+      changesetContext = null,
     } = ctx;
     if (!baseSum || !headSum) return [];
     if (isBaselineNewSpec && exemptBranchNewRegression) return [];
@@ -117,6 +121,32 @@ export const ruleG116 = {
           },
         },
       ];
+    }
+
+    // Fire when an existing HTTP status class is dropped/disguised even with `gainedClasses = []` (`G2-F09`, `G2-F10`),
+    // unless relocated to another executable spec in the same changeset.
+    if (lostClasses.length > 0) {
+      const siblingClasses = new Set();
+      if (changesetContext?.entries) {
+        for (const entry of changesetContext.entries) {
+          if (entry.filePath === file || !entry.headSum) continue;
+          if (entry.isExecutableSpec === false) continue;
+          const sib = summarizeStatusClasses(entry.headSum.assertions || []);
+          for (const cls of sib.classes) siblingClasses.add(cls);
+        }
+      }
+      const unrelocatedLost = lostClasses.filter((c) => !siblingClasses.has(c));
+      if (unrelocatedLost.length > 0) {
+        return [
+          {
+            code: 'AITEST-G116',
+            severity: 'error',
+            file,
+            message: `${file}: HTTP status equivalence class dropped or disguised (${unrelocatedLost.join(', ')}).`,
+            evidence: { lostClasses: unrelocatedLost, gainedClasses },
+          },
+        ];
+      }
     }
 
     return [];

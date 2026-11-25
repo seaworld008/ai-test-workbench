@@ -2,7 +2,7 @@
 
 > [English Version](./README.en.md)
 
-本目录用于存放 Playwright **Planner** Agent 生成（或由 `npx ai-test-workbench@6.2.0 explore` 巡检汇总 `system-overview.md`）的人类可评审 Markdown 测试计划；评审通过后再交给 **Generator** 编写可执行 TypeScript 用例。
+本目录用于存放 Playwright **Planner** Agent 生成（或由 `npx ai-test-workbench@6.2.1 explore` 巡检汇总 `system-overview.md`）的人类可评审 Markdown 测试计划；评审通过后再交给 **Generator** 编写可执行 TypeScript 用例。
 
 ## 每份测试计划必备章节
 

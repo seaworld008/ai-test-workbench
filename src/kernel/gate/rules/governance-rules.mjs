@@ -22,7 +22,8 @@ import { isProtectedDiffPath, validateAssertFunctionNames } from '../policy.mjs'
  *   assertFunctionNames?: string[];
  *   isDiffTextMode?: boolean;
  *   rulesConfig?: Record<string, any>;
- *   changesetContext?: { entries?: Array<{ filePath: string; baseSum?: import('../parser.mjs').AstSummary | null; headSum?: import('../parser.mjs').AstSummary | null }> } | null;
+ *   changesetContext?: { entries?: Array<{ filePath: string; isExecutableSpec?: boolean; baseSum?: import('../parser.mjs').AstSummary | null; headSum?: import('../parser.mjs').AstSummary | null }> } | null;
+ *   exemptScaffoldRemoval?: boolean;
  *   [key: string]: any;
  * }} RuleEvalCtx
  */

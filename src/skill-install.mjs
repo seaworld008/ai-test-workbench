@@ -54,17 +54,30 @@ export function resolveSkillDestination(targetDir, client = 'qa', qaDirName = 'q
  */
 export async function runSkillInstallCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
+  const asJson = Boolean(options.json);
+  /** @param {number} exitCode @param {string} msg @param {'fail' | 'usage'} [outcome] */
+  const failSkill = (exitCode, msg, outcome = exitCode === 64 ? 'usage' : 'fail') => {
+    if (!asJson) console.error(msg);
+    return emitCommandResult(
+      buildCommandResult({ tool: 'skill-install', outcome, ok: false, exitCode, summary: msg, data: { error: msg } }),
+      { asJson, compatSpreadData: false }
+    );
+  };
   if (!options.target) {
-    console.error(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
-    return 1;
+    return failSkill(1, lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
   }
   if (!fs.existsSync(SKILL_SRC_DIR)) {
-    console.error(`Bundled skill source missing: ${SKILL_SRC_DIR}`);
-    return 1;
+    return failSkill(1, `Bundled skill source missing: ${SKILL_SRC_DIR}`);
   }
 
   const client = options.client || 'qa';
-  const destDir = resolveSkillDestination(options.target, client, options.qaDir);
+  let destDir;
+  try {
+    destDir = resolveSkillDestination(options.target, client, options.qaDir);
+  } catch (err) {
+    if (asJson) return failSkill(64, err instanceof Error ? err.message : String(err), 'usage');
+    throw err;
+  }
   const dryRun = Boolean(options.dryRun);
   const force = Boolean(options.force);
 

@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0.0",
-  "generatedAt": "2026-11-24T08:34:40.948Z",
-  "gateKernelVersion": "5.1.1",
+  "generatedAt": "2026-11-25T08:23:41.474Z",
+  "gateKernelVersion": "6.2.1",
   "preregistrationDoc": "bench/real-world/PREREGISTRATION.md",
   "samplingSeed": 20261124,
   "mode": "pilot",
@@ -46,9 +46,9 @@
     }
   },
   "violationsByRule": {
+    "AITEST-G107": 2,
     "AITEST-G110": 1,
     "STATIC-WAIT-FOR-TIMEOUT": 1,
-    "AITEST-G107": 1,
     "AITEST-G105": 1
   },
   "byRepository": {
@@ -109,10 +109,12 @@
         "packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js"
       ],
       "ruleCodes": [
+        "AITEST-G107",
         "AITEST-G110"
       ],
       "violations": [
         "[Healer Diff Guard][AITEST-G110] packages/kit/test/apps/basics/test/playwright/client.test.js: wrapping expect() inside conditional if-block is forbidden.",
+        "[Healer Diff Guard][AITEST-G107] packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js: 2-arg .then(onFulfilled, onRejected) swallows rejection without throwing.",
         "[Healer Diff Guard][AITEST-G110] packages/kit/test/apps/basics/test/playwright/cross-platform/client.test.js: wrapping expect() inside conditional if-block is forbidden."
       ],
       "adjudication": {

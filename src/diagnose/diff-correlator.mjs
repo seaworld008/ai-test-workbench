@@ -92,11 +92,11 @@ export function correlateFailureWithFrontendDiff(repoDir, triage, errorText, gua
       const m = /^diff --git a\/.+ b\/(.+)$/.exec(line);
       const candFile = m ? m[1].trim() : '';
       const isFrontend =
-        candFile &&
+        Boolean(candFile) &&
         !candFile.startsWith('qa/') &&
         !candFile.includes('/qa/') &&
         FRONTEND_EXT_RE.test(candFile) &&
-        (FRONTEND_PATH_RE.test(candFile) || !candFile.includes('server'));
+        (FRONTEND_PATH_RE.test(candFile) || !/^(?:test|tests|spec|specs)\//i.test(candFile));
       activeFile = isFrontend ? path.normalize(candFile).replace(/\\/g, '/') : null;
       activeLines = [];
       if (activeFile) changedFiles.push(activeFile);

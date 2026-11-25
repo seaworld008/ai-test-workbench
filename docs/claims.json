@@ -151,6 +151,13 @@
       "corpusType": "red-team",
       "testFile": "test/adversarial/ast-gate-v2.test.mjs",
       "testTitleSubstring": "WU-05 AST Gate v2"
+    },
+    {
+      "id": "CLAIM-24-v621-trust-gate-autonomy-hardening",
+      "claim": "v6.2.1 trust, gate, and autonomy hardening enforces fail-closed sticky-T1, signed baseline-ref ignored in CI/explicit --base, X.509 CA/KeyUsage/Fulcio commit OID pinning, AST Gate v2.1 bypass closures (G2-F01..F14, hoisted Dieselgate), and idempotent init/upgrade",
+      "corpusType": "security",
+      "testFile": "test/adversarial/v621-hardening.test.mjs",
+      "testTitleSubstring": "v6.2.1 Hardening"
     }
   ]
 }

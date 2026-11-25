@@ -3,7 +3,13 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildCommandResult, emitCommandResult } from '../core/outcome.mjs';
-import { canonicalizeJson, sha256Hex, verifyPayloadT1 } from '../kernel/gate-kernel.mjs';
+import {
+  canonicalizeJson,
+  openTrustContext,
+  resolveGitRoot,
+  sha256Hex,
+  verifyPayloadT1,
+} from '../kernel/gate-kernel.mjs';
 import {
   INTOTO_STATEMENT_TYPE,
   LEGACY_VERDICT_PREDICATE_TYPES,
@@ -11,6 +17,42 @@ import {
   VERDICT_PREDICATE_TYPE,
 } from './intoto.mjs';
 import { verifySigstoreBundleForAttestation } from './sigstore-verify.mjs';
+
+/**
+ * Infers `(qaDir, repoDir)` surrounding an attestation file so in-workspace `AITEST_HMAC_KEY_FILE`
+ * cannot bypass trust-context isolation (`VULN-08`, v6.2.1).
+ * @param {string} absAttestationPath
+ * @param {Record<string, any>} options
+ * @returns {{ qaDir: string, repoDir: string }}
+ */
+function resolveAttestationWorkspaceBounds(absAttestationPath, options) {
+  let qaDir = options.qaDir ? path.resolve(options.qaDir) : '';
+  if (!qaDir) {
+    let cur = path.dirname(absAttestationPath);
+    for (let depth = 0; depth < 6; depth += 1) {
+      if (path.basename(cur) === '.aitest') {
+        qaDir = path.dirname(cur);
+        break;
+      }
+      if (
+        fs.existsSync(path.join(cur, 'playwright.config.ts')) ||
+        fs.existsSync(path.join(cur, 'aitest.config.json'))
+      ) {
+        qaDir = cur;
+        break;
+      }
+      const parent = path.dirname(cur);
+      if (parent === cur) break;
+      cur = parent;
+    }
+    if (!qaDir) qaDir = path.dirname(absAttestationPath);
+  }
+  const repoDir = options.repoDir
+    ? path.resolve(options.repoDir)
+    : resolveGitRoot(qaDir) ||
+      (fs.existsSync(path.join(path.dirname(qaDir), 'package.json')) ? path.dirname(qaDir) : qaDir);
+  return { qaDir, repoDir };
+}
 
 /**
  * Extracts the attested Git commit SHA and Git tree digest from an in-toto Statement v1 document.
@@ -115,11 +157,18 @@ export function verifyAttestationFile(attestationPath, options = {}) {
     );
   }
 
+  let forcedExitCode = null;
   const gitBindings = extractAttestedGitBindings(doc);
-  if (options.expectGitSha) {
+  if (options.expectGitSha !== undefined && options.expectGitSha !== null && String(options.expectGitSha) !== '') {
     const expectedSha = String(options.expectGitSha).trim().toLowerCase();
     const actualSha = (gitBindings.gitCommitSha || '').toLowerCase();
-    if (!actualSha || (actualSha !== expectedSha && !actualSha.startsWith(expectedSha))) {
+    if (!/^[0-9a-f]{12,64}$/.test(expectedSha)) {
+      primaryReasonCode = primaryReasonCode || 'INVALID_GIT_SHA_EXPECTATION';
+      forcedExitCode = 2;
+      errors.push(
+        `Invalid --expect-git-sha "${options.expectGitSha}": must be a hexadecimal Git commit SHA of at least 12 characters (40-char full SHA recommended).`
+      );
+    } else if (!actualSha || (actualSha !== expectedSha && !actualSha.startsWith(expectedSha))) {
       primaryReasonCode = primaryReasonCode || 'GIT_SHA_MISMATCH';
       errors.push(`Attested gitCommitSha "${gitBindings.gitCommitSha || 'missing'}" != expected "${options.expectGitSha}".`);
     }
@@ -132,6 +181,22 @@ export function verifyAttestationFile(attestationPath, options = {}) {
       primaryReasonCode = primaryReasonCode || 'TREE_DIGEST_MISMATCH';
       errors.push(`Attested treeDigest "${gitBindings.treeDigest || 'missing'}" != expected "${options.expectTreeDigest}".`);
     }
+  }
+
+  const workspaceBounds = resolveAttestationWorkspaceBounds(absPath, options);
+  const resolvedTrustContext =
+    options.trustContext ||
+    openTrustContext({
+      qaDir: workspaceBounds.qaDir,
+      repoDir: workspaceBounds.repoDir,
+      env: options.env || process.env,
+      createKeyIfMissing: false,
+    });
+
+  if (resolvedTrustContext.source === 'rejected-in-workspace') {
+    primaryReasonCode = primaryReasonCode || 'IN_WORKSPACE_HMAC_KEY_REJECTED';
+    forcedExitCode = 2;
+    errors.push(resolvedTrustContext.error || 'Refusing to use AITEST_HMAC_KEY_FILE inside workspace directory.');
   }
 
   const hasLocalT1Sig =
@@ -150,7 +215,14 @@ export function verifyAttestationFile(attestationPath, options = {}) {
           'verdict.attestation',
           { ...statementCore, statementDigest: doc.statementDigest },
           doc.mac,
-          { requireMac: Boolean(options.requireT1Mac), macs: doc.macs || null, trustContext: options.trustContext || null }
+          {
+            qaDir: workspaceBounds.qaDir,
+            repoDir: workspaceBounds.repoDir,
+            requireMac: Boolean(options.requireT1Mac),
+            macs: doc.macs || null,
+            trustContext: resolvedTrustContext,
+            env: options.env || process.env,
+          }
         );
   if (!macCheck.ok) {
     primaryReasonCode = primaryReasonCode || 'T1_MAC_INVALID';
@@ -178,6 +250,26 @@ export function verifyAttestationFile(attestationPath, options = {}) {
       if (sigRes.trustRoot) trustRoot = sigRes.trustRoot;
       if (sigRes.ok) {
         trustedRootFingerprint = sigRes.trustedRootSha256;
+        // Enforce Fulcio Commit SHA OID (1.3.6.1.4.1.57264.1.3 / .1.21) binding against doc subject & --expect-git-sha (`VULN-02`, v6.2.1)
+        const fulcioCommit = sigRes.identity?.commitSha ? String(sigRes.identity.commitSha).trim().toLowerCase() : null;
+        if (fulcioCommit) {
+          const attestedCommit = (gitBindings.gitCommitSha || '').toLowerCase();
+          if (!attestedCommit || (attestedCommit !== fulcioCommit && !fulcioCommit.startsWith(attestedCommit) && !attestedCommit.startsWith(fulcioCommit))) {
+            primaryReasonCode = primaryReasonCode || 'FULCIO_COMMIT_SHA_MISMATCH';
+            errors.push(
+              `Fulcio certificate Build Signer Digest (${fulcioCommit}) does not match attested gitCommit (${gitBindings.gitCommitSha || 'missing'}).`
+            );
+          }
+          if (options.expectGitSha) {
+            const expectedSha = String(options.expectGitSha).trim().toLowerCase();
+            if (/^[0-9a-f]{12,64}$/.test(expectedSha) && fulcioCommit !== expectedSha && !fulcioCommit.startsWith(expectedSha)) {
+              primaryReasonCode = primaryReasonCode || 'FULCIO_COMMIT_SHA_MISMATCH';
+              errors.push(
+                `Fulcio certificate Build Signer Digest (${fulcioCommit}) does not match --expect-git-sha (${options.expectGitSha}).`
+              );
+            }
+          }
+        }
         if (doc.predicate?.verdict !== 'pass') {
           primaryReasonCode = primaryReasonCode || 'VERDICT_NOT_PASS';
           errors.push(`Signed verdict is "${doc.predicate?.verdict || 'unknown'}", not "pass"; cannot grant T2 green.`);
@@ -214,6 +306,7 @@ export function verifyAttestationFile(attestationPath, options = {}) {
 
   return {
     ok,
+    exitCode: ok ? 0 : forcedExitCode || 1,
     trustLevel,
     verifiedTier: trustLevel,
     trustRoot,
@@ -252,14 +345,29 @@ export function computeCertPemSha256(certPemOrPath) {
  */
 export async function runAttestCommand(options = {}) {
   const action = String(options.action || 'verify').toLowerCase();
+  const asJson = Boolean(options.json);
+  /** @param {number} code @param {string} msg */
+  const failAttest = (code, msg) => {
+    if (!asJson) console.error(msg);
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'attest',
+        outcome: code === 64 ? 'usage' : code === 2 ? 'blocked' : 'fail',
+        ok: false,
+        exitCode: code,
+        blockerKind: code === 64 ? 'USAGE_ERROR' : code === 2 ? 'ATTESTATION_SECURITY_BLOCKED' : null,
+        summary: msg,
+        data: { error: msg },
+      }),
+      { asJson }
+    );
+  };
   if (action !== 'verify') {
-    console.error(`Unknown attest action "${action}". Use: verify`);
-    return 1;
+    return failAttest(64, `Unknown attest action "${action}". Use: verify`);
   }
   const filePath = options.file || options.target;
   if (!filePath) {
-    console.error('Missing --file <path/to/attestation.json>');
-    return 1;
+    return failAttest(64, 'Missing --file <path/to/attestation.json>');
   }
   const res = verifyAttestationFile(filePath, {
     bundlePath: options.bundle,
@@ -273,7 +381,7 @@ export async function runAttestCommand(options = {}) {
     requireT1Mac: Boolean(options.requireMac),
     allowT1: false,
   });
-  if (!options.json) {
+  if (!asJson) {
     for (const w of res.warnings) console.warn(`[WARN] ${w}`);
     if (!res.ok) {
       console.error(`[Attestation REJECTED] trustLevel=${res.trustLevel} reasonCode=${res.reasonCode} mergeGradeGreen=false`);
@@ -284,18 +392,19 @@ export async function runAttestCommand(options = {}) {
       );
     }
   }
-  const exitCode = res.ok ? 0 : 1;
+  const exitCode = res.ok ? 0 : res.exitCode || 1;
   return emitCommandResult(
     buildCommandResult({
       tool: 'attest',
-      outcome: res.ok ? 'pass' : 'fail',
+      outcome: res.ok ? 'pass' : exitCode === 2 ? 'blocked' : 'fail',
       ok: res.ok,
       exitCode,
+      blockerKind: exitCode === 2 ? res.reasonCode || 'ATTESTATION_SECURITY_BLOCKED' : null,
       summary: res.ok
         ? `Attestation verified (${res.trustLevel}, trustRoot=${res.trustRoot}, reasonCode=${res.reasonCode})`
         : res.errors[0] || `Attestation rejected (${res.reasonCode})`,
       data: res,
     }),
-    { asJson: Boolean(options.json) }
+    { asJson }
   );
 }

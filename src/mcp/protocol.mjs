@@ -233,7 +233,7 @@ async function executeMcpTool(name, rawArgs = {}, ctx = {}, meta = {}) {
         false,
         2,
         pathCheck.error || '[Workspace Boundary Blocked]',
-        { blockedTarget: pathCheck.blockedPath || target, allowedRoots },
+        { blockedTarget: pathCheck.blockedPath || target, allowedRootsCount: allowedRoots.length },
         ['Pass target/repo/output paths strictly inside an authorized workspace root.'],
         { protocolVersion, deprecation }
       );

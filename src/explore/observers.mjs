@@ -47,6 +47,8 @@ export async function attachExploreObservers({ context, safety, guardConfig, ses
   /** @type {Set<string>} */
   const blockedApiHostSet = new Set();
   let firewallAbortCount = 0;
+  /** @type {Map<string, { depth: number, ts: number }>} */
+  const redirectHopTracker = new Map();
 
   await context.route('**/*', async (/** @type {any} */ route) => {
     const req = route.request();
@@ -87,11 +89,17 @@ export async function attachExploreObservers({ context, safety, guardConfig, ses
       return;
     }
 
-    let redirectDepth = 0;
+    let nativeDepth = 0;
     for (let r = typeof req.redirectedFrom === 'function' ? req.redirectedFrom() : null; r; r = r.redirectedFrom?.()) {
-      redirectDepth += 1;
+      nativeDepth += 1;
     }
-    if (redirectDepth > MAX_REDIRECT_HOPS) {
+    const trackedKey = `${resourceType}:${curUrl}`;
+    const trackedEntry = redirectHopTracker.get(trackedKey);
+    const trackedDepth = trackedEntry && Date.now() - trackedEntry.ts < 30_000 ? trackedEntry.depth : 0;
+    redirectHopTracker.delete(trackedKey);
+    const redirectDepth = Math.max(nativeDepth, trackedDepth);
+
+    if (redirectDepth >= MAX_REDIRECT_HOPS) {
       recordBlocked(curMethod, curUrl, `Blocked explore redirect loop exceeding ${MAX_REDIRECT_HOPS} hops`);
       await route.abort('blockedbyclient');
       return;
@@ -102,7 +110,8 @@ export async function attachExploreObservers({ context, safety, guardConfig, ses
       const status = res.status();
       const location = res.headers()?.location;
       if (REDIRECT_STATUSES.has(status) && location) {
-        if (redirectDepth >= MAX_REDIRECT_HOPS) {
+        const nextDepth = redirectDepth + 1;
+        if (nextDepth > MAX_REDIRECT_HOPS) {
           recordBlocked(curMethod, curUrl, `Blocked explore redirect loop exceeding ${MAX_REDIRECT_HOPS} hops`);
           await route.abort('blockedbyclient');
           return;
@@ -115,6 +124,8 @@ export async function attachExploreObservers({ context, safety, guardConfig, ses
           await route.abort('blockedbyclient');
           return;
         }
+        if (redirectHopTracker.size > 200) redirectHopTracker.clear();
+        redirectHopTracker.set(`${resourceType}:${next.url}`, { depth: nextDepth, ts: Date.now() });
       }
       // Return checked 3xx/non-3xx response directly so Chromium natively tracks page.url() redirects
       await route.fulfill({ response: res });

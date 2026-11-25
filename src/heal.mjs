@@ -372,14 +372,21 @@ export async function attemptHealRepair(qaDir, options = {}) {
  */
 export async function runHealCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
+  const asJson = Boolean(options.json);
+  /** @param {string} msg */
+  const failHeal = (msg) => {
+    if (!asJson) console.error(msg);
+    return emitCommandResult(
+      buildCommandResult({ tool: 'heal', outcome: 'fail', ok: false, exitCode: 1, summary: msg, data: { error: msg } }),
+      { asJson, compatSpreadData: false }
+    );
+  };
   if (!options.target) {
-    console.error(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
-    return 1;
+    return failHeal(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
   }
   const qaDir = resolveQaDirectory(path.resolve(options.target), options.qaDir);
   if (!qaDir) {
-    console.error(lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
-    return 1;
+    return failHeal(lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
   }
 
   const action = String(options.action || 'begin').toLowerCase();

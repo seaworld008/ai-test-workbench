@@ -1,3 +1,4 @@
+// @ts-check
 import {
   buildCustomAssertNameMatcher,
   classifyExpectChainAst,
@@ -13,6 +14,12 @@ import {
   inspectPropertyAssignment,
   inspectTryStatement,
 } from './parser-inspectors.mjs';
+import {
+  assertionVerifiesSettledResult,
+  extractCollectionTargetKeys,
+  extractLoopTargetKeys,
+  isValidLoopCountGuard,
+} from './parser-loops.mjs';
 import { buildSymbolTable } from './symbol-table.mjs';
 import { getNodeLine, resolveTypeScriptCompiler, unwrapExpr } from './ts-loader.mjs';
 
@@ -23,6 +30,7 @@ import { getNodeLine, resolveTypeScriptCompiler, unwrapExpr } from './ts-loader.
  *   implicitCountCredit?: boolean; hasApiSchema?: boolean; screenshotOptions?: Record<string, number> | null;
  *   isStatusCheck?: boolean; statusCodes?: number[]; isStatusRangeCheck?: boolean;
  *   numericExpected: number | null; actualExpr?: string; expectedArg?: string; raw: string;
+ *   countGuardKeys?: string[];
  *   line: number; scopeKind: string; testTitle: string | null;
  *   insideIf: boolean; insideIfInTest: boolean; insideTernary: boolean;
  *   insideDynamicLoop?: boolean; insideEventListener?: boolean; insideBrowserEvaluate: boolean;
@@ -116,7 +124,7 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
     });
   };
 
-  /** @type {Array<{ line: number, scopeKind: string, testTitle: string | null, snippet: string }>} */
+  /** @type {Array<{ line: number, scopeKind: string, testTitle: string | null, snippet: string, loopTargetKeys: string[] }>} */
   const pendingLoopAssertions = [];
   /** @type {Array<{ line: number, scopeKind: string, testTitle: string | null, snippet: string }>} */
   const pendingAllSettledCalls = [];
@@ -136,6 +144,7 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
     insideIfInTest: false,
     insideTernary: false,
     insideDynamicLoop: false,
+    loopTargetKeys: /** @type {string[]} */ ([]),
     insideEventListener: false,
     insideBrowserEvaluate: false,
     scopeKind: options.wrapInAsyncFn ? 'test' : 'top-level',
@@ -197,11 +206,11 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
           const testTitle = titleStr || (node.arguments[0] ? node.arguments[0].getText(sf).slice(0, 80) : '<unnamed>');
           const reqIds = [...new Set(testTitle.match(/\bREQ-[A-Za-z0-9_-]+\b/g) || [])];
           summary.testBlocks.push({ title: testTitle, reqIds, line, assertions: [] });
-          childScopeOverride = { scopeKind: 'test', testTitle, insideIfInTest: false, insideDynamicLoop: false, insideEventListener: false };
+          childScopeOverride = { scopeKind: 'test', testTitle, insideIfInTest: false, insideDynamicLoop: false, loopTargetKeys: [], insideEventListener: false };
         } else if (isDescribe) {
           childScopeOverride = { scopeKind: 'describe' };
         } else if (isHook) {
-          childScopeOverride = { scopeKind: 'hook', insideIfInTest: false, insideDynamicLoop: false, insideEventListener: false };
+          childScopeOverride = { scopeKind: 'hook', insideIfInTest: false, insideDynamicLoop: false, loopTargetKeys: [], insideEventListener: false };
         }
       }
 
@@ -211,8 +220,17 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
           childScopeOverride = { ...(childScopeOverride || {}), scopeKind: 'browser-evaluate', insideBrowserEvaluate: true };
         } else if ((mName === 'forEach' || mName === 'map') && node.arguments.length >= 1) {
           const recv = unwrapExpr(ts, node.expression.expression);
-          if (!(recv && ts.isArrayLiteralExpression(recv) && recv.elements.length > 0)) {
-            childScopeOverride = { ...(childScopeOverride || {}), insideDynamicLoop: true };
+          const isGuaranteedNonEmpty =
+            Boolean(recv && ts.isArrayLiteralExpression(recv) && recv.elements.length > 0) ||
+            Boolean(
+              recv &&
+              ts.isCallExpression(recv) &&
+              ts.isPropertyAccessExpression(recv.expression) &&
+              recv.expression.name.text === 'split'
+            );
+          if (!isGuaranteedNonEmpty) {
+            const loopKeys = extractCollectionTargetKeys(ts, sf, recv, symbolTable, ctx.testTitle);
+            childScopeOverride = { ...(childScopeOverride || {}), insideDynamicLoop: true, loopTargetKeys: loopKeys };
           }
         } else if ((mName === 'on' || mName === 'addListener') && node.arguments.length >= 2) {
           childScopeOverride = { ...(childScopeOverride || {}), insideEventListener: true };
@@ -224,8 +242,10 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
       const chain = extractExpectChainFromCall(ts, sf, node, symbolTable);
       if (chain) {
         const snippet = node.getText(sf).trim();
+        const countGuardKeys = extractCollectionTargetKeys(ts, sf, chain.actualNode, symbolTable, ctx.testTitle);
         const cls = {
           ...classifyExpectChainAst(ts, sf, chain, snippet, { symbolTable, testTitle: ctx.testTitle }),
+          countGuardKeys,
           line, scopeKind: ctx.scopeKind, testTitle: ctx.testTitle,
           insideIf: ctx.insideIf, insideIfInTest: ctx.insideIfInTest, insideTernary: ctx.insideTernary,
           insideDynamicLoop: ctx.insideDynamicLoop, insideEventListener: ctx.insideEventListener,
@@ -284,7 +304,9 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
           pushViolation('AITEST-G110', ev.message, snippet, ev);
         }
         if (ctx.insideDynamicLoop && ctx.scopeKind === 'test') {
-          pendingLoopAssertions.push({ line, scopeKind: ctx.scopeKind, testTitle: ctx.testTitle, snippet });
+          pendingLoopAssertions.push({
+            line, scopeKind: ctx.scopeKind, testTitle: ctx.testTitle, snippet, loopTargetKeys: ctx.loopTargetKeys,
+          });
         }
       } else if (ts.isIdentifier(node.expression) && isCustomAssertName(node.expression.text)) {
         summary.customAssertCalls += 1;
@@ -309,6 +331,9 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
     const enteredDynamicLoop =
       ts.isForStatement(node) || ts.isForInStatement(node) || ts.isWhileStatement(node) || ts.isDoStatement(node) ||
       (ts.isForOfStatement(node) && !isStaticNonEmptyLoopNode(ts, node));
+    const enteredLoopTargetKeys = enteredDynamicLoop
+      ? extractLoopTargetKeys(ts, sf, node, symbolTable, ctx.testTitle)
+      : [];
 
     const nextCtx = {
       insideIf: ctx.insideIf || ts.isIfStatement(node),
@@ -321,6 +346,12 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
         childScopeOverride?.insideDynamicLoop !== undefined
           ? childScopeOverride.insideDynamicLoop
           : ctx.insideDynamicLoop || enteredDynamicLoop,
+      loopTargetKeys:
+        childScopeOverride?.loopTargetKeys !== undefined
+          ? childScopeOverride.loopTargetKeys
+          : enteredDynamicLoop
+            ? enteredLoopTargetKeys
+            : ctx.loopTargetKeys,
       insideEventListener:
         childScopeOverride?.insideEventListener !== undefined
           ? childScopeOverride.insideEventListener
@@ -340,20 +371,13 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
     const scoped = lp.testTitle
       ? summary.assertions.filter((a) => a.testTitle === lp.testTitle)
       : summary.assertions;
-    const hasCountGuard = scoped.some(
-      (a) =>
-        !a.insideDynamicLoop &&
-        ((a.matcher === 'toHaveCount' && (a.numericExpected === null || a.numericExpected > 0)) ||
-          (a.matcher === 'toBeGreaterThan' && (a.numericExpected ?? 0) >= 0) ||
-          (a.matcher === 'toBeGreaterThanOrEqual' && (a.numericExpected ?? 0) >= 1) ||
-          (a.matcher === 'toHaveLength' && (a.numericExpected === null || a.numericExpected > 0)))
-    );
+    const hasCountGuard = scoped.some((a) => isValidLoopCountGuard(a, lp.loopTargetKeys, symbolTable, lp.testTitle));
     if (!hasCountGuard) {
       const ev = {
         kind: 'loop-without-count-guard',
         line: lp.line, scopeKind: lp.scopeKind, testTitle: lp.testTitle,
         insideIfInTest: true, snippet: lp.snippet,
-        message: `${fileLabel}: expect() inside dynamic loop without preceding non-zero count guard silently passes on 0 iterations.`,
+        message: `${fileLabel}: expect() inside dynamic loop without preceding matching non-zero count guard silently passes on 0 iterations.`,
       };
       summary.events.conditionalAssertions.push(ev);
       pushViolation('AITEST-G110', ev.message, lp.snippet, ev);
@@ -364,9 +388,7 @@ export function analyzeSourceAst(fileLabel, sourceText, options = {}) {
     const scoped = asc.testTitle
       ? summary.assertions.filter((a) => a.testTitle === asc.testTitle)
       : summary.assertions;
-    const assertsFulfilled = scoped.some(
-      (a) => /\b(?:fulfilled|rejected|reason)\b/.test(a.raw || '') || a.matcher === 'toThrow'
-    );
+    const assertsFulfilled = scoped.some(assertionVerifiesSettledResult);
     if (!assertsFulfilled) {
       const ev = {
         kind: 'all-settled-swallow',

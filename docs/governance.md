@@ -8,7 +8,7 @@
 
 ## 1. 四层可信防假绿门禁内核 (`src/kernel/gate/`)
 
-每次执行 `npx ai-test-workbench@6.2.0 audit`、`npx ai-test-workbench@6.2.0 run --audit` 或一键判决 `npx ai-test-workbench@6.2.0 verify-change` 时，均依次经过以下四层 fail-closed 门禁（任何缺失、不可用或未绑定结果均返回三态 `blocked`，退出码 `2`）：
+每次执行 `npx ai-test-workbench@6.2.1 audit`、`npx ai-test-workbench@6.2.1 run --audit` 或一键判决 `npx ai-test-workbench@6.2.1 verify-change` 时，均依次经过以下四层 fail-closed 门禁（任何缺失、不可用或未绑定结果均返回三态 `blocked`，退出码 `2`）：
 
 | 层级 | 门禁名称 | 核心校验内容 | 阻断典型作弊手段 |
 |---|---|---|---|
@@ -19,16 +19,16 @@
 
 ---
 
-## 2. 人类专属治理审批协议 (`npx ai-test-workbench@6.2.0 governance`)
+## 2. 人类专属治理审批协议 (`npx ai-test-workbench@6.2.1 governance`)
 
 受保护治理文件锁定于 `<repo>/qa/.aitest/governance.lock`，并附只追加审计日志 `.aitest/governance-audit.jsonl`：
 
 ```bash
 # 查看受保护治理文件哈希状态（Agent 与人工均可只读执行）
-npx ai-test-workbench@6.2.0 governance status --target "/path/to/repo"
+npx ai-test-workbench@6.2.1 governance status --target "/path/to/repo"
 
 # 人工修改受保护配置或新增合规豁免后，由人类在本地终端重签治理锁
-npx ai-test-workbench@6.2.0 governance approve --target "/path/to/repo" --by "alice@team" --reason "更新 staging 性能预算基线"
+npx ai-test-workbench@6.2.1 governance approve --target "/path/to/repo" --by "alice@team" --reason "更新 staging 性能预算基线"
 ```
 
 > [!IMPORTANT]
@@ -36,12 +36,12 @@ npx ai-test-workbench@6.2.0 governance approve --target "/path/to/repo" --by "al
 
 ---
 
-## 3. 有状态自愈会话状态机 (`npx ai-test-workbench@6.2.0 heal` / `aitest_heal`)
+## 3. 有状态自愈会话状态机 (`npx ai-test-workbench@6.2.1 heal` / `aitest_heal`)
 
 所有失败修复均通过带 T1 MAC 保护的状态机推进：
 
 1. **`aitest_heal(action="begin")`**（CLI：`heal begin`）：读取最新 `Run Ledger` 与结构化诊断信号（`A / B / C / D`），创建 `.aitest/heals/<sessionId>.json`：
-   - **A 类（定位器/等待同步漂移）**：允许进入修复态（`allowedToEditTests: true`），跨会话累计最多 **3 轮尝试**。
+   - **A 类（定位器/等待同步漂移）**：允许进入修复态（`repairPermitted: true`），跨会话累计最多 **3 轮尝试**。
    - **B 类（环境/网络/门禁阻断）**：**硬阻断改测试**（退出码 `2`），提示修复环境或重新运行 `auth-login`。
    - **C 类（后端 `5xx`、未捕获异常、契约/业务缺陷）**：**硬阻断改测试**（退出码 `2`），自动附带 32 位 W3C `Trace-ID` 生成缺陷单 `reports/defects/<id>.md`。
    - **D 类（需求歧义）**：**硬阻断改测试**，暂停并向用户确认预期行为。
@@ -57,7 +57,7 @@ npx ai-test-workbench@6.2.0 governance approve --target "/path/to/repo" --by "al
 
 ---
 
-## 5. 一键可信变更判决 (`npx ai-test-workbench@6.2.0 verify-change` / `aitest_verify_change`)
+## 5. 一键可信变更判决 (`npx ai-test-workbench@6.2.1 verify-change` / `aitest_verify_change`)
 
 一次调用即可串联完整闭环：
 `governance verify` → `Git merge-base` → `Import-Graph Impact v2` → `Playwright Run (Run Ledger)` → `4-Layer Gate Audit` → `Heal Conflict Check` → `Diagnose & Trace Matrix`，产出：
@@ -78,6 +78,6 @@ npx ai-test-workbench@6.2.0 governance approve --target "/path/to/repo" --by "al
 - 通过 [examples/workflows/use-aitest-verify.yml](../examples/workflows/use-aitest-verify.yml) 接入 `.github/workflows/aitest-verify.yml`。
 - 离线验签统一执行：
   ```bash
-  npx ai-test-workbench@6.2.0 attest verify --file <attestation.json> --bundle <attestation.sigstore.json> --expect-repo <owner/repo> --expect-workflow <workflow-path> --expect-ref <ref>
+  npx ai-test-workbench@6.2.1 attest verify --file <attestation.json> --bundle <attestation.sigstore.json> --expect-repo <owner/repo> --expect-workflow <workflow-path> --expect-ref <ref>
   ```
 - 私有仓库须知：`signer: github-attest`（默认）依赖 GitHub Artifact Attestations（私有仓库需 GitHub Enterprise Cloud）；`signer: cosign` 使用公共 Sigstore 时会将仓库身份写入公开 Rekor 日志。

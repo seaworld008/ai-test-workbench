@@ -6,7 +6,7 @@ import path from 'node:path';
 import {
   GITHUB_ACTIONS_OIDC_ISSUER,
   computeDssePae,
-  extractFulcioOidcIssuerFromDer,
+  extractFulcioExtensionsFromDer,
   extractSanUris,
   normalizeExpectedWorkflowPath,
   parseGithubWorkflowSanUri,
@@ -35,7 +35,7 @@ import { VERDICT_PREDICATE_TYPE } from './intoto.mjs';
  *   reasonCode: string,
  *   trustRoot: 'sigstore' | 'pinned-custom' | 'custom',
  *   trustedRootSha256: string | null,
- *   identity: { oidcIssuer: string, sanUri: string, repo: string, workflow: string, ref: string },
+ *   identity: { oidcIssuer: string, sanUri: string, repo: string, workflow: string, ref: string, commitSha?: string | null },
  *   signedPredicateType: string | null,
  * } | {
  *   ok: false,
@@ -139,9 +139,11 @@ export function verifySigstoreBundleForAttestation(absAttestationPath, absBundle
     };
   }
 
-  // 3. Verify Fulcio OIDC Issuer
+  // 3. Verify Fulcio OIDC Issuer & extract Build Signer / Source Repo Digest OIDs (`.1.3` / `.1.21`)
   const expectedIssuer = options.certificateOidcIssuer || GITHUB_ACTIONS_OIDC_ISSUER;
-  const oidcIssuer = extractFulcioOidcIssuerFromDer(leafCert.raw);
+  const fulcioExt = extractFulcioExtensionsFromDer(leafCert.raw);
+  const oidcIssuer = fulcioExt.oidcIssuer;
+  const fulcioCommitSha = fulcioExt.buildSignerDigest || fulcioExt.sourceRepoDigest || null;
   if (!oidcIssuer || oidcIssuer !== expectedIssuer) {
     return {
       ok: false,
@@ -211,14 +213,19 @@ export function verifySigstoreBundleForAttestation(absAttestationPath, absBundle
         trustRoot = 'custom';
       }
 
-      const chainRes = verifyCertChainToTrustedRoot(leafCert, certs.slice(1), rootPem);
+      // Reference time: prefer Rekor transparency log integratedTime if present, else current time
+      const tlogEntry = Array.isArray(vm.tlogEntries) ? vm.tlogEntries[0] : null;
+      const integratedSec = tlogEntry?.integratedTime !== undefined ? Number(tlogEntry.integratedTime) : Number.NaN;
+      const referenceTimeMs = Number.isFinite(integratedSec) && integratedSec > 0 ? integratedSec * 1000 : Date.now();
+
+      const chainRes = verifyCertChainToTrustedRoot(leafCert, certs.slice(1), rootPem, { referenceTimeMs });
       if (!chainRes.ok) {
         return {
           ok: false,
           reasonCode: 'UNTRUSTED_CERT_CHAIN',
           trustRoot,
           error: chainRes.reason || 'Certificate chain failed offline trusted-root verification.',
-          identity: { oidcIssuer, sanUri: matchedSan.uri, repo: matchedSan.repo, workflow: matchedSan.workflowPath, ref: matchedSan.gitRef },
+          identity: { oidcIssuer, sanUri: matchedSan.uri, repo: matchedSan.repo, workflow: matchedSan.workflowPath, ref: matchedSan.gitRef, commitSha: fulcioCommitSha },
         };
       }
     } catch (err) {
@@ -270,6 +277,7 @@ export function verifySigstoreBundleForAttestation(absAttestationPath, absBundle
       repo: matchedSan.repo,
       workflow: matchedSan.workflowPath,
       ref: matchedSan.gitRef,
+      commitSha: fulcioCommitSha,
     },
     signedPredicateType: signedStatement.predicateType || null,
   };

@@ -125,20 +125,44 @@ test('Layer 0 Governance Lock intercepts all 5 config/waiver/fixture tampering v
     ]);
     assert.equal(botBlockedCode, 2);
 
-    // Legitimate human approval succeeds
+    // Legitimate human approval succeeds (requires explicit non-interactive human opt-in and clean non-agent env)
     const cfgPath = path.join(qaDir, 'aitest.config.json');
     fs.writeFileSync(cfgPath, JSON.stringify({ assertFunctionNames: ['expect*'], maxFlaky: 0 }, null, 2) + '\n', 'utf8');
-    const humanOkCode = await runCli([
-      'governance',
-      'approve',
-      '--target',
-      repoDir,
-      '--by',
-      'qa-director-zhang',
-      '--reason',
-      'Tighten assertFunctionNames to expect* only',
-      '--yes',
-    ]);
+    const savedAgentEnv = {
+      AITEST_APPROVE_NON_INTERACTIVE: process.env.AITEST_APPROVE_NON_INTERACTIVE,
+      ANTIGRAVITY_CONVERSATION_ID: process.env.ANTIGRAVITY_CONVERSATION_ID,
+      CLAUDECODE: process.env.CLAUDECODE,
+      CODEX_CI: process.env.CODEX_CI,
+      CODEX_SANDBOX: process.env.CODEX_SANDBOX,
+      CURSOR_TRACE_ID: process.env.CURSOR_TRACE_ID,
+      AIDER_MODEL: process.env.AIDER_MODEL,
+    };
+    process.env.AITEST_APPROVE_NON_INTERACTIVE = '1';
+    delete process.env.ANTIGRAVITY_CONVERSATION_ID;
+    delete process.env.CLAUDECODE;
+    delete process.env.CODEX_CI;
+    delete process.env.CODEX_SANDBOX;
+    delete process.env.CURSOR_TRACE_ID;
+    delete process.env.AIDER_MODEL;
+    let humanOkCode;
+    try {
+      humanOkCode = await runCli([
+        'governance',
+        'approve',
+        '--target',
+        repoDir,
+        '--by',
+        'qa-director-zhang',
+        '--reason',
+        'Tighten assertFunctionNames to expect* only',
+        '--yes',
+      ]);
+    } finally {
+      for (const [k, v] of Object.entries(savedAgentEnv)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
     assert.equal(humanOkCode, 0);
     assert.equal(runAuditForQaDir(qaDir, { staticOnly: true }).ok, true);
   } finally {

@@ -46,11 +46,13 @@ export function flattenPlaywrightResults(resultsObj) {
    * @param {string} fileHint
    */
   const walkSuite = (suite, parents = [], fileHint = '') => {
-    const nextParents = suite.title ? [...parents, suite.title] : parents;
+    const normSuiteTitle = suite.title ? String(suite.title).replace(/\\/g, '/') : '';
+    const nextParents = normSuiteTitle ? [...parents, normSuiteTitle] : parents;
     const curFile = String(suite.file || fileHint || '').replace(/\\/g, '/');
 
     for (const spec of suite.specs || []) {
-      const fullTitle = [...nextParents, spec.title || ''].filter(Boolean).join(' > ');
+      const normSpecTitle = String(spec.title || '').replace(/\\/g, '/');
+      const fullTitle = [...nextParents, normSpecTitle].filter(Boolean).join(' > ');
       const file = String(spec.file || curFile || '').replace(/\\/g, '/');
       const specTags = Array.isArray(spec.tags) ? spec.tags.map((t) => (t.startsWith('@') ? t : `@${t}`)) : [];
       const inlineTags = fullTitle.match(/@[a-zA-Z0-9_-]+/g) || [];

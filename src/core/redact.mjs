@@ -1,13 +1,13 @@
 // @ts-check
 
 export const SECRET_KEY_RE =
-  /(?:password|passwd|pwd|secret|token|cookie|authorization|auth|credential|api[_-]?key|private[_-]?key|session[_-]?id|bearer|jwt|otp|pin|hmac[_-]?key)/i;
+  /(?:password|passwd|pwd|secret|token|cookie|authorization|auth[_-]?(?:header|token|key|secret|bearer|basic|cookie|cred|pass)|credential|api[_-]?key|private[_-]?key|session[_-]?id|bearer|jwt|otp|pin|hmac[_-]?key)/i;
 
 const COOKIE_OR_STORAGE_SENSITIVE_NAME_RE =
-  /(?:password|passwd|pwd|secret|token|cookie|authorization|auth|credential|api[_-]?key|private[_-]?key|session|sess|sid|jwt|csrf|xsrf|otp|pin|bearer|hmac)/i;
+  /(?:password|passwd|pwd|secret|token|refresh|cookie|authorization|auth|credential|api[_-]?key|private[_-]?key|session|sess|sid|jwt|csrf|xsrf|otp|pin|bearer|hmac|user[._-]?data|account|supabase|firebase|oauth|oidc|access)/i;
 
 const JSON_SECRET_KEY_PATTERN =
-  '[A-Za-z0-9_.-]*?(?:password|passwd|pwd|secret|client_secret|clientSecret|token|access_token|accessToken|refresh_token|refreshToken|id_token|idToken|auth_token|authToken|api_key|apiKey|private_key|privateKey|session_id|sessionId|cookie|authorization|credential|bearer|jwt|otp|pin|secretKey|secret_key|hmac_key|hmacKey)[A-Za-z0-9_.-]*';
+  '[A-Za-z0-9_.-]*?(?:password|passwd|pwd|secret|client_secret|clientSecret|token|access_token|accessToken|refresh_token|refreshToken|id_token|idToken|auth_token|authToken|api[_-]?key|apiKey|private[_-]?key|privateKey|session[_-]?id|sessionId|cookie|authorization|credential|bearer|jwt|otp|pin|secretKey|secret_key|hmac_key|hmacKey)[A-Za-z0-9_.-]*';
 
 /**
  * Internal AI Test Workbench correlation/session IDs that are NEVER credentials.
@@ -41,9 +41,13 @@ export function redactSecrets(input) {
     .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
     .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
 
-  // 1. Redact PEM private keys completely
+  // 1. Redact PEM private keys completely (including single-line JSON-escaped `\\n` PEM strings)
   out = out.replace(
-    /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,
+    /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:\\r?\\n|[\s\S])*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,
+    '[REDACTED_PRIVATE_KEY]'
+  );
+  out = out.replace(
+    /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:\\r?\\n|\r?\n)[A-Za-z0-9+/=\\n\r\s]{12,}/g,
     '[REDACTED_PRIVATE_KEY]'
   );
 
@@ -117,6 +121,12 @@ export function redactSecrets(input) {
     '$1[REDACTED]'
   );
 
+  // 11. Redact Web Storage setItem("...secret/token...", "value") calls in error logs/snippets
+  out = out.replace(
+    /(\bsetItem\s*\(\s*["'][A-Za-z0-9_.-]*?(?:password|passwd|pwd|secret|token|refresh|cookie|auth|credential|api[_-]?key|session|jwt)[A-Za-z0-9_.-]*["']\s*,\s*)(["'])(?:\\.|(?!\2).)*\2/gi,
+    '$1$2[REDACTED]$2'
+  );
+
   return out;
 }
 
@@ -145,9 +155,6 @@ export function redactStructuredValue(value, parentKey = '') {
     return /** @type {T} */ (/** @type {unknown} */ (redactSecrets(value)));
   }
   if (typeof value === 'number' || typeof value === 'boolean') {
-    if (parentKey && !WORKBENCH_INTERNAL_ID_KEYS.has(parentKey) && SECRET_KEY_RE.test(parentKey)) {
-      return /** @type {T} */ (/** @type {unknown} */ ('[REDACTED]'));
-    }
     return value;
   }
   if (Array.isArray(value)) {
