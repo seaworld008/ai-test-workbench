@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { getFileAtGitRef, listChangedFilesUnderDir, resolveGitRoot } from './git-utils.mjs';
+import { execGitSync, getFileAtGitRef, listChangedFilesUnderDir, resolveGitRoot } from './git-utils.mjs';
 import { analyzeSourceAst } from './parser.mjs';
 import { isCoveredByWaiver, isProtectedDiffPath, loadAitestConfig, validateAssertFunctionNames } from './policy.mjs';
-import { evaluateDiffRules } from './rules/index.mjs';
+import { evaluateProductFileAst } from './rules/g117-dieselgate.mjs';
+import { evaluateDiffRules, isRuleEnabled } from './rules/index.mjs';
 
 /**
  * Full-file AST semantic comparison between base source (e.g. `git show base:file`) and head source.
@@ -71,11 +72,53 @@ export function compareSpecSourcesAst(filePath, baseSource, headSource, options 
 }
 
 /**
+ * Reads `.aitest/baseline-ref` (supports either JSON `{ baselineRef }` or raw SHA text).
+ * @param {string | undefined} qaDir
+ * @returns {string | null}
+ */
+function readWorkspaceBaselineRef(qaDir) {
+  if (!qaDir) return null;
+  const refPath = path.join(qaDir, '.aitest', 'baseline-ref');
+  if (!fs.existsSync(refPath)) return null;
+  try {
+    const raw = fs.readFileSync(refPath, 'utf8').trim();
+    if (!raw) return null;
+    if (raw.startsWith('{')) {
+      const parsed = JSON.parse(raw);
+      return typeof parsed.baselineRef === 'string' && parsed.baselineRef.trim() ? parsed.baselineRef.trim() : null;
+    }
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Checks whether branch-new specs/tests preserve at least one non-tautological `>= S2` assertion per test block (`WU-04`).
+ * @param {import('./parser.mjs').AstSummary | null | undefined} headSum
+ * @param {Set<string> | null} baselineTestTitles
+ * @param {boolean} isBaselineNewSpec
+ * @returns {boolean}
+ */
+function meetsBranchNewAssertionFloor(headSum, baselineTestTitles, isBaselineNewSpec) {
+  if (!headSum) return false;
+  const blocks = headSum.testBlocks || [];
+  if (isBaselineNewSpec) {
+    if (blocks.length === 0) return true;
+    return blocks.every((tb) => (tb.assertions || []).some((a) => !a.isTautology && a.tier >= 2));
+  }
+  if (!baselineTestTitles) return false;
+  const branchNewBlocks = blocks.filter((tb) => !baselineTestTitles.has(tb.title));
+  if (branchNewBlocks.length === 0) return true;
+  return branchNewBlocks.every((tb) => (tb.assertions || []).some((a) => !a.isTautology && a.tier >= 2));
+}
+
+/**
  * Commit-level multi-file AST changeset comparison (`compareChangesetAst`).
  * Parses every changed spec file in the commit together so rules can inspect cross-file context
  * (e.g., tests split or moved across spec files in the same commit).
  *
- * @param {Array<{ filePath: string, baseSource: string, headSource: string }>} fileChanges
+ * @param {Array<{ filePath: string, baseSource: string, headSource: string, isBaselineNewSpec?: boolean, baselineTestTitles?: Set<string> | null }>} fileChanges
  * @param {{ assertFunctionNames?: string[], activeWaivers?: any[], qaDir?: string, tsCompiler?: any, rulesConfig?: Record<string, any>, protectedGlobs?: string[] }} [options]
  */
 export function compareChangesetAst(fileChanges, options = {}) {
@@ -94,13 +137,25 @@ export function compareChangesetAst(fileChanges, options = {}) {
     ...('tsCompiler' in options ? { tsCompiler: options.tsCompiler } : {}),
   };
 
-  const parsedEntries = (fileChanges || []).map((entry) => ({
-    filePath: entry.filePath,
-    baseSource: entry.baseSource || '',
-    headSource: entry.headSource || '',
-    baseSum: analyzeSourceAst(entry.filePath, entry.baseSource || '', astOpts),
-    headSum: analyzeSourceAst(entry.filePath, entry.headSource || '', astOpts),
-  }));
+  const parsedEntries = (fileChanges || []).map((entry) => {
+    const baseSum = analyzeSourceAst(entry.filePath, entry.baseSource || '', astOpts);
+    const headSum = analyzeSourceAst(entry.filePath, entry.headSource || '', astOpts);
+    const isBaselineNewSpec = Boolean(entry.isBaselineNewSpec);
+    const baselineTestTitles = entry.baselineTestTitles || null;
+    const exemptBranchNewRegression =
+      (isBaselineNewSpec || baselineTestTitles !== null) &&
+      meetsBranchNewAssertionFloor(headSum, baselineTestTitles, isBaselineNewSpec);
+    return {
+      filePath: entry.filePath,
+      baseSource: entry.baseSource || '',
+      headSource: entry.headSource || '',
+      baseSum,
+      headSum,
+      isBaselineNewSpec,
+      baselineTestTitles,
+      exemptBranchNewRegression,
+    };
+  });
 
   const changesetContext = {
     entries: parsedEntries,
@@ -134,6 +189,9 @@ export function compareChangesetAst(fileChanges, options = {}) {
       rulesConfig,
       protectedGlobs,
       changesetContext,
+      isBaselineNewSpec: entry.isBaselineNewSpec,
+      baselineTestTitles: entry.baselineTestTitles,
+      exemptBranchNewRegression: entry.exemptBranchNewRegression,
       isDiffTextMode: false,
     });
     allFindings.push(...evalRes.findings);
@@ -155,7 +213,7 @@ export function compareChangesetAst(fileChanges, options = {}) {
  * Compares FULL `git show <diffBase>:<file>` against live disk content across the entire changeset.
  * @param {string} qaDir
  * @param {string} diffBase
- * @param {{ activeWaivers?: Array<Record<string, any>>, tsCompiler?: any }} [options]
+ * @param {{ activeWaivers?: Array<Record<string, any>>, tsCompiler?: any, baselineRef?: string | null }} [options]
  * @returns {{ ok: boolean, status: 'pass' | 'fail' | 'blocked', findings: Array<Record<string, any>>, violations: string[] }}
  */
 export function runGitDiffGuard(qaDir, diffBase, options = {}) {
@@ -185,6 +243,14 @@ export function runGitDiffGuard(qaDir, diffBase, options = {}) {
   /** @type {Array<Record<string, any>>} */
   const findings = [];
 
+  const candidateBaselineRef =
+    options.baselineRef !== undefined ? options.baselineRef : readWorkspaceBaselineRef(qaDir);
+  const validBaselineRef =
+    candidateBaselineRef &&
+    execGitSync(gitRoot, ['rev-parse', '--verify', `${candidateBaselineRef}^{commit}`]).status === 0
+      ? candidateBaselineRef
+      : null;
+
   const allChangedRelFromGitRoot = [
     ...changedInfo.changed.map((c) => ({ rel: c.path, status: c.status, oldRel: c.oldPath || c.path })),
     ...changedInfo.untracked.map((p) => ({ rel: p, status: 'U', oldRel: null })),
@@ -198,7 +264,7 @@ export function runGitDiffGuard(qaDir, diffBase, options = {}) {
     }
   })();
 
-  /** @type {Array<{ filePath: string, baseSource: string, headSource: string }>} */
+  /** @type {Array<{ filePath: string, baseSource: string, headSource: string, isBaselineNewSpec?: boolean, baselineTestTitles?: Set<string> | null }>} */
   const specChanges = [];
 
   for (const item of allChangedRelFromGitRoot) {
@@ -214,6 +280,17 @@ export function runGitDiffGuard(qaDir, diffBase, options = {}) {
 
     /** @param {string} key */
     const canWaive = (key) => Boolean(isCoveredByWaiver({ file: relInsideQa, title: key }, activeWaivers, 'diff'));
+
+    // G-08: Prevent hiding an executable spec by moving it outside `tests/` via git mv
+    if (item.status.startsWith('R') && item.oldRel) {
+      const oldRelInsideQa = path.relative(realQaDir, path.join(gitRoot, item.oldRel)).replace(/\\/g, '/');
+      if (/^tests\/.*\.(?:spec|test)\.[jt]s$/i.test(oldRelInsideQa) && !/^tests\//i.test(relInsideQa)) {
+        const msg = `${oldRelInsideQa}: spec moved outside executable tests directory to "${relInsideQa}" (testMatch conservation violation).`;
+        findings.push({ code: 'AITEST-G101', severity: 'error', file: relInsideQa, message: msg });
+        violations.push(`[Healer Diff Guard][AITEST-G101] ${msg}`);
+        continue;
+      }
+    }
 
     // 1. Check protected file path regardless of extension or non-ASCII parent path
     if (isProtectedDiffPath(relInsideQa, cfg.governance?.protected) && !canWaive('protected-file')) {
@@ -231,7 +308,36 @@ export function runGitDiffGuard(qaDir, diffBase, options = {}) {
           : '';
       const headSource =
         fs.existsSync(absPath) && fs.statSync(absPath).isFile() ? fs.readFileSync(absPath, 'utf8') : '';
-      specChanges.push({ filePath: relInsideQa, baseSource, headSource });
+
+      let isBaselineNewSpec = false;
+      /** @type {Set<string> | null} */
+      let baselineTestTitles = null;
+      if (validBaselineRef && /\.(?:spec|test)\.[jt]s$/i.test(relInsideQa)) {
+        const baselineLookupRel = item.oldRel || item.rel;
+        const baselineContent = getFileAtGitRef(gitRoot, validBaselineRef, baselineLookupRel);
+        if (baselineContent === null) {
+          isBaselineNewSpec = true;
+        } else {
+          const baseAstOpts = {
+            assertFunctionNames: cfg.assertFunctionNames,
+            qaDir,
+            wrapInAsyncFn: false,
+            ...('tsCompiler' in options ? { tsCompiler: options.tsCompiler } : {}),
+          };
+          const baselineSum = analyzeSourceAst(relInsideQa, baselineContent, baseAstOpts);
+          if (baselineSum.usedAst && !baselineSum.compilerUnavailable) {
+            baselineTestTitles = new Set((baselineSum.testBlocks || []).map((tb) => tb.title));
+          }
+        }
+      }
+
+      specChanges.push({
+        filePath: relInsideQa,
+        baseSource,
+        headSource,
+        isBaselineNewSpec,
+        baselineTestTitles,
+      });
     }
   }
 
@@ -248,6 +354,39 @@ export function runGitDiffGuard(qaDir, diffBase, options = {}) {
     if (cmp.blocked) blocked = true;
     findings.push(...cmp.findings);
     violations.push(...cmp.violations);
+  }
+
+  // Layer 3 Product-Side Dieselgate Guard (`AITEST-G117`): block test-traffic special-casing outside `qa/`
+  if (isRuleEnabled('AITEST-G117', cfg.rules || {})) {
+    const repoChanged = listChangedFilesUnderDir(gitRoot, diffBase, gitRoot);
+    if (repoChanged.ok) {
+      const repoItems = [
+        ...repoChanged.changed.map((c) => ({ rel: c.path, status: c.status, oldRel: c.oldPath || c.path })),
+        ...repoChanged.untracked.map((p) => ({ rel: p, status: 'U', oldRel: null })),
+      ];
+      for (const item of repoItems) {
+        const normRel = item.rel.replace(/\\/g, '/');
+        if (!/\.(?:ts|tsx|js|jsx|mjs|cjs)$/i.test(normRel)) continue;
+        const absProd = path.join(gitRoot, item.rel);
+        const relFromQa = path.relative(realQaDir, absProd).replace(/\\/g, '/');
+        if (!relFromQa.startsWith('..')) continue;
+        if (/(?:^|\/)(?:qa|test|tests|bench|scripts|reports|knowledge|\.aitest|node_modules)\//i.test(normRel)) continue;
+        if (/\.(?:spec|test)\.[jt]sx?$/i.test(normRel)) continue;
+        if (isCoveredByWaiver({ file: normRel, title: 'AITEST-G117' }, activeWaivers, 'diff')) continue;
+        const baseProd =
+          item.oldRel && item.status !== 'A' && item.status !== 'U'
+            ? getFileAtGitRef(gitRoot, diffBase, item.oldRel) || ''
+            : '';
+        const headProd =
+          fs.existsSync(absProd) && fs.statSync(absProd).isFile() ? fs.readFileSync(absProd, 'utf8') : '';
+        const dgRes = evaluateProductFileAst(normRel, baseProd, headProd, {
+          qaDir,
+          ...('tsCompiler' in options ? { tsCompiler: options.tsCompiler } : {}),
+        });
+        findings.push(...dgRes.findings);
+        violations.push(...dgRes.violations);
+      }
+    }
   }
 
   const unique = [...new Set(violations)];

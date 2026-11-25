@@ -182,6 +182,25 @@ test('Architecture boundary: zero src/scripts -> templates inversions and vendor
     `Vendored template mirror drifted from src/kernel/: drifted=${JSON.stringify(vendorCheck.drifted)}, stale=${JSON.stringify(vendorCheck.stale)}. Run "npm run sync:vendor".`
   );
 
+  // WU-02: bench/** and scripts/** import src/** ONLY via stable public facades (`src/app/index.mjs` or `src/kernel/index.mjs`)
+  const facadeViolations = [];
+  const benchFiles = walkMjs(path.join(REPO_ROOT, 'bench'));
+  for (const file of [...benchFiles, ...scriptFiles]) {
+    const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
+    for (const spec of extractImports(file)) {
+      if (!spec.startsWith('.')) continue;
+      const target = resolveRepoRel(file, spec);
+      if (target.startsWith('src/') && target !== 'src/app/index.mjs' && target !== 'src/kernel/index.mjs') {
+        facadeViolations.push(`${rel} -> ${target}`);
+      }
+    }
+  }
+  assert.deepEqual(
+    facadeViolations,
+    [],
+    `bench/** and scripts/** must import only src/app/index.mjs or src/kernel/index.mjs; violations:\n${facadeViolations.join('\n')}`
+  );
+
   // Enforce ZERO circular imports across the entire src/** module graph (WU-07).
   const srcGraph = new Map();
   for (const file of srcFiles) {
@@ -227,6 +246,17 @@ test('Architecture boundary (WU-06 & WU-07): decomposed domains, MCP tools, and 
   const authLoginText = fs.readFileSync(path.join(REPO_ROOT, 'src', 'auth-login.mjs'), 'utf8');
   assert.equal(authLoginText.includes('mkdtempSync'), false, 'src/auth-login.mjs must not generate temp .mjs scripts');
   assert.equal(authLoginText.includes('node:os'), false, 'src/auth-login.mjs must not write temp scripts into os.tmpdir()');
+
+  // WU-02: Enforce <= 500 LOC ceiling across EVERY module under src/**/*.mjs (zero oversized monoliths)
+  const oversized = [];
+  for (const file of walkMjs(path.join(REPO_ROOT, 'src'))) {
+    const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
+    const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/).length;
+    if (lines > 500) {
+      oversized.push(`${rel} (${lines} lines)`);
+    }
+  }
+  assert.deepEqual(oversized, [], `All src/**/*.mjs modules must stay <= 500 LOC; oversized: ${oversized.join(', ')}`);
 
   // WU-08: Enforce zero TypeScript suppression directives across authoritative src/** modules
   const suppressions = [];

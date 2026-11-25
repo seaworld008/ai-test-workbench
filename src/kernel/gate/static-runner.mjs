@@ -5,7 +5,7 @@ import { isCiEnvironment } from '../../core/outcome.mjs';
 import { buildAssertRegex } from './lattice.mjs';
 import { analyzeSourceAst } from './parser.mjs';
 import { isCoveredByWaiver, loadAitestConfig, validateAssertFunctionNames } from './policy.mjs';
-import { isRuleEnabled } from './rules/index.mjs';
+import { getGateRuleByCode, isRuleEnabled } from './rules/index.mjs';
 import { resolveTypeScriptCompiler } from './ts-loader.mjs';
 
 /** @param {string[]} args @param {string} cwd */
@@ -52,8 +52,18 @@ export function scanSpecFilesFallback(testsDir, options = {}) {
         walk(full);
         continue;
       }
-      if (!/\.(?:spec|test)\.[jt]s$/.test(entry.name)) continue;
       const rel = path.relative(testsDir, full).replace(/\\/g, '/');
+      if (/^(?:[^/]+\/)*[^/]+\.setup\.[jt]s$/.test(rel)) {
+        const rawSetup = fs.readFileSync(full, 'utf8');
+        const strippedSetup = rawSetup.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+        if (/from\s+['"]@playwright\/test['"]/.test(strippedSetup)) {
+          errors.push(
+            `[Static Check] Setup file ${rel} MUST import test/expect from fixtures/base (direct '@playwright/test' import bypasses workbench guards).`
+          );
+        }
+        continue;
+      }
+      if (!/\.(?:spec|test)\.[jt]s$/.test(entry.name)) continue;
       if (rel === 'seed.spec.ts' || entry.name.endsWith('.official.example.ts')) continue;
 
       const raw = fs.readFileSync(full, 'utf8');
@@ -71,12 +81,43 @@ export function scanSpecFilesFallback(testsDir, options = {}) {
 
       if (ts) {
         const astSum = analyzeSourceAst(rel, raw, { assertFunctionNames, qaDir: qaDir || path.dirname(testsDir) });
-        for (const v of astSum.violations) {
-          if (STATIC_SPEC_RULE_CODES.has(v.code) && isRuleEnabled(v.code, rulesConfig)) {
-            const covered = isCoveredByWaiver({ file: rel, title: v.snippet || v.code }, activeWaivers, 'spec');
-            if (!covered) {
-              errors.push(`[Static Check][${v.code}] ${v.message}`);
-            }
+        const emptyBaseSum = {
+          file: rel,
+          usedAst: true,
+          compilerUnavailable: false,
+          assertions: [],
+          customAssertCalls: 0,
+          semanticLocators: 0,
+          genericLocators: 0,
+          successStatuses: 0,
+          serverErrorStatuses: 0,
+          criticalTags: [],
+          testBlocks: [],
+          events: {
+            configTamper: [], tautologies: [], skips: [], softAssertions: [], swallowedCatches: [],
+            forceTrue: [], timeoutOrRetry: [], conditionalAssertions: [], emptyHelpers: [], routeFulfills: [],
+          },
+          violations: [],
+        };
+        const canWaive = (/** @type {string} */ key) =>
+          Boolean(isCoveredByWaiver({ file: rel, title: key }, activeWaivers, 'spec'));
+        for (const code of STATIC_SPEC_RULE_CODES) {
+          if (!isRuleEnabled(code, rulesConfig)) continue;
+          const rule = getGateRuleByCode(code);
+          if (!rule) continue;
+          const ruleFindings = rule.evaluate({
+            file: rel,
+            baseSum: emptyBaseSum,
+            headSum: astSum,
+            baseSource: '',
+            headSource: raw,
+            assertFunctionNames,
+            canWaive,
+            rulesConfig,
+            isDiffTextMode: false,
+          });
+          for (const f of ruleFindings) {
+            errors.push(`[Static Check][${f.code}] ${f.message}`);
           }
         }
         const hasTestCall = /\b(?:test|it)\s*\(/.test(stripped);
@@ -122,7 +163,11 @@ export function runStaticSpecChecks(qaDir, options = {}) {
   const cfg = loadAitestConfig(qaDir);
   const activeWaivers = options.activeWaivers || [];
   const requireCompilers =
-    options.requireCompilers !== undefined ? Boolean(options.requireCompilers) : isCiEnvironment(options.env);
+    options.requireCompilers !== undefined
+      ? Boolean(options.requireCompilers)
+      : isCiEnvironment(options.env) ||
+        (fs.existsSync(path.join(qaDir, '.aitest', 'governance.lock')) &&
+          fs.existsSync(path.join(qaDir, 'node_modules')));
   const errors = [...validateAssertFunctionNames(cfg.assertFunctionNames)];
   /** @type {string[]} */
   const warnings = [];

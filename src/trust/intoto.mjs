@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { WORKBENCH_VERSION } from '../core/version.mjs';
-import { canonicalizeJson, sha256Hex, signPayloadT1 } from '../kernel/gate-kernel.mjs';
+import { canonicalizeJson, openTrustContext, sha256Hex, signPayloadT1 } from '../kernel/gate-kernel.mjs';
 
 export const INTOTO_STATEMENT_TYPE = 'https://in-toto.io/Statement/v1';
 export const VERDICT_PREDICATE_TYPE = 'https://github.com/seaworld008/ai-test-workbench/verdict/v1';
@@ -185,17 +185,19 @@ export function buildInTotoVerdictAttestation(params) {
   };
 
   const statementDigest = `sha256:${sha256Hex(canonicalizeJson(statementCore))}`;
+  const trustContext = openTrustContext({ qaDir, repoDir, createKeyIfMissing: true });
   const macRes = signPayloadT1('verdict.attestation', { ...statementCore, statementDigest }, {
     qaDir,
     repoDir,
     createIfMissing: true,
+    trustContext,
   });
 
   return {
     ...statementCore,
     statementDigest,
     attestationDigest: statementDigest,
-    ...(macRes.signed ? { mac: macRes.mac } : {}),
+    ...(macRes.signed ? { mac: macRes.mac, macKeyId: macRes.keyId } : {}),
   };
 }
 

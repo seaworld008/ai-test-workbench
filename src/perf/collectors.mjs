@@ -5,6 +5,7 @@ import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 import { resolvePlaywrightPackage } from '../core/playwright-resolve.mjs';
 import { detectEnvelopeBusinessError, redactEndpointUrl } from '../explore/safety.mjs';
+import { computeNextRedirectRequest, MAX_REDIRECT_HOPS, REDIRECT_STATUSES } from '../kernel/target-redirect.mjs';
 import { checkOutgoingRequestSafety } from '../origin-guard.mjs';
 import { computeLatencyPercentiles, medianOfNullable, p75OfNullable } from './budget.mjs';
 
@@ -50,15 +51,66 @@ export async function runBrowserPerfProfile(qaDir, baseURL, routes, options = {}
     if (guardCfg) {
       await context.route('**/*', async (/** @type {any} */ route) => {
         const req = route.request();
-        const check = checkOutgoingRequestSafety(req.method(), req.url(), {
+        let curMethod = req.method().toUpperCase();
+        let curUrl = req.url();
+        let curHeaders = { ...req.headers() };
+        const initCheck = checkOutgoingRequestSafety(curMethod, curUrl, {
           ...guardCfg,
           strictReadonly: true,
         });
-        if (check.blocked) {
+        if (initCheck.blocked) {
           await route.abort('blockedbyclient');
           return;
         }
-        await route.continue();
+        if (!/^https?:/i.test(curUrl)) {
+          await route.continue();
+          return;
+        }
+        try {
+          for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop += 1) {
+            const res =
+              hop === 0
+                ? await route.fetch({ maxRedirects: 0, headers: curHeaders })
+                : await context.request.fetch(curUrl, {
+                    method: curMethod,
+                    headers: curHeaders,
+                    maxRedirects: 0,
+                  });
+            const status = res.status();
+            const location = res.headers()?.location;
+            if (REDIRECT_STATUSES.has(status) && location) {
+              if (hop >= MAX_REDIRECT_HOPS) {
+                await route.abort('blockedbyclient');
+                return;
+              }
+              const next = computeNextRedirectRequest(curMethod, status, location, curUrl, curHeaders);
+              const hopCheck = checkOutgoingRequestSafety(next.method, next.url, {
+                ...guardCfg,
+                strictReadonly: true,
+              });
+              if (hopCheck.blocked) {
+                await route.abort('blockedbyclient');
+                return;
+              }
+              curMethod = next.method;
+              curUrl = next.url;
+              curHeaders = next.headers;
+              continue;
+            }
+            if (hop === 0) {
+              await route.fulfill({ response: res });
+            } else {
+              await route.fulfill({ status, headers: res.headers(), body: await res.body() });
+            }
+            return;
+          }
+        } catch {
+          try {
+            await route.abort('failed');
+          } catch {
+            // ignore on closed browser
+          }
+        }
       });
     }
 
@@ -277,14 +329,46 @@ export async function runBrowserPerfProfile(qaDir, baseURL, routes, options = {}
   return metricsList;
 }
 
-/** @param {string} endpointUrl @param {number} concurrency @param {number} iterations */
-export async function runReadOnlyApiBenchmark(endpointUrl, concurrency, iterations) {
+/**
+ * @param {string} endpointUrl
+ * @param {number} concurrency
+ * @param {number} iterations
+ * @param {Record<string, any>} [guardConfig]
+ */
+export async function runReadOnlyApiBenchmark(endpointUrl, concurrency, iterations, guardConfig = {}) {
   /** @type {number[]} */
   const latencies = [];
   let errors = 0;
   let envelopeErrors = 0;
   let issued = 0;
   const wallStart = performance.now();
+
+  const fetchValidated = async (/** @type {string} */ startUrl) => {
+    let curMethod = 'GET';
+    let curUrl = startUrl;
+    for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop += 1) {
+      const check = checkOutgoingRequestSafety(curMethod, curUrl, {
+        ...guardConfig,
+        strictReadonly: true,
+      });
+      if (check.blocked) {
+        throw new Error(`[AI Test Workbench Perf Guard] ${check.reason}`);
+      }
+      const res = await fetch(curUrl, { method: curMethod, redirect: 'manual' });
+      const location = res.headers.get('location');
+      if (REDIRECT_STATUSES.has(res.status) && location) {
+        if (hop >= MAX_REDIRECT_HOPS) {
+          throw new Error(`[AI Test Workbench Perf Guard] Exceeded ${MAX_REDIRECT_HOPS} redirect hops`);
+        }
+        const next = computeNextRedirectRequest(curMethod, res.status, location, curUrl, {});
+        curMethod = next.method;
+        curUrl = next.url;
+        continue;
+      }
+      return res;
+    }
+    throw new Error(`[AI Test Workbench Perf Guard] Exceeded ${MAX_REDIRECT_HOPS} redirect hops`);
+  };
 
   const worker = async () => {
     while (issued < iterations) {
@@ -293,7 +377,7 @@ export async function runReadOnlyApiBenchmark(endpointUrl, concurrency, iteratio
       if (myIdx >= iterations) break;
       const t0 = performance.now();
       try {
-        const res = await fetch(endpointUrl, { method: 'GET', redirect: 'follow' });
+        const res = await fetchValidated(endpointUrl);
         const contentType = String(res.headers.get('content-type') || '');
         let parsedJson = null;
         if (/application\/json/i.test(contentType)) {

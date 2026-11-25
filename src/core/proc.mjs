@@ -32,12 +32,51 @@ const execFileAsync = promisify(execFile);
  */
 
 /**
- * Terminates a child process and its entire descendant tree cleanly across Windows & POSIX.
+ * Sends a signal to an OS process or POSIX process group.
+ * @param {number} pid
+ * @param {NodeJS.Signals | number} signal
+ */
+function signalProcessOrGroup(pid, signal) {
+  if (process.platform === 'win32') return false;
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch {
+    try {
+      process.kill(pid, signal);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/**
+ * Checks whether a process or POSIX process group is still alive.
+ * @param {number} pid
+ * @returns {boolean}
+ */
+export function isPidAlive(pid) {
+  if (!pid || typeof pid !== 'number') return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    const code = err && typeof err === 'object' && 'code' in err ? err.code : undefined;
+    return code === 'EPERM';
+  }
+}
+
+/**
+ * Terminates a child process and its entire descendant tree across Windows & POSIX.
+ * On POSIX, sends `SIGTERM` and schedules a 5-second `SIGKILL` escalation fallback.
  * @param {number | undefined} pid
+ * @param {{ graceMs?: number }} [options]
  * @returns {void}
  */
-export function killProcessTree(pid) {
+export function killProcessTree(pid, options = {}) {
   if (!pid || typeof pid !== 'number') return;
+  const graceMs = options.graceMs ?? 5000;
   try {
     if (process.platform === 'win32') {
       spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
@@ -45,15 +84,46 @@ export function killProcessTree(pid) {
         windowsHide: true,
         stdio: 'ignore',
       });
-    } else {
-      try {
-        process.kill(-pid, 'SIGTERM');
-      } catch {
-        process.kill(pid, 'SIGTERM');
-      }
+      return;
+    }
+    if (signalProcessOrGroup(pid, 'SIGTERM') && graceMs > 0) {
+      const killer = setTimeout(() => {
+        if (isPidAlive(pid)) {
+          signalProcessOrGroup(pid, 'SIGKILL');
+        }
+      }, graceMs);
+      if (typeof killer.unref === 'function') killer.unref();
     }
   } catch {
     // process already exited
+  }
+}
+
+/**
+ * Terminates a child process tree and awaits actual OS process termination (`SIGTERM -> graceMs -> SIGKILL`).
+ * @param {number | undefined} pid
+ * @param {{ graceMs?: number }} [options]
+ * @returns {Promise<void>}
+ */
+export async function killProcessTreeAsync(pid, options = {}) {
+  if (!pid || typeof pid !== 'number') return;
+  const graceMs = options.graceMs ?? 5000;
+  if (process.platform === 'win32') {
+    killProcessTree(pid, options);
+    return;
+  }
+  signalProcessOrGroup(pid, 'SIGTERM');
+  const deadline = Date.now() + graceMs;
+  while (Date.now() < deadline) {
+    if (!isPidAlive(pid)) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  if (isPidAlive(pid)) {
+    signalProcessOrGroup(pid, 'SIGKILL');
+    const killDeadline = Date.now() + 1000;
+    while (Date.now() < killDeadline && isPidAlive(pid)) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
   }
 }
 

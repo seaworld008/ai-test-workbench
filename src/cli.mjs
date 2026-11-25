@@ -2,6 +2,7 @@
 import { parseArgs } from 'node:util';
 import { CLI_COMMANDS, CLI_COMMAND_NAMES } from './cli/commands.mjs';
 import { detectLang, t } from './core/i18n.mjs';
+import { EXIT_CODES, buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import { WORKBENCH_VERSION } from './core/version.mjs';
 
 export { CLI_COMMANDS, CLI_COMMAND_NAMES };
@@ -56,6 +57,7 @@ function printHelp(lang) {
   console.log('  --reason <text>         Approval reason for "governance approve"');
   console.log('  --json                  Output machine-readable JSON');
   console.log('  --lang <zh|en>          Override output language');
+  console.log('  -V, --version           Print workbench version');
   console.log('  -h, --help              Show help (or `<command> --help` for per-command flags)\n');
 }
 
@@ -81,7 +83,10 @@ function locateSubcommand(argv) {
     const tok = argv[i];
     if (tok === '--') break;
     if (tok === '-h' || tok === '--help') {
-      return { cmd: null, cmdIndex: -1, helpRequested: true, langHint };
+      return { cmd: null, cmdIndex: -1, helpRequested: true, versionRequested: false, langHint };
+    }
+    if (tok === '-V' || tok === '--version') {
+      return { cmd: null, cmdIndex: -1, helpRequested: false, versionRequested: true, langHint };
     }
     if (tok === '--lang' && i + 1 < argv.length) {
       langHint = argv[i + 1];
@@ -95,20 +100,74 @@ function locateSubcommand(argv) {
     if (tok.startsWith('-')) {
       continue;
     }
-    return { cmd: tok, cmdIndex: i, helpRequested: false, langHint };
+    return { cmd: tok, cmdIndex: i, helpRequested: false, versionRequested: false, langHint };
   }
-  return { cmd: null, cmdIndex: -1, helpRequested: false, langHint };
+  return { cmd: null, cmdIndex: -1, helpRequested: false, versionRequested: false, langHint };
+}
+
+/**
+ * Emits a standardized exit-64 usage envelope (for CLI `--json` & `AITEST_RESULT_FILE`) and stderr notice.
+ * @param {string} tool
+ * @param {string} message
+ * @param {boolean} asJson
+ * @param {string[]} [recoverySteps]
+ * @returns {number}
+ */
+function failUsage(tool, message, asJson, recoverySteps = ['Run "aitw --help" to see valid commands and flags.']) {
+  const envelope = buildCommandResult({
+    tool,
+    outcome: 'usage',
+    ok: false,
+    exitCode: EXIT_CODES.USAGE,
+    summary: message,
+    recoverable: true,
+    blockerKind: 'USAGE_ERROR',
+    recoverySteps,
+    data: { error: message },
+    nextRecommendedActions: recoverySteps,
+  });
+  if (!asJson) {
+    console.error(message);
+  }
+  return emitCommandResult(envelope, { asJson, compatSpreadData: false });
 }
 
 export async function runCli(argv = process.argv.slice(2)) {
+  const asJson = argv.includes('--json');
   const located = locateSubcommand(argv);
   const preLang = detectLang(located.langHint);
 
+  if (located.versionRequested) {
+    const verEnv = buildCommandResult({
+      tool: 'version',
+      outcome: 'pass',
+      ok: true,
+      exitCode: EXIT_CODES.PASS,
+      summary: `ai-test-workbench ${WORKBENCH_VERSION}`,
+      data: { name: 'ai-test-workbench', version: WORKBENCH_VERSION },
+    });
+    if (!asJson) {
+      console.log(WORKBENCH_VERSION);
+    }
+    return emitCommandResult(verEnv, { asJson });
+  }
+
   if (located.helpRequested || !located.cmd) {
-    if (!located.helpRequested && argv.length > 0) {
-      // Unknown leading flag before any command (e.g. `aitw --bogus`)
-      console.error(`[CLI Option Error] Unknown option '${argv[0]}'. Run --help for usage.`);
-      return 1;
+    if (!located.helpRequested && argv.some((tok) => tok !== '--json')) {
+      return failUsage('cli', `[CLI Option Error] Unknown option '${argv[0]}'. Run --help for usage.`, asJson);
+    }
+    if (asJson) {
+      return emitCommandResult(
+        buildCommandResult({
+          tool: 'help',
+          outcome: 'pass',
+          ok: true,
+          exitCode: EXIT_CODES.PASS,
+          summary: `ai-test-workbench v${WORKBENCH_VERSION} CLI commands`,
+          data: { version: WORKBENCH_VERSION, commands: CLI_COMMAND_NAMES },
+        }),
+        { asJson: true }
+      );
     }
     printHelp(preLang);
     return 0;
@@ -118,8 +177,8 @@ export async function runCli(argv = process.argv.slice(2)) {
   const spec = CLI_COMMANDS[cmd];
   if (!spec) {
     const hint = suggestClosest(cmd, CLI_COMMAND_NAMES);
-    console.error(`${t(preLang, 'unknownCmd', cmd)}${hint ? ` Did you mean "${hint}"?` : ''}`);
-    return 1;
+    const msg = `${t(preLang, 'unknownCmd', cmd)}${hint ? ` Did you mean "${hint}"?` : ''}`;
+    return failUsage(cmd, msg, asJson, hint ? [`Try "aitw ${hint} --help".`] : undefined);
   }
 
   const cmdArgv = [...argv.slice(0, located.cmdIndex), ...argv.slice(located.cmdIndex + 1)];
@@ -135,16 +194,12 @@ export async function runCli(argv = process.argv.slice(2)) {
   } catch (err) {
     const rawMsg = err instanceof Error && err.message ? err.message : String(err);
     const unkMatch = /Unknown option '([^']+)'/.exec(rawMsg);
-    if (unkMatch) {
-      const allowedFlags = Object.keys(spec.options).filter((k) => !(spec.deprecatedAliases && k in spec.deprecatedAliases));
-      const hint = suggestClosest(unkMatch[1], allowedFlags, '--');
-      console.error(
-        `[CLI Option Error] ${rawMsg} for command "${cmd}".${hint ? ` Did you mean "${hint}"?` : ''} Run "aitw ${cmd} --help" for allowed flags.`
-      );
-    } else {
-      console.error(`[CLI Option Error] ${rawMsg}`);
-    }
-    return 1;
+    const allowedFlags = Object.keys(spec.options).filter((k) => !(spec.deprecatedAliases && k in spec.deprecatedAliases));
+    const hint = unkMatch ? suggestClosest(unkMatch[1], allowedFlags, '--') : null;
+    const msg = unkMatch
+      ? `[CLI Option Error] ${rawMsg} for command "${cmd}".${hint ? ` Did you mean "${hint}"?` : ''} Run "aitw ${cmd} --help" for allowed flags.`
+      : `[CLI Option Error] ${rawMsg}`;
+    return failUsage(cmd, msg, asJson, [`Run "aitw ${cmd} --help" for allowed flags.`]);
   }
 
   const v = parsed.values;
@@ -153,6 +208,11 @@ export async function runCli(argv = process.argv.slice(2)) {
   if (v.help) {
     printCommandHelp(cmd, spec, lang);
     return 0;
+  }
+
+  if (spec.requireTarget && !v.target) {
+    const msg = lang === 'zh' ? `命令 "${cmd}" 缺少必填参数 --target <path>` : `Command "${cmd}" missing mandatory --target <path>`;
+    return failUsage(cmd, msg, Boolean(v.json), [`Pass --target <repo-or-qa-path> to "aitw ${cmd}".`]);
   }
 
   if (spec.deprecatedAliases) {
@@ -168,7 +228,18 @@ export async function runCli(argv = process.argv.slice(2)) {
   try {
     return await spec.run(v, parsed.positionals, lang);
   } catch (err) {
-    console.error(`[Error] ${err instanceof Error && err.message ? err.message : String(err)}`);
-    return 1;
+    const msg = err instanceof Error && err.message ? err.message : String(err);
+    if (!v.json) console.error(`[Error] ${msg}`);
+    return emitCommandResult(
+      buildCommandResult({
+        tool: cmd,
+        outcome: 'fail',
+        ok: false,
+        exitCode: EXIT_CODES.FAIL,
+        summary: msg,
+        data: { error: msg },
+      }),
+      { asJson: Boolean(v.json), compatSpreadData: false }
+    );
   }
 }

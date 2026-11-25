@@ -16,6 +16,15 @@ export {
 } from './gate/engine.mjs';
 
 export {
+  computeKeyId,
+  getStickyMarkerPath,
+  isHostT1Sticky,
+  openTrustContext,
+  recordHostT1Sticky,
+  resolveDefaultHmacKeyFilePath,
+} from './gate/trust-context.mjs';
+
+export {
   HMAC_PREFIX,
   canonicalizeJson,
   computeDomainHmac,
@@ -27,7 +36,6 @@ export {
 } from './gate/trust-hmac.mjs';
 
 export {
-  computeWorkspaceInputHash,
   execGitSync,
   getFileAtGitRef,
   listChangedFilesUnderDir,
@@ -37,9 +45,12 @@ export {
   resolveGitIdentity,
   resolveGitRoot,
   resolveGitTreeSha,
-  sha256Hex,
   unquoteGitPath,
 } from './gate/git-utils.mjs';
+export {
+  computeWorkspaceInputHash,
+  sha256Hex,
+} from './gate/workspace-hash.mjs';
 
 export {
   BOT_APPROVER_RE,
@@ -47,6 +58,7 @@ export {
   PROTECTED_GOVERNANCE_REL_FILES,
   compilePolicyGlob,
   computeProtectedFileHashes,
+  isBotApprover,
   isCoveredByWaiver,
   isInitializedQaWorkspace,
   isProtectedDiffPath,

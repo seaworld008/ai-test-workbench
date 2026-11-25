@@ -12,12 +12,16 @@ import {
   type Page,
 } from '@playwright/test';
 import {
+  MAX_REDIRECT_HOPS,
+  REDIRECT_STATUSES,
   checkOutgoingRequestSafety,
   compileBlockedEndpointRules,
+  computeNextRedirectRequest,
   DEFAULT_BLOCKED_ENDPOINTS,
   DEFAULT_SAFE_WRITE_PATHS,
   parseCsvList,
   parseLowerCsvList,
+  resolveDefaultMutationPolicy,
 } from '../../support/target-guard.mjs';
 import {
   extractOpenApiResponseSchema,
@@ -59,13 +63,8 @@ function buildRequestGuardConfig(baseURL: string | undefined) {
   const blockedRules = compileBlockedEndpointRules(
     process.env.TEST_BLOCKED_ENDPOINTS ?? DEFAULT_BLOCKED_ENDPOINTS
   );
-  const allowMutation =
-    process.env.TEST_ALLOW_MUTATION === '1' || process.env.TEST_ALLOW_MUTATION === 'true';
-  // Default strict-readonly ON whenever TEST_ALLOW_MUTATION is disabled unless explicitly overridden (`E-01`)
-  const strictReadonly =
-    process.env.TEST_STRICT_READONLY !== undefined && process.env.TEST_STRICT_READONLY !== ''
-      ? process.env.TEST_STRICT_READONLY === '1' || process.env.TEST_STRICT_READONLY === 'true'
-      : !allowMutation;
+  const mutationPolicy = resolveDefaultMutationPolicy(process.env as Record<string, string | undefined>, baseURL);
+  const strictReadonly = mutationPolicy.strictReadonly;
   const safeWritePaths = parseCsvList(
     process.env.TEST_SAFE_WRITE_PATHS ?? DEFAULT_SAFE_WRITE_PATHS
   );
@@ -111,31 +110,70 @@ function wrapApiRequestContext(
 
       return async (urlOrReq: string | { url(): string; method(): string }, options?: Record<string, unknown>) => {
         const rawUrl = typeof urlOrReq === 'string' ? urlOrReq : urlOrReq.url();
-        const method =
+        const initialMethod =
           prop === 'fetch'
-            ? String(options?.method || (typeof urlOrReq === 'string' ? 'GET' : urlOrReq.method()) || 'GET')
+            ? String(options?.method || (typeof urlOrReq === 'string' ? 'GET' : urlOrReq.method()) || 'GET').toUpperCase()
             : prop.toUpperCase();
-        const postData = serializeBodyOption(options?.data);
-
-        const check = checkOutgoingRequestSafety(method, rawUrl, { ...guardConfig, postData });
-        if (check.blocked) {
-          throw new Error(`[AI Test Workbench Request Guard] ${check.reason}`);
+        const initialHeaders: Record<string, string> = {
+          ...((options?.headers as Record<string, string> | undefined) || {}),
+        };
+        if (traceparentValue && !initialHeaders.traceparent && !initialHeaders.Traceparent) {
+          initialHeaders.traceparent = traceparentValue;
         }
 
-        let nextOptions = options;
-        if (traceparentValue) {
-          const existingHeaders = (options?.headers as Record<string, string> | undefined) || {};
-          if (!existingHeaders.traceparent && !existingHeaders.Traceparent) {
-            nextOptions = {
-              ...(options || {}),
-              headers: {
-                ...existingHeaders,
-                traceparent: traceparentValue,
-              },
-            };
+        let curMethod = initialMethod;
+        let curUrl = rawUrl;
+        let curHeaders = initialHeaders;
+        let curData: unknown = options?.data;
+        let curBodyText = serializeBodyOption(curData);
+
+        const initCheck = checkOutgoingRequestSafety(curMethod, curUrl, { ...guardConfig, postData: curBodyText });
+        if (initCheck.blocked) {
+          throw new Error(`[AI Test Workbench Request Guard] ${initCheck.reason}`);
+        }
+
+        const firstOptions: Record<string, unknown> = {
+          ...(options || {}),
+          headers: curHeaders,
+          maxRedirects: 0,
+        };
+        let response: APIResponse = await orig.call(target, urlOrReq, firstOptions);
+
+        for (let hop = 0; hop < MAX_REDIRECT_HOPS; hop += 1) {
+          const status = response.status();
+          const location = response.headers()?.location;
+          if (!REDIRECT_STATUSES.has(status) || !location) {
+            return response;
           }
+          const resolvedBase = new URL(curUrl, guardConfig.baseURL || 'http://localhost').toString();
+          const next = computeNextRedirectRequest(curMethod, status, location, resolvedBase, curHeaders);
+          curMethod = next.method;
+          curUrl = next.url;
+          curHeaders = next.headers;
+          if (next.dropBody) {
+            curData = undefined;
+            curBodyText = null;
+          }
+          const hopCheck = checkOutgoingRequestSafety(curMethod, curUrl, {
+            ...guardConfig,
+            postData: curBodyText,
+          });
+          if (hopCheck.blocked) {
+            throw new Error(`[AI Test Workbench Request Guard] Redirect hop blocked: ${hopCheck.reason}`);
+          }
+          response = await target.fetch(curUrl, {
+            method: curMethod,
+            headers: curHeaders,
+            ...(curData !== undefined ? { data: curData } : {}),
+            maxRedirects: 0,
+          });
         }
-        return orig.call(target, urlOrReq, nextOptions);
+
+        const finalStatus = response.status();
+        if (REDIRECT_STATUSES.has(finalStatus) && response.headers()?.location) {
+          throw new Error(`[AI Test Workbench Request Guard] Redirect chain exceeded ${MAX_REDIRECT_HOPS} hops`);
+        }
+        return response;
       };
     },
   });
@@ -333,6 +371,7 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
       };
 
       // Guard ALL pages/frames/popups in BrowserContext (`E-03`)
+      const rawContextRequest = context.request;
       guardRequestPropertyOnObject(context, guardConfig, trace.traceparent);
       attachPageRuntimeGuards(page);
       context.on('page', (popupPage) => {
@@ -352,30 +391,87 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
         });
       }
 
-      // Guard ALL HTTP(S) requests in BrowserContext + actively inject W3C `traceparent` (`D-02`, `S-03`)
+      // Guard ALL HTTP(S) requests & redirect hops in BrowserContext + inject W3C `traceparent` (`D-02`, `S-03`, `WU-03`)
       await context.route('**/*', async (route) => {
         const req = route.request();
-        const check = checkOutgoingRequestSafety(req.method(), req.url(), {
+        let curMethod = req.method().toUpperCase();
+        let curUrl = req.url();
+        let curBody: string | Buffer | null = req.postDataBuffer() ?? req.postData() ?? null;
+        let curBodyText = req.postData() || null;
+        let curHeaders: Record<string, string> = { ...req.headers() };
+        if (!curHeaders.traceparent) {
+          curHeaders.traceparent = trace.traceparent;
+        }
+
+        const initCheck = checkOutgoingRequestSafety(curMethod, curUrl, {
           ...guardConfig,
-          postData: req.postData() || null,
+          postData: curBodyText,
         });
-        if (check.blocked && check.reason) {
-          blockedRequests.push(check.reason);
+        if (initCheck.blocked && initCheck.reason) {
+          blockedRequests.push(initCheck.reason);
           await route.abort('blockedbyclient');
           return;
         }
 
-        const existingHeaders = req.headers();
-        if (!existingHeaders.traceparent) {
-          await route.continue({
-            headers: {
-              ...existingHeaders,
-              traceparent: trace.traceparent,
-            },
-          });
+        if (!/^https?:/i.test(curUrl)) {
+          await route.continue({ headers: curHeaders });
           return;
         }
-        await route.continue();
+
+        try {
+          for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop += 1) {
+            const res =
+              hop === 0
+                ? await route.fetch({ maxRedirects: 0, headers: curHeaders })
+                : await rawContextRequest.fetch(curUrl, {
+                    method: curMethod,
+                    headers: curHeaders,
+                    ...(curBody !== null && curBody !== undefined ? { data: curBody } : {}),
+                    maxRedirects: 0,
+                  });
+            const status = res.status();
+            const location = res.headers()?.location;
+            if (REDIRECT_STATUSES.has(status) && location) {
+              if (hop >= MAX_REDIRECT_HOPS) {
+                blockedRequests.push(`Blocked redirect loop exceeding ${MAX_REDIRECT_HOPS} hops (${curUrl})`);
+                await route.abort('blockedbyclient');
+                return;
+              }
+              const next = computeNextRedirectRequest(curMethod, status, location, curUrl, curHeaders);
+              const hopBodyText = next.dropBody ? null : curBodyText;
+              const hopCheck = checkOutgoingRequestSafety(next.method, next.url, {
+                ...guardConfig,
+                postData: hopBodyText,
+              });
+              if (hopCheck.blocked && hopCheck.reason) {
+                blockedRequests.push(hopCheck.reason);
+                await route.abort('blockedbyclient');
+                return;
+              }
+              curMethod = next.method;
+              curUrl = next.url;
+              curHeaders = next.headers;
+              if (next.dropBody) {
+                curBody = null;
+                curBodyText = null;
+              }
+              continue;
+            }
+            if (hop === 0) {
+              await route.fulfill({ response: res });
+            } else {
+              const bodyBuf = await res.body();
+              await route.fulfill({ status, headers: res.headers(), body: bodyBuf });
+            }
+            return;
+          }
+        } catch {
+          try {
+            await route.abort('failed');
+          } catch {
+            // route or browser closed
+          }
+        }
       });
 
       await use();

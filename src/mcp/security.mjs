@@ -175,6 +175,113 @@ export function isLoopbackHost(host) {
 }
 
 /**
+ * Validates HTTP `Host` header against exact `host:port` (or canonical loopback hostnames at listening port)
+ * to prevent DNS Rebinding against `GET /sse` and `/mcp` (`WU-03`).
+ * @param {string | string[] | undefined | null} hostHeader
+ * @param {string} bindHost
+ * @param {number | null | undefined} listenPort
+ * @param {string[]} [extraHosts]
+ * @returns {boolean}
+ */
+export function isAllowedHttpHost(hostHeader, bindHost, listenPort, extraHosts = []) {
+  if (!hostHeader || Array.isArray(hostHeader)) return false;
+  const raw = String(hostHeader).trim().toLowerCase();
+  if (!raw || /[/\s@\\]/.test(raw)) return false;
+
+  const port = listenPort && Number.isInteger(listenPort) && listenPort > 0 ? listenPort : null;
+  const configuredExtra = [
+    ...extraHosts,
+    ...String(process.env.AITEST_MCP_ALLOWED_HOSTS || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  ].map((h) => h.toLowerCase());
+
+  if (configuredExtra.includes(raw)) return true;
+
+  if (isLoopbackHost(bindHost)) {
+    const loopbackBases = ['127.0.0.1', 'localhost', '[::1]'];
+    if (port) {
+      if (loopbackBases.some((b) => raw === `${b}:${port}`)) return true;
+      if ((port === 80 || port === 443) && loopbackBases.includes(raw)) return true;
+      return false;
+    }
+    return loopbackBases.some((b) => raw === b || raw.startsWith(`${b}:`));
+  }
+
+  const normalizedBind = String(bindHost || '').toLowerCase();
+  if (port) {
+    return raw === `${normalizedBind}:${port}` || ((port === 80 || port === 443) && raw === normalizedBind);
+  }
+  return raw === normalizedBind || raw.startsWith(`${normalizedBind}:`);
+}
+
+/**
+ * Enforces `application/json` media type on POST requests (`WU-03`, `415 Unsupported Media Type`).
+ * @param {string | string[] | undefined | null} contentTypeHeader
+ * @returns {boolean}
+ */
+export function hasJsonContentType(contentTypeHeader) {
+  if (!contentTypeHeader || Array.isArray(contentTypeHeader)) return false;
+  const mime = String(contentTypeHeader).split(';')[0].trim().toLowerCase();
+  return mime === 'application/json' || mime.endsWith('+json');
+}
+
+/**
+ * Strips host filesystem absolute paths before sending HTTP transport errors back to clients.
+ * @param {string} msg
+ * @returns {string}
+ */
+export function sanitizeHttpErrorMessage(msg) {
+  return String(msg || '')
+    .replace(/\b[A-Za-z]:\\[^\s"'`,;)]+/g, '<HOST_PATH>')
+    .replace(/\/(?:Users|home|tmp|var|etc|opt|srv|root)\/[^\s"'`,;)]+/g, '<HOST_PATH>');
+}
+
+/**
+ * Reads an HTTP request body up to `maxBytes` (`M-09`).
+ * @param {import('node:http').IncomingMessage} req
+ * @param {number} [maxBytes]
+ * @returns {Promise<string>}
+ */
+export function readHttpBody(req, maxBytes = 2 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    /** @type {Buffer[]} */
+    const chunks = [];
+    req.on('data', (/** @type {Buffer} */ chunk) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        reject(new Error('Request body too large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', reject);
+  });
+}
+
+/**
+ * Writes a JSON HTTP response safely.
+ * @param {import('node:http').ServerResponse} res
+ * @param {number} status
+ * @param {unknown} body
+ * @param {Record<string, string>} [extraHeaders]
+ */
+export function sendHttpJson(res, status, body, extraHeaders = {}) {
+  if (res.writableEnded) return;
+  const payload = JSON.stringify(body);
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    ...extraHeaders,
+  });
+  res.end(payload);
+}
+
+/**
  * Constant-time Bearer token check via SHA-256 digest (`M-09`).
  * @param {string | string[] | null | undefined} authHeader
  * @param {string} expectedToken
@@ -192,6 +299,7 @@ export function isAllowedHttpOrigin(originHeader, extraOrigins = []) {
   if (!originHeader) return true;
   try {
     const parsed = new URL(originHeader);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
     const hostname = parsed.hostname.toLowerCase();
     if (['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname)) return true;
     const configured = [
@@ -201,10 +309,7 @@ export function isAllowedHttpOrigin(originHeader, extraOrigins = []) {
         .map((s) => s.trim())
         .filter(Boolean),
     ];
-    return configured.some((allowed) => {
-      const normalized = allowed.toLowerCase();
-      return parsed.origin.toLowerCase() === normalized || hostname === normalized;
-    });
+    return configured.some((allowed) => parsed.origin.toLowerCase() === allowed.toLowerCase());
   } catch {
     return false;
   }

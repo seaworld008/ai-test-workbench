@@ -128,8 +128,8 @@ export const MCP_PRESETS = {
     description:
       'MySQL read-only inspection (INSERT/UPDATE/DELETE disabled; MUST also enforce SELECT-only DB user)',
     command: 'npx',
-    args: ['-y', '@benborla29/mcp-server-mysql@1.0.41'],
-    pinnedVersion: '1.0.41',
+    args: ['-y', '@benborla29/mcp-server-mysql@2.0.9'],
+    pinnedVersion: '2.0.9',
     riskLevel: 'read',
     readonly: true,
     env: {
@@ -181,8 +181,8 @@ export const MCP_PRESETS = {
     pillar: 'api-contract',
     description: 'OpenAPI / Swagger live schema reader for automated contract drift detection',
     command: 'npx',
-    args: ['-y', 'openapi-mcp-server@1.2.0', '${OPENAPI_SPEC_URL}'],
-    pinnedVersion: '1.2.0',
+    args: ['-y', 'openapi-mcp-server@2.1.0', '${OPENAPI_SPEC_URL}'],
+    pinnedVersion: '2.1.0',
     riskLevel: 'read',
     readonly: true,
     envTemplate: {

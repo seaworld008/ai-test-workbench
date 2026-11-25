@@ -6,9 +6,9 @@ export const STATEFUL_TOOLS = [
   {
     name: 'aitest_heal',
     category: 'stateful',
-    title: 'Stateful A/B/C/D Heal Governance State Machine (begin | attempt | conclude)',
+    title: 'Stateful A/B/C/D Heal Governance State Machine (begin | attempt | conclude | discard)',
     description:
-      'Execute T1-signed stateful Heal governance: action="begin" starts a session (locking out Class B/C/D edits); action="attempt" validates a Class-A repair against Governance Lock + AST Semantic Diff Guard (<= 3 attempts across sessions); action="conclude" closes the session and emits a Class-C defect ticket.',
+      'Use when repairing failing Class-A specs or filing Class-C product defects under governance. Executes T1-signed state transitions: begin (locks non-A tests), attempt (AST-guarded <=3 retries per appCodeTreeHash), conclude (closes/files defect ticket), or discard.',
     annotations: {
       title: 'Manage Governed A/B/C/D Heal Session',
       readOnlyHint: false,
@@ -21,22 +21,22 @@ export const STATEFUL_TOOLS = [
       properties: {
         action: {
           type: 'string',
-          enum: ['begin', 'attempt', 'conclude'],
-          description: 'Heal state machine transition: begin | attempt | conclude',
+          enum: ['begin', 'attempt', 'conclude', 'discard'],
+          description: 'Heal state machine transition: begin | attempt | conclude | discard',
         },
         target: { type: 'string', description: 'Target repository or QA directory' },
         testId: { type: 'string', description: 'Optional testId or title substring (for action="begin")' },
         results: { type: 'string', description: 'Optional results.json path (for action="begin")' },
-        sessionId: { type: 'string', description: 'Heal session ID (required for action="attempt" and action="conclude")' },
+        sessionId: { type: 'string', description: 'Heal session ID (required for action="attempt", "conclude", or "discard")' },
         skipRun: { type: 'boolean', description: 'Validate semantic gates without running Playwright (for action="attempt")' },
         outcome: {
           type: 'string',
           enum: ['verified', 'reported', 'escalated', 'clarification-needed'],
           description: 'Final session outcome (for action="conclude")',
         },
-        summary: { type: 'string', description: 'Optional summary note (for action="conclude")' },
-        qaDir: { type: 'string' },
-        lang: { type: 'string', enum: ['zh', 'en'] },
+        summary: { type: 'string', description: 'Optional summary note (for action="conclude" or "discard")' },
+        qaDir: { type: 'string', description: 'Optional QA subdirectory name or path' },
+        lang: { type: 'string', enum: ['zh', 'en'], description: 'Output language code (zh or en)' },
         ...ASYNC_JOB_PROPS,
       },
       required: ['action', 'target'],
@@ -51,7 +51,7 @@ export const STATEFUL_TOOLS = [
       defectTicketPath: { type: ['string', 'null'] },
     },
     validateExtra: (args) => {
-      if ((args.action === 'attempt' || args.action === 'conclude') && !args.sessionId) {
+      if ((args.action === 'attempt' || args.action === 'conclude' || args.action === 'discard') && !args.sessionId) {
         return [`Missing required property "sessionId" for aitest_heal(action="${args.action}").`];
       }
       return [];
@@ -71,6 +71,9 @@ export const STATEFUL_TOOLS = [
       } else if (action === 'conclude') {
         pushOpt(a, '--session-id', args.sessionId);
         pushOpt(a, '--outcome', args.outcome);
+        pushOpt(a, '--summary', args.summary);
+      } else if (action === 'discard') {
+        pushOpt(a, '--session-id', args.sessionId);
         pushOpt(a, '--summary', args.summary);
       }
       return a;
@@ -94,7 +97,7 @@ export const STATEFUL_TOOLS = [
     category: 'stateful',
     title: 'Inspect, Await, or Cancel Async Background MCP Jobs (status | result | cancel)',
     description:
-      'Manage backgrounded async MCP jobs owned by this session: action="status" polls progress, action="result" awaits/retrieves final structured output, and action="cancel" terminates the job and its OS process tree.',
+      'Use when managing backgrounded async MCP jobs owned by this session: action="status" polls progress, action="result" awaits/retrieves final structured output, and action="cancel" terminates the job and its OS process tree.',
     annotations: {
       title: 'Control Async Background Jobs',
       readOnlyHint: false,
@@ -167,7 +170,7 @@ export const STATEFUL_TOOLS = [
       }
 
       if (action === 'cancel') {
-        const cancelRes = jobManager.cancelByJobId(args.jobId, sessionId);
+        const cancelRes = await jobManager.cancelByJobIdAndWait(args.jobId, sessionId);
         if (!cancelRes.found) {
           return { ok: false, exitCode: 1, summary: `Unknown jobId "${args.jobId}"`, data: cancelRes, nextActions: [] };
         }
@@ -234,6 +237,22 @@ export const DEPRECATED_TOOL_ALIASES = {
     targetTool: 'aitest_job',
     fixedAction: 'cancel',
     deprecatedSince: '6.0.0',
+    removeIn: '7.0.0',
+  },
+  aitest_flaky_report: {
+    deprecatedTool: 'aitest_flaky_report',
+    targetTool: 'aitest_report',
+    fixedArgs: { view: 'flaky' },
+    replacement: 'aitest_report(view="flaky")',
+    deprecatedSince: '6.2.0',
+    removeIn: '7.0.0',
+  },
+  aitest_trace_matrix: {
+    deprecatedTool: 'aitest_trace_matrix',
+    targetTool: 'aitest_report',
+    fixedArgs: { view: 'traceability' },
+    replacement: 'aitest_report(view="traceability")',
+    deprecatedSince: '6.2.0',
     removeIn: '7.0.0',
   },
 };

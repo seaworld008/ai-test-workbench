@@ -5,7 +5,8 @@ import { resolveQaDirectory } from './agents.mjs';
 import { computeFlakyStats } from './core/playwright-results.mjs';
 import { SCHEMA_VERSIONS } from './core/version.mjs';
 import { readPerTestLedgerRuns } from './ledger.mjs';
-import { signPayloadT1 } from './kernel/gate-kernel.mjs';
+import { openTrustContext, signPayloadT1 } from './kernel/gate-kernel.mjs';
+import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 
 /**
  * Computes historical flaky & failure rates per test from Run Ledger (`R1-2`).
@@ -25,16 +26,17 @@ export function computeFlakyReport(qaDir, options = {}) {
   for (const run of runs) {
     for (const t of run.tests || []) {
       if (t.status === 'skipped') continue;
-      let rec = byTest.get(t.testId);
+      const normTestId = String(t.testId || '').replace(/\\/g, '/');
+      let rec = byTest.get(normTestId);
       if (!rec) {
         rec = {
-          testId: t.testId,
-          file: t.file,
+          testId: normTestId,
+          file: String(t.file || '').replace(/\\/g, '/'),
           title: t.title,
           observations: [],
           durations: [],
         };
-        byTest.set(t.testId, rec);
+        byTest.set(normTestId, rec);
       }
       rec.observations.push({ status: t.status, retryPassed: t.retryPassed });
       if (typeof t.durationMs === 'number') rec.durations.push(t.durationMs);
@@ -160,12 +162,15 @@ export function syncQuarantineFromLedger(qaDir, options = {}) {
     ttlDays,
     entries: nextEntries,
   };
+  const repoDir = path.dirname(qaDir);
+  const trustContext = openTrustContext({ qaDir, repoDir, createKeyIfMissing: true });
   const sig = signPayloadT1('quarantine.json', corePayload, {
     qaDir,
-    repoDir: path.dirname(qaDir),
+    repoDir,
     createIfMissing: true,
+    trustContext,
   });
-  const payload = { ...corePayload, ...(sig.signed ? { mac: sig.mac } : {}) };
+  const payload = { ...corePayload, ...(sig.signed ? { mac: sig.mac, macKeyId: sig.keyId } : {}) };
   fs.mkdirSync(aitestDir, { recursive: true });
   fs.writeFileSync(qPath, JSON.stringify(payload, null, 2) + '\n', 'utf8');
 
@@ -200,18 +205,26 @@ export async function runFlakyCommand(options = {}) {
   }
   const report = computeFlakyReport(qaDir);
   const out = { ...report, syncResult };
+  const summary = `Runs analyzed=${report.runsAnalyzed}, flakyCandidates=${report.flakyCandidates.length}, quarantined=${report.quarantineEntries.length}`;
 
-  if (options.json) {
-    console.log(JSON.stringify({ ok: true, exitCode: 0, ...out }, null, 2));
-    return 0;
+  if (!options.json) {
+    console.log(
+      `\n=== ${lang === 'zh' ? 'Flaky 历史统计与隔离区报告' : 'Historical Flaky Telemetry & Quarantine Report'} ===`
+    );
+    console.log(`Runs analyzed: ${report.runsAnalyzed} · Flaky candidates: ${report.flakyCandidates.length} · Quarantined: ${report.quarantineEntries.length}`);
+    for (const c of report.flakyCandidates.slice(0, 15)) {
+      console.log(`  - [flakyRate=${c.flakyRate}] ${c.file} :: ${c.title} (runs=${c.totalRuns}, passStreak=${c.consecutivePasses})`);
+    }
   }
-
-  console.log(
-    `\n=== ${lang === 'zh' ? 'Flaky 历史统计与隔离区报告' : 'Historical Flaky Telemetry & Quarantine Report'} ===`
+  return emitCommandResult(
+    buildCommandResult({
+      tool: 'flaky',
+      outcome: 'pass',
+      ok: true,
+      exitCode: 0,
+      summary,
+      data: out,
+    }),
+    { asJson: Boolean(options.json) }
   );
-  console.log(`Runs analyzed: ${report.runsAnalyzed} · Flaky candidates: ${report.flakyCandidates.length} · Quarantined: ${report.quarantineEntries.length}`);
-  for (const c of report.flakyCandidates.slice(0, 15)) {
-    console.log(`  - [flakyRate=${c.flakyRate}] ${c.file} :: ${c.title} (runs=${c.totalRuns}, passStreak=${c.consecutivePasses})`);
-  }
-  return 0;
 }

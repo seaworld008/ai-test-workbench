@@ -1,0 +1,56 @@
+// @ts-check
+/**
+ * Public Application Service Facade (`src/app/index.mjs`, `WU-02`).
+ * External consumers, benchmarks, and verification scripts should import from this stable entry
+ * rather than reaching into internal domain implementations directly.
+ */
+export { loadWorkbenchConfig } from '../core/config.mjs';
+export { buildCommandResult, emitCommandResult, EXIT_CODES, outcomeToExitCode } from '../core/outcome.mjs';
+export { redactSecrets } from '../core/redact.mjs';
+export { REPO_ROOT, SCHEMA_VERSIONS, WORKBENCH_VERSION } from '../core/version.mjs';
+export { resolveQaDirectory, resolveWorkspace } from '../domains/workspace/resolve.mjs';
+export { analyzeHealerDiffText, runAuditCommand, runAuditForQaDir } from '../audit.mjs';
+export { bootstrapWorkspaceCore, inferRuntimeConfigForRepo, runBootstrapCommand } from '../bootstrap.mjs';
+export { runCli } from '../cli.mjs';
+export { CLI_COMMANDS } from '../cli/commands.mjs';
+export { runMapCommand, syncLivingCodeMap } from '../codemap.mjs';
+export { generateDiagnosticsMarkdown, runDiagnoseCommand, suggestFailureCategory } from '../diagnose.mjs';
+export { computeFlakyReport, runFlakyCommand, syncQuarantineFromLedger } from '../flaky.mjs';
+export { ensureInitialGovernanceLock, runGovernanceCommand, writeGovernanceLock } from '../governance.mjs';
+export {
+  attemptHealRepair,
+  autoCloseStaleClassBSessions,
+  beginHealSession,
+  concludeHealSession,
+  discardHealSession,
+  runHealCommand,
+} from '../heal.mjs';
+export { computeImpact, evaluateImpactForFiles, runImpactCommand } from '../impact.mjs';
+export { runInit } from '../init.mjs';
+export { beginRunLedger, finalizeRunLedger, readLedgerHistory, resolveGitHeadSha } from '../ledger.mjs';
+export { TOOL_REGISTRY } from '../mcp/registry.mjs';
+export { handleMcpJsonRpcMessage } from '../mcp-server.mjs';
+export { evaluateTargetSafety, checkOutgoingRequestSafety, loadMergedQaEnv } from '../origin-guard.mjs';
+export { runReportCommand } from '../report.mjs';
+export { executeSuiteCore, runSuiteCommand } from '../runner.mjs';
+export { buildRequirementTraceMatrix, runTraceMatrixCommand } from '../traceability.mjs';
+export { buildInTotoVerdictAttestation, runAttestCommand, verifyAttestationFile } from '../trust.mjs';
+export { computeDssePae, GITHUB_ACTIONS_OIDC_ISSUER } from '../trust/der-x509.mjs';
+export { INTOTO_STATEMENT_TYPE, VERDICT_PREDICATE_TYPE } from '../trust/intoto.mjs';
+export { runUpgradeCommand, upgradeQaWorkspace } from '../upgrade.mjs';
+export { checkHealSessionConflicts, runVerifyChangeCommand, verifyChangeCore } from '../verdict.mjs';
+export {
+  GATE_KERNEL_VERSION,
+  compareChangesetAst,
+  compareSpecSourcesAst,
+  computeDomainHmac,
+  computeWorkspaceInputHash,
+  openTrustContext,
+  resolveDefaultDiffBase,
+  resolveGitTreeSha,
+  resolveTypeScriptCompiler,
+  scanSpecFilesFallback,
+  sha256Hex,
+  stripSignatureFields,
+  verifyGovernanceLockInQaDir,
+} from '../kernel/gate-kernel.mjs';

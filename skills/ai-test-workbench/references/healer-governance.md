@@ -4,7 +4,7 @@
 
 > **工具强执覆盖条款**：Playwright 官方默认 Healer 提示词包含“若持续失败则改标 `test.fixme()`”。在 `ai-test-workbench v6.0.0` 中，不仅 `test.fixme()` / `test.skip()` 被阻断，**任何降低断言强度、篡改配置文件、添加 `test.fail()` / `expect.soft()` 或对 B/C/D 类故障修改测试的行为均由工具状态机直接拦截（`FGER = 0.0%`）**。
 
-## 1. 有状态自愈会话强制工作流 (`npx ai-test-workbench@6.1.0 heal` / `aitest_heal`)
+## 1. 有状态自愈会话强制工作流 (`npx ai-test-workbench@6.2.0 heal` / `aitest_heal`)
 
 修改任何 `tests/**` 文件前，必须先启动受控自愈会话：
 
@@ -19,4 +19,4 @@
 
 每次 `aitest_heal(action="attempt")` 与 `aitest_audit(diffBase="HEAD")` 都会检查整个 `qa/`（含未跟踪新文件与受保护配置）：
 - **`S5` 精确值断言**（`toHaveText('exact')`、`toEqual`、`toBe(200)`）不得降级为 **`S3` 模糊匹配**、**`S2` 仅可见（`toBeVisible()`）**、**`S1` 弱存在** 或 **`S0` 恒真断言（`expect(true).toBe(true)`）**。
-- 严禁篡改 `.aitest/governance.lock` 锁定的 17 项受保护路径（`eslint.config.mjs`、`playwright.config.ts`、`aitest.config.json`、`waivers.json`、`support/**` 等），需经人类运行 `npx ai-test-workbench@6.1.0 governance approve --by <name> --reason "<原因>"`。
+- 严禁篡改 `.aitest/governance.lock` 锁定的 17 项受保护路径（`eslint.config.mjs`、`playwright.config.ts`、`aitest.config.json`、`waivers.json`、`support/**` 等），需经人类运行 `npx ai-test-workbench@6.2.0 governance approve --by <name> --reason "<原因>"`。

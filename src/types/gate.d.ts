@@ -15,7 +15,9 @@ export type GateRuleCode =
   | 'AITEST-G112'
   | 'AITEST-G113'
   | 'AITEST-G114'
-  | 'AITEST-G115';
+  | 'AITEST-G115'
+  | 'AITEST-G116'
+  | 'AITEST-G117';
 
 export type AstScopeKind =
   | 'top-level'
@@ -59,6 +61,7 @@ export interface PlaywrightTestRecord {
   tags: string[];
   annotations: Array<{ type?: string; description?: string }>;
   results: PlaywrightAttemptRecord[];
+  attachments: Array<{ name: string; path: string | null; contentType: string | null }>;
   errorSnippet: string | null;
 }
 

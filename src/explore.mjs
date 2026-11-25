@@ -4,6 +4,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveQaDirectory } from './agents.mjs';
 import { syncLivingCodeMap } from './codemap.mjs';
+import { loadWorkbenchConfig } from './core/config.mjs';
+import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import { resolvePlaywrightPackage } from './core/playwright-resolve.mjs';
 import { executeExploreCrawl } from './explore/crawler.mjs';
 import {
@@ -12,6 +14,7 @@ import {
   generateSystemOverviewMarkdown,
   resolveExploreEntryPath,
 } from './explore/reporter.mjs';
+import { writeInferredApiSchemas } from './explore/schema-inferrer.mjs';
 import {
   DEFAULT_EXPLORE_PAGES,
   MAX_EXPLORE_PAGES,
@@ -82,6 +85,7 @@ export async function runExploreCommand(options = {}) {
     return 1;
   }
 
+  loadWorkbenchConfig({ qaDir });
   /** @type {Record<string, string>} */
   const overrides = {};
   if (options.baseUrl) overrides.TEST_BASE_URL = options.baseUrl;
@@ -156,10 +160,18 @@ export async function runExploreCommand(options = {}) {
   }
 
   if (options.dryRun) {
-    if (options.json) {
-      console.log(JSON.stringify(buildExploreCliSummary(topology, { entryPath, dryRun: true }), null, 2));
-    }
-    return 0;
+    const drySummary = buildExploreCliSummary(topology, { entryPath, dryRun: true });
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'explore',
+        outcome: 'pass',
+        ok: true,
+        exitCode: 0,
+        summary: `Dry-run explore complete (${topology.pages.length} route(s), ${topology.endpoints.length} endpoint(s))`,
+        data: drySummary,
+      }),
+      { asJson: Boolean(options.json) }
+    );
   }
 
   const reportsDir = path.join(qaDir, 'reports');
@@ -170,8 +182,10 @@ export async function runExploreCommand(options = {}) {
 
   const topologyPath = path.join(reportsDir, 'system-topology.json');
   const overviewPath = path.join(specsDir, 'system-overview.md');
-  fs.writeFileSync(topologyPath, JSON.stringify(topology, null, 2) + '\n', 'utf8');
-  fs.writeFileSync(overviewPath, generateSystemOverviewMarkdown(topology, lang), 'utf8');
+  const schemaOut = writeInferredApiSchemas(qaDir, topology.jsonCaptures || [], topology);
+  const { jsonCaptures: _omitCaptures, ...persistedTopology } = topology;
+  fs.writeFileSync(topologyPath, JSON.stringify(persistedTopology, null, 2) + '\n', 'utf8');
+  fs.writeFileSync(overviewPath, generateSystemOverviewMarkdown(persistedTopology, lang), 'utf8');
 
   for (const p of topology.pages) {
     const slug = routeToSafeSlug(p.route);
@@ -183,17 +197,19 @@ export async function runExploreCommand(options = {}) {
     syncImpact: !options.noSyncImpact,
   });
 
-  const summary = buildExploreCliSummary(topology, {
-    entryPath,
-    topologyPath,
-    overviewPath,
-    pagesSpecDir,
-    codeMapSync,
-  });
+  const summary = {
+    ...buildExploreCliSummary(persistedTopology, {
+      entryPath,
+      topologyPath,
+      overviewPath,
+      pagesSpecDir,
+      codeMapSync,
+    }),
+    apiSchemasPath: schemaOut.outPath,
+    apiSchemasCount: schemaOut.count,
+  };
 
-  if (options.json) {
-    console.log(JSON.stringify(summary, null, 2));
-  } else {
+  if (!options.json) {
     console.log(
       lang === 'zh'
         ? `\n[Explore] 从 0 到 1 只读探索完成 (snapshot=${topology.snapshotId})：覆盖 ${topology.portals.length} 个门户上下文、${topology.pages.length} 个路由（Tab ${summary.tabsExploredCount} 次 / 只读弹窗 ${summary.dialogsExploredCount} 次 / 断链 ${topology.brokenRoutes.length} 个）、${topology.endpoints.length} 个脱敏 API 端点（包裹异常 ${topology.envelopeErrors.length} 次，拦截写请求 ${topology.blockedWriteRequests.length} 次），同步活体知识图谱 (Revision #${codeMapSync.revision})。`
@@ -219,5 +235,15 @@ export async function runExploreCommand(options = {}) {
     console.log(`  Code Map MD   : ${codeMapSync.systemMapMdPath}`);
   }
 
-  return 0;
+  return emitCommandResult(
+    buildCommandResult({
+      tool: 'explore',
+      outcome: 'pass',
+      ok: true,
+      exitCode: 0,
+      summary: `Explore complete (${topology.pages.length} route(s), ${topology.endpoints.length} endpoint(s), map rev #${codeMapSync.revision})`,
+      data: summary,
+    }),
+    { asJson: Boolean(options.json) }
+  );
 }

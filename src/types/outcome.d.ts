@@ -6,14 +6,20 @@
  */
 export type GateOutcome = 'pass' | 'fail' | 'blocked';
 
-export type ExitCode = 0 | 1 | 2;
+export type CommandOutcome = GateOutcome | 'usage';
+
+export type ExitCode = 0 | 1 | 2 | 64;
 
 export interface CommandResult<T = Record<string, unknown>> {
+  schemaVersion: number;
   ok: boolean;
   exitCode: ExitCode;
-  outcome?: GateOutcome;
+  outcome: CommandOutcome;
   tool: string;
   summary: string;
+  recoverable: boolean;
+  blockerKind: string | null;
+  recoverySteps: string[];
   data: T;
   nextRecommendedActions: string[];
 }

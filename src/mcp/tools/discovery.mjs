@@ -10,7 +10,7 @@ export const DISCOVERY_TOOLS = [
     category: 'discovery',
     title: 'Environment, Browser & Gate Kernel Readiness Check',
     description:
-      'Inspect local Node.js (>=22.12), npm, Git, Codex/Claude CLIs, Docker, proxy hygiene, Chromium cache, and host Gate Kernel version drift (strictly read-only).',
+      'Use when verifying local toolchain readiness. Inspects Node.js (>=22.12), npm, Git, Codex/Claude CLIs, Docker, proxy hygiene, Chromium cache, and host Gate Kernel version drift (strictly read-only).',
     annotations: {
       title: 'Check Test Workbench Environment',
       readOnlyHint: true,
@@ -22,7 +22,7 @@ export const DISCOVERY_TOOLS = [
       type: 'object',
       properties: {
         target: { type: 'string', description: 'Optional target repository or QA directory to verify' },
-        lang: { type: 'string', enum: ['zh', 'en'] },
+        lang: { type: 'string', enum: ['zh', 'en'], description: 'Output language code (zh or en)' },
       },
       additionalProperties: false,
     },
@@ -38,14 +38,14 @@ export const DISCOVERY_TOOLS = [
       pushOpt(a, '--target', target);
       return a;
     },
-    nextActions: () => ['Call aitest_init with dryRun=true to preview isolated QA scaffolding.'],
+    nextActions: () => ['Call aitest_bootstrap(target) or aitest_init(target, dryRun=true) to prepare isolated QA scaffolding.'],
   },
   {
     name: 'aitest_init',
     category: 'discovery',
     title: 'Initialize Isolated QA Workspace & Governance Lock',
     description:
-      'Idempotently scaffold an isolated <repo>/qa Playwright Test Workbench (5 projects, guarded fixtures, T1-signed .aitest/governance.lock). May install npm dependencies & Chromium unless skipInstall=true.',
+      'Use when scaffolding an isolated <repo>/qa Playwright workbench for the first time without probing runtime dev servers. Generates 5 projects, guarded fixtures, and T1-signed .aitest/governance.lock.',
     annotations: {
       title: 'Initialize <repo>/qa Subproject',
       readOnlyHint: false,
@@ -59,13 +59,13 @@ export const DISCOVERY_TOOLS = [
         target: { type: 'string', description: 'Target repository root path' },
         name: { type: 'string', description: 'Project slug for QA package.json' },
         qaDir: { type: 'string', description: 'QA subdirectory name (default: qa)' },
-        preset: { type: 'string', enum: ['generic', 'demo-campus'], description: 'Template preset' },
+        preset: { type: 'string', enum: ['generic', 'demo-campus'], description: 'Template preset name (generic or demo-campus)' },
         loop: { type: 'string', description: 'Agent loops CSV: codex,claude,vscode,opencode,copilot,none' },
         dryRun: { type: 'boolean', description: 'Preview planned writes without mutating disk' },
         skipInstall: { type: 'boolean', description: 'Skip npm install during init' },
         skipBrowser: { type: 'boolean', description: 'Skip Playwright Chromium install check' },
         bridgeRoot: { type: 'boolean', description: 'Write root .mcp.json bridge to <repo>/qa' },
-        lang: { type: 'string', enum: ['zh', 'en'] },
+        lang: { type: 'string', enum: ['zh', 'en'], description: 'Output language code (zh or en)' },
         ...ASYNC_JOB_PROPS,
       },
       required: ['target'],
@@ -95,14 +95,74 @@ export const DISCOVERY_TOOLS = [
     nextActions: (_ok, args) =>
       args.dryRun
         ? ['Call aitest_init with dryRun=false to apply files and generate .aitest/governance.lock.']
-        : ['Call aitest_verify_change(mode="full") to verify the 4-layer anti-fake-green baseline.'],
+        : ['Call aitest_verify_change(mode="impact") to verify the 4-layer anti-fake-green baseline.'],
+  },
+  {
+    name: 'aitest_bootstrap',
+    category: 'discovery',
+    title: 'Zero-to-One Autonomous Loopback Bootstrapper',
+    description:
+      'Use when onboarding a new or cold repository end-to-end before running tests. Idempotently initializes <repo>/qa, infers loopback aitest.runtime.json, installs dependencies, probes health endpoints, and records baseline-ref.',
+    annotations: {
+      title: 'Bootstrap Autonomous Local QA Runtime',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: { type: 'string', description: 'Target repository root path' },
+        qaDir: { type: 'string', description: 'Optional QA subdirectory name or path (default: qa)' },
+        baseUrl: { type: 'string', description: 'Optional loopback HTTP base URL override (e.g. http://127.0.0.1:5173)' },
+        healthPath: { type: 'string', description: 'Health check route path to probe (default: /)' },
+        port: { type: 'integer', minimum: 1, maximum: 65535, description: 'Optional local dev server port override' },
+        preset: { type: 'string', enum: ['generic', 'demo-campus'], description: 'Template preset name (generic or demo-campus)' },
+        loop: { type: 'string', description: 'Agent loops CSV: codex,claude,vscode,opencode,copilot,none' },
+        skipInstall: { type: 'boolean', description: 'Skip npm install during bootstrap' },
+        skipBrowser: { type: 'boolean', description: 'Skip Playwright Chromium install check' },
+        dryRun: { type: 'boolean', description: 'Preview inferred runtime configuration without mutating disk' },
+        force: { type: 'boolean', description: 'Overwrite existing aitest.runtime.json when regenerating config' },
+        lang: { type: 'string', enum: ['zh', 'en'], description: 'Output language code (zh or en)' },
+        ...ASYNC_JOB_PROPS,
+      },
+      required: ['target'],
+      additionalProperties: false,
+    },
+    dataProps: {
+      qaDir: { type: 'string' },
+      runtimeConfigPath: { type: 'string' },
+      baseURL: { type: ['string', 'null'] },
+      serverReachable: { type: 'boolean' },
+    },
+    isReadOnly: (args) => Boolean(args.dryRun),
+    buildCliArgs: (args, target, lang) => {
+      const a = ['bootstrap', '--json', `--lang=${lang}`];
+      pushOpt(a, '--target', target);
+      pushOpt(a, '--qa-dir', args.qaDir);
+      pushOpt(a, '--base-url', args.baseUrl);
+      pushOpt(a, '--health-path', args.healthPath);
+      pushOpt(a, '--port', args.port);
+      pushOpt(a, '--preset', args.preset);
+      pushOpt(a, '--loop', args.loop);
+      pushBool(a, '--skip-install', args.skipInstall);
+      pushBool(a, '--skip-browser', args.skipBrowser);
+      pushBool(a, '--dry-run', args.dryRun);
+      pushBool(a, '--force', args.force);
+      return a;
+    },
+    nextActions: () => [
+      'Call aitest_explore(target) to map live ARIA trees and infer API schemas in knowledge/api-schemas.json.',
+      'Call aitest_verify_change(target, mode="impact") to run verification.',
+    ],
   },
   {
     name: 'aitest_explore',
     category: 'discovery',
     title: 'Zero-to-One Default-Deny Read-Only Explorer',
     description:
-      'Explore an allowlisted staging/local web app with default-deny on ALL non-GET/HEAD requests (GraphQL mutations, WebSockets & sendBeacon blocked). Writes PII-redacted specs/system-overview.md & specs/pages/*.md ARIA trees unless dryRun=true.',
+      'Use when exploring a running web application from zero knowledge to discover pages, ARIA locators, and API JSON schemas. Default-denies non-GET/HEAD requests and writes redacted specs/pages/*.md & knowledge/api-schemas.json unless dryRun=true.',
     annotations: {
       title: 'Explore Target App (Remote Read-Only, Writes Local Specs)',
       readOnlyHint: false,
@@ -114,8 +174,8 @@ export const DISCOVERY_TOOLS = [
       type: 'object',
       properties: {
         target: { type: 'string', description: 'Target repository or QA directory' },
-        qaDir: { type: 'string' },
-        baseUrl: { type: 'string', description: 'Allowlisted staging/local base URL' },
+        qaDir: { type: 'string', description: 'Optional QA subdirectory name or path' },
+        baseUrl: { type: 'string', description: 'Allowlisted staging or local base URL' },
         entryPath: { type: 'string', description: 'Starting route path (default: /)' },
         maxPages: {
           type: 'integer',
@@ -141,9 +201,9 @@ export const DISCOVERY_TOOLS = [
           maximum: 5,
           description: 'Maximum portal/tenant contexts to explore (1..5, default: 3)',
         },
-        noSyncImpact: { type: 'boolean' },
+        noSyncImpact: { type: 'boolean', description: 'Skip synchronizing inferred route impact mappings' },
         dryRun: { type: 'boolean', description: 'Explore in memory without writing local files' },
-        lang: { type: 'string', enum: ['zh', 'en'] },
+        lang: { type: 'string', enum: ['zh', 'en'], description: 'Output language code (zh or en)' },
         ...ASYNC_JOB_PROPS,
       },
       required: ['target'],
@@ -173,7 +233,7 @@ export const DISCOVERY_TOOLS = [
       return a;
     },
     nextActions: () => [
-      'Read aitest://project/{target}/system-overview and specs/pages/*.md ARIA trees.',
+      'Read aitest://project/{target}/system-overview, specs/pages/*.md, and knowledge/api-schemas.json.',
       'Author REQ-xxx specs and Playwright tests extending fixtures/base.ts.',
     ],
   },
@@ -182,7 +242,7 @@ export const DISCOVERY_TOOLS = [
     category: 'discovery',
     title: 'Sync Convergent Living Code Map v4',
     description:
-      'Index host source repository routes (including :id / [id] dynamic routes), controllers & DB entities, prune deleted routes/specs, and converge defects into knowledge/code-map.json & SYSTEM_MAP.md.',
+      'Use when synchronizing the codebase topology and auto-generated impact map after routes, controllers, or specs change. Writes knowledge/code-map.json, SYSTEM_MAP.md, and knowledge/impact-map.auto.json.',
     annotations: {
       title: 'Synchronize Living Code Map v4',
       readOnlyHint: false,
@@ -195,9 +255,9 @@ export const DISCOVERY_TOOLS = [
       properties: {
         target: { type: 'string', description: 'Target repository or QA directory' },
         repo: { type: 'string', description: 'Optional host source directory path' },
-        qaDir: { type: 'string' },
-        noSyncImpact: { type: 'boolean', description: 'Skip auto-updating impact-map suggestions' },
-        lang: { type: 'string', enum: ['zh', 'en'] },
+        qaDir: { type: 'string', description: 'Optional QA subdirectory name or path' },
+        noSyncImpact: { type: 'boolean', description: 'Skip auto-updating impact-map.auto.json suggestions' },
+        lang: { type: 'string', enum: ['zh', 'en'], description: 'Output language code (zh or en)' },
       },
       required: ['target'],
       additionalProperties: false,
@@ -224,7 +284,7 @@ export const DISCOVERY_TOOLS = [
     category: 'discovery',
     title: 'Manage Pinned 7-Pillar MCP Presets & Supply-Chain Doctor',
     description:
-      'List version-pinned, risk-graded MCP presets, merge configs into .mcp.json & .codex/config.toml, or audit supply-chain pins, prompt-poisoning & .aitest/mcp.lock via doctor.',
+      'Use when configuring or auditing external pinned MCP integrations. Lists 7-pillar presets, writes .mcp.json/.codex/config.toml, or verifies descriptor hashes against .aitest/mcp.lock.',
     annotations: {
       title: 'Configure & Audit System MCP Hub',
       readOnlyHint: false,
@@ -235,14 +295,18 @@ export const DISCOVERY_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['presets', 'add', 'doctor'], description: 'MCP Hub sub-action' },
-        target: { type: 'string', description: 'Required for add and doctor' },
-        profile: { type: 'string', enum: ['minimal', 'observability', 'data-verify', 'perf', 'full-link'] },
-        servers: { type: 'string', description: 'Comma-separated preset names' },
-        lock: { type: 'boolean', description: 'Write .aitest/mcp.lock hashes during doctor' },
-        dryRun: { type: 'boolean' },
-        qaDir: { type: 'string' },
-        lang: { type: 'string', enum: ['zh', 'en'] },
+        action: { type: 'string', enum: ['presets', 'add', 'doctor'], description: 'MCP Hub sub-action (presets | add | doctor)' },
+        target: { type: 'string', description: 'Target repository path (required for add and doctor)' },
+        profile: {
+          type: 'string',
+          enum: ['minimal', 'observability', 'data-verify', 'perf', 'full-link'],
+          description: 'Preset MCP bundle profile to configure',
+        },
+        servers: { type: 'string', description: 'Comma-separated preset server names' },
+        lock: { type: 'boolean', description: 'Write .aitest/mcp.lock descriptor hashes during doctor' },
+        dryRun: { type: 'boolean', description: 'Preview MCP config changes without writing files' },
+        qaDir: { type: 'string', description: 'Optional QA subdirectory name or path' },
+        lang: { type: 'string', enum: ['zh', 'en'], description: 'Output language code (zh or en)' },
       },
       required: ['action'],
       additionalProperties: false,
@@ -276,7 +340,7 @@ export const DISCOVERY_TOOLS = [
     category: 'discovery',
     title: 'Install Portable Agent Skill into Project',
     description:
-      'Install the standard ai-test-workbench Agent Skill into qa/skills/, .codex/skills/, .claude/skills/, .agents/skills/, .gemini/skills/, or .github/skills/ cleanly (force=true overwrites existing skill files).',
+      'Use when installing portable ai-test-workbench Agent Skill documentation into qa/skills/, .codex/skills/, .claude/skills/, .agents/skills/, .gemini/skills/, or .github/skills/.',
     annotations: {
       title: 'Install AI Test Workbench Skill',
       readOnlyHint: false,
@@ -288,11 +352,15 @@ export const DISCOVERY_TOOLS = [
       type: 'object',
       properties: {
         target: { type: 'string', description: 'Target repository path' },
-        client: { type: 'string', enum: ['qa', 'codex', 'claude', 'agents', 'gemini', 'copilot'] },
-        force: { type: 'boolean' },
-        dryRun: { type: 'boolean' },
-        qaDir: { type: 'string' },
-        lang: { type: 'string', enum: ['zh', 'en'] },
+        client: {
+          type: 'string',
+          enum: ['qa', 'codex', 'claude', 'agents', 'gemini', 'copilot'],
+          description: 'Target agent client skill directory (default: qa)',
+        },
+        force: { type: 'boolean', description: 'Overwrite existing installed SKILL files cleanly' },
+        dryRun: { type: 'boolean', description: 'Preview skill copy plan without modifying disk' },
+        qaDir: { type: 'string', description: 'Optional QA subdirectory name or path' },
+        lang: { type: 'string', enum: ['zh', 'en'], description: 'Output language code (zh or en)' },
       },
       required: ['target'],
       additionalProperties: false,

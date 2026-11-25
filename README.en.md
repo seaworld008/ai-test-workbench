@@ -1,10 +1,10 @@
 <div align="center">
 
-# AI Test Workbench (`v6.1.0`)
+# AI Test Workbench (`v6.2.0`)
 
 **Trustworthy Verification Kernel & Native Multi-Protocol MCP Server for AI Coding Agents**
 
-Provides a **4-Layer Fail-Closed AST Anti-Fake-Green Gate (`S0–S5` + `AITEST-G101..G115`)** · **One-Call Change Verdict (`verify-change` · in-toto v1 + `T0/T1/T2`)** · **Zero-Dep Native MCP Server (`stdio` / `/mcp` / `/sse` · 17 Canonical Tools · Async Child-Process Jobs)** · **Tamper-Evident Healer State Machine** · **Import-Graph Impact Analysis** · **Default-Deny Explorer & Living Code Map** · **Buffered `PerformanceObserver` Web Vitals**
+Provides a **4-Layer Fail-Closed AST Anti-Fake-Green Gate (`S0–S5` + `AITEST-G101..G117` + SymbolTable + Dieselgate Guard)** · **One-Call Change Verdict (`verify-change` · in-toto v1 + `T0/T1/T2`)** · **Zero-Dep Native MCP Server (`stdio` / `/mcp` / `/sse` · 16 Canonical Tools · Framed Subprocess IPC)** · **Immutable `TrustContext` & Sticky T1** · **Zero-Block Loopback Bootstrap (`aitest_bootstrap`)** · **Default-Deny Explorer & API Schema Inference** · **Buffered `PerformanceObserver` Web Vitals**
 
 [简体中文文档 (默认)](./README.md) · [v5→v6 Upgrade Guide](./docs/upgrade.en.md) · [Governance & 4-Layer Gate](./docs/governance.en.md) · [AI Agent Quickstart](./docs/ai-agent-quickstart.en.md) · [AGENTS.en.md](./AGENTS.en.md) · [Architecture](./ARCHITECTURE.en.md) · [v6 Refactor Assessment](./docs/review/v6-refactor-assessment.en.md) · [Changelog](./CHANGELOG.en.md)
 
@@ -49,7 +49,7 @@ Adopt T2 verification via [examples/workflows/use-aitest-verify.yml](./examples/
 ```yaml
 jobs:
   aitest-t2-verdict:
-    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.1.0
+    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.2.0
     permissions:
       id-token: write
       attestations: write
@@ -65,7 +65,7 @@ jobs:
 Verify a T2 attestation bundle offline (fail-closed by default: missing signature, T1-only MAC, digest tampering, or workflow identity mismatch exits non-zero with `trustLevel <= T1`):
 
 ```bash
-npx ai-test-workbench@6.1.0 attest verify \
+npx ai-test-workbench@6.2.0 attest verify \
   --file attestation.json \
   --bundle attestation.sigstore.json \
   --expect-repo owner/repo \
@@ -77,16 +77,16 @@ npx ai-test-workbench@6.1.0 attest verify \
 
 ---
 
-## 2. v6.0.0 Layered Architecture
+## 2. v6.2.0 Layered Architecture
 
-v6.0.0 eliminates all `src/ -> templates/` dependency inversions (`0` violations) and circular imports across `src/**` (`0` cycles), enforcing a strict four-layer unidirectional architecture (see [ARCHITECTURE.en.md](./ARCHITECTURE.en.md) and [ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.en.md)):
+v6.2.0 builds on the acyclic four-layer core with a public `src/app/index.mjs` application facade, immutable `TrustContext`, and strict `<= 500` LOC module discipline across all `src/**/*.mjs` (see [ARCHITECTURE.en.md](./ARCHITECTURE.en.md) and [ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.en.md)):
 
 ```mermaid
 flowchart TB
-    L4["Layer 4: Protocol & CLI — src/cli/ (per-command strict flags) · src/mcp/ (17 canonical tools + async jobs)"]
-    L3["Layer 3: Domain Subsystems — trust · explore · codemap · perf · verdict · heal · diagnose · impact · workspace"]
-    L2["Layer 2: Authoritative Kernel SSoT — src/kernel/ (target-guard · schema-validator · gate/ pluggable G101..G115)"]
-    L1["Layer 1: Zero-Dep Core Leaves — src/core/ (version · outcome · config · redact · glob · proc) · src/types/*.d.ts"]
+    L4["Layer 4: Protocol & CLI — src/cli/ (CommandResult v2) · src/mcp/ (16 canonical tools + framed IPC jobs)"]
+    L3["Layer 3: App Facade & Domains — src/app/ · trust · explore · codemap · perf · verdict · heal · diagnose · impact · bootstrap"]
+    L2["Layer 2: Authoritative Kernel SSoT — src/kernel/ (target-guard · schema-validator · gate/ SymbolTable + G101..G117)"]
+    L1["Layer 1: Zero-Dep Core Leaves — src/core/ (version · outcome · config · redact v3 · glob · proc) · src/types/*.d.ts"]
     TPL["Scaffold Distribution Mirror (one-way) — templates/playwright-qa/support/ (@generated + sha256 stamp)"]
 
     L4 --> L3 --> L2 --> L1
@@ -101,19 +101,19 @@ flowchart TB
 ### Requirements & Supply-Chain Security
 
 - **Node.js**: `>= 22.12.0` (`24 LTS` or `26 LTS` recommended) on Windows PowerShell (`pwsh`), macOS, or Linux.
-- **Zero Runtime Dependencies**: Root `package.json` carries zero runtime `dependencies`. Always invoke pinned `npx ai-test-workbench@6.1.0 <cmd>`, global short alias `aitw <cmd>` (`npm i -g ai-test-workbench@6.1.0`), or local source `node tools/aitest.mjs <cmd>`.
+- **Zero Runtime Dependencies**: Root `package.json` carries zero runtime `dependencies`. Always invoke pinned `npx ai-test-workbench@6.2.0 <cmd>`, global short alias `aitw <cmd>` (`npm i -g ai-test-workbench@6.2.0`), or local source `node tools/aitest.mjs <cmd>`.
 
 ### Register Native MCP Server (`stdio` / `/mcp` / `/sse`)
 
 - **Claude Code**:
   ```bash
-  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.1.0 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
+  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.2.0 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
   ```
 - **Codex CLI** (`.codex/config.toml`):
   ```toml
   [mcp_servers.ai-test-workbench]
   command = "npx"
-  args = ["--package=ai-test-workbench@6.1.0", "ai-test-workbench", "mcp-serve"]
+  args = ["--package=ai-test-workbench@6.2.0", "ai-test-workbench", "mcp-serve"]
   ```
 - **Cursor / Windsurf / Antigravity / Gemini CLI** (`.mcp.json`):
   ```json
@@ -121,14 +121,14 @@ flowchart TB
     "mcpServers": {
       "ai-test-workbench": {
         "command": "npx",
-        "args": ["--package=ai-test-workbench@6.1.0", "ai-test-workbench", "mcp-serve"]
+        "args": ["--package=ai-test-workbench@6.2.0", "ai-test-workbench", "mcp-serve"]
       }
     }
   }
   ```
 - **Streamable HTTP (`/mcp`) & Legacy SSE (`/sse`)**:
   ```bash
-  npx ai-test-workbench@6.1.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
+  npx ai-test-workbench@6.2.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
   ```
 
 ### Official MCP Conformance & 3-Transport Interoperability
@@ -136,25 +136,25 @@ flowchart TB
 - Rationale and re-evaluation triggers for the zero-dependency MCP protocol layer live in [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md).
 - Isolated under `conformance/` (excluded from the npm tarball, enforced by CI `mcp-conformance`):
   - **`@modelcontextprotocol/conformance@0.1.16`** (Streamable HTTP `/mcp`, `active` suite — 30 scenarios): `8/8` protocol-level scenarios pass; `22` inapplicable/deferred scenarios are recorded in [`conformance/expected-failures.json`](./conformance/expected-failures.json) with `0` unlisted failures.
-  - **`@modelcontextprotocol/sdk@1.32.2` Reference `Client`** (`5/5` suites pass): covers `stdio`, Streamable HTTP (`/mcp`), and Legacy SSE (`/sse` + `/messages`), verifying `2024-11-05`..`2025-11-25` version negotiation, exact 17 canonical tools with valid JSON Schemas, `structuredContent`, `notifications/progress`, and `AbortController` cancellation.
+  - **`@modelcontextprotocol/sdk@1.32.2` Reference `Client`** (`5/5` suites pass): covers `stdio`, Streamable HTTP (`/mcp`), and Legacy SSE (`/sse` + `/messages`), verifying `2024-11-05`..`2025-11-25` version negotiation, exact 16 canonical tools with valid JSON Schemas, `structuredContent`, `notifications/progress`, and `AbortController` cancellation.
 
 ### Standard CLI Workflow & Local Verification
 
 ```bash
 # 1. Readiness check, initialization, and hash-safe template upgrades
-npx ai-test-workbench@6.1.0 doctor
-npx ai-test-workbench@6.1.0 init --name my-app --target "/path/to/your-repo" --loop codex
-npx ai-test-workbench@6.1.0 upgrade --target "/path/to/your-repo" --dry-run
+npx ai-test-workbench@6.2.0 doctor
+npx ai-test-workbench@6.2.0 init --name my-app --target "/path/to/your-repo" --loop codex
+npx ai-test-workbench@6.2.0 upgrade --target "/path/to/your-repo" --dry-run
 
 # 2. Session capture -> read-only exploration -> living code map -> pinned external MCPs
-npx ai-test-workbench@6.1.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
-npx ai-test-workbench@6.1.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
-npx ai-test-workbench@6.1.0 map --target "/path/to/your-repo"
-npx ai-test-workbench@6.1.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.1.0 mcp doctor --target "/path/to/your-repo" --lock
+npx ai-test-workbench@6.2.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
+npx ai-test-workbench@6.2.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
+npx ai-test-workbench@6.2.0 map --target "/path/to/your-repo"
+npx ai-test-workbench@6.2.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.2.0 mcp doctor --target "/path/to/your-repo" --lock
 
 # 3. Performance SLOs and one-call pre-merge verdict
-npx ai-test-workbench@6.1.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
-npx ai-test-workbench@6.1.0 verify-change --target "/path/to/your-repo" --base origin/main
+npx ai-test-workbench@6.2.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
+npx ai-test-workbench@6.2.0 verify-change --target "/path/to/your-repo" --base origin/main
 ```
 
 Reproduce the full repository gate locally (zero external servers):
@@ -177,6 +177,7 @@ The table below is auto-generated from `src/mcp/registry.mjs` by `scripts/genera
 |---|---|---|---|
 | `aitest_doctor` | Discovery & Setup | Yes | Environment, Browser & Gate Kernel Readiness Check |
 | `aitest_init` | Discovery & Setup | No | Initialize Isolated QA Workspace & Governance Lock |
+| `aitest_bootstrap` | Discovery & Setup | No | Zero-to-One Autonomous Loopback Bootstrapper |
 | `aitest_explore` | Discovery & Setup | No | Zero-to-One Default-Deny Read-Only Explorer |
 | `aitest_map_sync` | Discovery & Setup | No | Sync Convergent Living Code Map v4 |
 | `aitest_mcp_hub` | Discovery & Setup | No | Manage Pinned 7-Pillar MCP Presets & Supply-Chain Doctor |
@@ -187,13 +188,11 @@ The table below is auto-generated from `src/mcp/registry.mjs` by `scripts/genera
 | `aitest_audit` | Verification & Gates | Yes | Run 4-Layer Fail-Closed Anti-Fake-Green Quality Gate |
 | `aitest_diagnose` | Verification & Gates | No | Generate Redacted Evidence-First A/B/C/D Diagnostics Report |
 | `aitest_perf` | Verification & Gates | No | Run PerformanceObserver Web Vitals & Read-Only API SLO Benchmark |
-| `aitest_trace_matrix` | Verification & Gates | Yes | Query Requirement <-> Spec Traceability Matrix (REQ-xxx) |
-| `aitest_flaky_report` | Verification & Gates | Yes | Query Historical Flaky Telemetry & Quarantine List |
-| `aitest_report` | Verification & Gates | Yes | Index Local Reports, Attestations, SARIF & Trace Artifacts |
-| `aitest_heal` | Stateful Control | No | Stateful A/B/C/D Heal Governance State Machine (begin \| attempt \| conclude) |
+| `aitest_report` | Verification & Gates | Yes | Query Reports Index, Flaky Telemetry & Requirement Traceability |
+| `aitest_heal` | Stateful Control | No | Stateful A/B/C/D Heal Governance State Machine (begin \| attempt \| conclude \| discard) |
 | `aitest_job` | Stateful Control | No | Inspect, Await, or Cancel Async Background MCP Jobs (status \| result \| cancel) |
 
-> Auto-generated from `src/mcp/registry.mjs` (`17` canonical tools; `governance approve` is human-CLI-only and never registered; 6 v5 names `aitest_heal_*` / `aitest_job_*` remain as deprecated forwarding aliases in v6.x).
+> Auto-generated from `src/mcp/registry.mjs` (`16` canonical tools; `governance approve` is human-CLI-only and never registered; 8 legacy v5/v6.1 tool names remain as deprecated forwarding aliases in `v6.x`, see `docs/upgrade.en.md`).
 <!-- END:GENERATED_MCP_TOOLS -->
 
 The following privileged or interactive commands are **local CLI only and never registered as MCP tools**:

@@ -4,8 +4,11 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compareChangesetAst, resolveTypeScriptCompiler } from '../src/kernel/gate/ast-analyzer.mjs';
-import { GATE_KERNEL_VERSION } from '../src/kernel/gate/engine.mjs';
+import {
+  GATE_KERNEL_VERSION,
+  compareChangesetAst,
+  resolveTypeScriptCompiler,
+} from '../src/kernel/index.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');

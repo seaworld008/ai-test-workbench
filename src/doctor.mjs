@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import { resolvePlaywrightCli } from './core/playwright-resolve.mjs';
 import { probeToolVersion, runNpm, runPlaywright } from './core/proc.mjs';
 import { redactSecrets } from './core/redact.mjs';
@@ -80,6 +81,24 @@ export function detectHostGateKernelVersion(qaDir) {
       const ver = parsed.gateKernelVersion || parsed.workbenchVersion;
       if (typeof ver === 'string' && ver.trim()) {
         return { present: true, version: ver.trim(), source: '.aitest/template-manifest.json' };
+      }
+    } catch {
+      // fall through to VERSION.json / code inspection
+    }
+  }
+
+  const vendorVersionJson = path.join(qaDir, 'support', 'VERSION.json');
+  if (fs.existsSync(vendorVersionJson)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(vendorVersionJson, 'utf8'));
+      const ver = parsed.gateKernelVersion || parsed.workbenchVersion;
+      if (typeof ver === 'string' && ver.trim()) {
+        const hostSrc = fs.readFileSync(hostKernelPath, 'utf8');
+        const shaMatch = /@source-sha256:\s*([0-9a-f]{64})/i.exec(hostSrc);
+        const recordedSha = parsed.sourceFiles?.['gate-kernel.mjs'];
+        const sourceSuffix =
+          shaMatch && recordedSha && `sha256:${shaMatch[1]}` === recordedSha ? '' : ' (source-sha mismatch)';
+        return { present: true, version: ver.trim(), source: `support/VERSION.json${sourceSuffix}` };
       }
     } catch {
       // fall through to code inspection
@@ -308,20 +327,34 @@ export async function runDoctor(options = {}) {
 
   const failCount = checks.filter((c) => c.status === 'FAIL').length;
   const warnCount = checks.filter((c) => c.status === 'WARN').length;
+  const okCount = checks.length - failCount - warnCount;
   const exitCode = failCount === 0 ? 0 : 1;
+  const summary = `Doctor checked ${checks.length} items: OK=${okCount}, WARN=${warnCount}, FAIL=${failCount}`;
 
-  if (options.json) {
-    console.log(JSON.stringify({ ok: exitCode === 0, exitCode, failCount, warnCount, checks }, null, 2));
-  } else {
+  if (!options.json) {
     console.log(`\n=== ${lang === 'zh' ? 'AI Test Workbench 环境体检 (doctor)' : 'AI Test Workbench Environment Doctor'} ===`);
     for (const c of checks) {
       const badge = c.status === 'OK' ? '[OK]  ' : c.status === 'WARN' ? '[WARN]' : '[FAIL]';
       console.log(`${badge} ${c.name}: ${c.detail}`);
     }
     console.log(
-      `\n${lang === 'zh' ? '汇总' : 'Summary'}: OK=${checks.length - warnCount - failCount}, WARN=${warnCount}, FAIL=${failCount}\n`
+      `\n${lang === 'zh' ? '汇总' : 'Summary'}: OK=${okCount}, WARN=${warnCount}, FAIL=${failCount}\n`
     );
   }
 
-  return exitCode;
+  return emitCommandResult(
+    buildCommandResult({
+      tool: 'doctor',
+      outcome: exitCode === 0 ? 'pass' : 'fail',
+      ok: exitCode === 0,
+      exitCode,
+      summary,
+      data: { ok: exitCode === 0, failCount, warnCount, checks },
+      nextRecommendedActions:
+        exitCode === 0
+          ? ['Call aitest_init(dryRun=true) or run "verify-change" on an initialized QA workspace.']
+          : checks.filter((c) => c.status === 'FAIL').map((c) => `Fix FAILED check "${c.name}": ${c.detail}`),
+    }),
+    { asJson: Boolean(options.json) }
+  );
 }

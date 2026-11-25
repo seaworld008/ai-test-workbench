@@ -112,10 +112,45 @@
     },
     {
       "id": "CLAIM-18-fger-agentic-dual-tier-redteam",
-      "claim": "FGER-agentic dual-tier red-team harness isolates hidden oracles and ephemeral Fulcio T2 CA, exposes same-UID local T1 limits (AG-B4/AG-C4), and enforces 0.0% T2 escape rate across all 4 attack classes (A/B/C/D)",
+      "claim": "FGER-agentic dual-tier red-team harness isolates hidden oracles and ephemeral Fulcio T2 CA, exposes same-UID local T1 limits (AG-B4/AG-C4), detects Class E Dieselgate branching (AG-E1/AG-E2), and enforces 0.0% T2 escape rate across all 5 attack classes (A/B/C/D/E)",
       "corpusType": "red-team",
       "testFile": "test/adversarial/fger-agentic.test.mjs",
       "testTitleSubstring": "FGER-agentic Dual-Tier Red-Team Suite"
+    },
+    {
+      "id": "CLAIM-19-immutable-trust-context-and-sticky-t1",
+      "claim": "Immutable TrustContext, sticky T1 key enforcement, multi-machine lock macs, and aitest_init template verification block governance lock re-sign/strip bypasses",
+      "corpusType": "security",
+      "testFile": "test/unit/trust-and-governance-wu01.test.mjs",
+      "testTitleSubstring": "WU-01"
+    },
+    {
+      "id": "CLAIM-20-framed-ipc-and-atomic-lock",
+      "claim": "Unified CommandResult v2 envelope, AITEST_RESULT_FILE framed IPC, and atomic disk lock prevent stdout scraping and concurrent lock deletion",
+      "corpusType": "architecture",
+      "testFile": "test/unit/envelope-ipc-and-lock-wu02.test.mjs",
+      "testTitleSubstring": "WU-02"
+    },
+    {
+      "id": "CLAIM-21-redirect-egress-and-redaction-v3",
+      "claim": "10-hop maxRedirects=0 validation firewall, MCP Host/Content-Type/Origin hardening, Redaction v3 (ANSI/token/cookie scrubbing), and pinned Fulcio CA/commit SHA attestation",
+      "corpusType": "security",
+      "testFile": "test/unit/security-redirect-and-redact-wu03.test.mjs",
+      "testTitleSubstring": "WU-03"
+    },
+    {
+      "id": "CLAIM-22-zero-block-autonomous-loop",
+      "claim": "Loopback CRUD defaults, aitest_bootstrap, branch-new spec baseline-ref exemption, A-UI-Sync diff correlation, and explore API schema inference enable unblocked zero-to-one agent workflows",
+      "corpusType": "autonomy",
+      "testFile": "test/unit/autonomy-bootstrap-and-loop-wu04.test.mjs",
+      "testTitleSubstring": "WU-04"
+    },
+    {
+      "id": "CLAIM-23-semantic-ast-gate-v2",
+      "claim": "AST Gate v2 SymbolTable (const propagation, DOM taint, semantic empty regex, expect.poll/loop/event/promise catches), AITEST-G116 HTTP status equivalence, and AITEST-G117 Dieselgate guard close residual bypasses",
+      "corpusType": "red-team",
+      "testFile": "test/adversarial/ast-gate-v2.test.mjs",
+      "testTitleSubstring": "WU-05 AST Gate v2"
     }
   ]
 }

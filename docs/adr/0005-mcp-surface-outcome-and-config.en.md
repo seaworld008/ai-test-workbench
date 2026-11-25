@@ -1,9 +1,9 @@
-# ADR-0005: MCP Tool Surface Consolidation (21 -> 17), Unified Outcome Model & Centralized Config Layer
+# ADR-0005: MCP Tool Surface Consolidation (21 -> 16), Unified Outcome Model & Centralized Config Layer
 
 > [简体中文 (默认)](./0005-mcp-surface-outcome-and-config.md) · [English README](../../README.en.md) · [Upgrade Guide](../upgrade.en.md)
 
-- **Status**: Accepted (Implemented in `v6.0.0`)
-- **Date**: `2026-11-24`
+- **Status**: Accepted (Shipped in `v6.0.0`, further consolidated to `16` canonical tools + `CommandResult v2` in `v6.2.0`)
+- **Date**: `2026-11-25`
 
 ---
 
@@ -20,10 +20,10 @@ In `v5.1.1`, the protocol and interface layer suffered from four structural issu
 
 ## 2. Decision
 
-1. **Zero Cycles & 17 Canonical MCP Tools**:
+1. **Zero Cycles & 16 Canonical MCP Tools**:
    - Extracted pure data module `src/mcp-hub/catalog.mjs` and routed `mcp serve` in `src/cli/commands.mjs`, reducing `src/**` import cycles to `0` (enforced in unit tests).
    - Decomposed `src/mcp/registry.mjs` into `src/mcp/tools/{shared,discovery,verification,stateful}.mjs` with declarative `execute(args, ctx)` and `validateExtra(args)` hooks, removing hardcoded tool branches from `protocol.mjs`.
-   - Consolidated `aitest_heal(action: "begin"|"attempt"|"conclude")` and `aitest_job(action: "status"|"result"|"cancel")` so `tools/list` exposes **17 canonical tools**, while `tools/call` forwards all 6 deprecated v5 names across `v6.x` with `data._deprecation` metadata and summary warnings.
+   - Building on the `v6.0` consolidation (`aitest_heal_*` / `aitest_job_*`), `v6.2` adds `aitest_bootstrap` and folds flaky telemetry & traceability into `aitest_report(view: "summary"|"flaky"|"traceability")`, bringing `tools/list` to **16 canonical tools** while forwarding all 8 legacy aliases across `v6.x`.
 2. **Per-Command Strict CLI Option Registry (`src/cli/commands.mjs`)**:
    - All 22 subcommands declare exact option tables; unrelated flags exit `1` with closest-flag suggestions; `governance` retains `--approver -> --by` as a deprecated `v6.x` alias.
 3. **Unified `Outcome` / Exit Codes & Centralized Config**:

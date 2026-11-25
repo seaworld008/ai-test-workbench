@@ -1,6 +1,8 @@
 // @ts-check
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
+import { isLoopbackHttpUrl, loadRuntimeConfig } from '../core/runtime-config.mjs';
 import { redactSecrets } from '../core/redact.mjs';
 import {
   capturePageSnapshot,
@@ -74,6 +76,7 @@ export async function executeExploreCrawl({
     endpoints: /** @type {Array<{ method: string, endpoint: string, status: number }>} */ ([]),
     blockedWriteRequests: /** @type {Array<{ method: string, endpoint: string, reason: string | null }>} */ ([]),
     blockedApiHosts: /** @type {string[]} */ ([]),
+    jsonCaptures: /** @type {Array<{ method: string, pathname: string, status: number, sample: unknown }>} */ ([]),
     envelopeErrors: /** @type {Array<{ route: string, method: string, endpoint: string, httpStatus: number, code: number | null, message: string | null }>} */ ([]),
     queryAnomalies: /** @type {Array<{ route: string, detail: string, endpoint: string }>} */ ([]),
     duplicateWaterfalls: /** @type {Array<{ route: string, endpoint: string, count: number }>} */ ([]),
@@ -97,6 +100,21 @@ export async function executeExploreCrawl({
   }
 
   const context = await browser.newContext(contextOpts);
+  const qaDirForRuntime = userAuthPath ? path.resolve(userAuthPath, '..', '..', '..') : null;
+  if (qaDirForRuntime && isLoopbackHttpUrl(safety.baseURL)) {
+    const rt = loadRuntimeConfig(qaDirForRuntime);
+    const authCfg = rt.ok ? rt.config?.auth : null;
+    if (authCfg?.loginEndpoint && authCfg.email && authCfg.password && !loadJsonIfValid(userAuthPath)) {
+      try {
+        const loginUrl = new URL(authCfg.loginEndpoint, safety.baseURL).toString();
+        await context.request.post(loginUrl, {
+          data: { email: authCfg.email, password: authCfg.password },
+        });
+      } catch {
+        // non-fatal loopback warmup attempt
+      }
+    }
+  }
   const observers = await attachExploreObservers({
     context,
     safety,
@@ -153,6 +171,17 @@ export async function executeExploreCrawl({
                   if (errObj?.name === 'NavigationDuplicated') return { usedSpa: true, error: null };
                   return { usedSpa: true, error: String(errObj?.message || e) };
                 }
+              }
+              // Generic History API SPA link click fallback for React / Next / Angular / Remix (`WU-04`)
+              const targetPathOnly = dest.split('?')[0];
+              const matchingLink = Array.from(document.querySelectorAll('a[href], [role="link"][data-href]')).find((el) => {
+                const raw = el.getAttribute('href') || el.getAttribute('data-href') || '';
+                if (!raw || raw.startsWith('#') || raw.startsWith('http')) return false;
+                return raw === dest || raw.split('?')[0] === targetPathOnly;
+              });
+              if (matchingLink && typeof (/** @type {any} */ (matchingLink)).click === 'function') {
+                (/** @type {any} */ (matchingLink)).click();
+                return { usedSpa: true, error: null };
               }
               return { usedSpa: false, error: null };
             }, normalizedKey)

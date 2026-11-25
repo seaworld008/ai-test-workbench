@@ -5,14 +5,19 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { analyzeHealerDiffText, runAuditForQaDir } from '../src/audit.mjs';
-import { runCli } from '../src/cli.mjs';
-import { suggestFailureCategory } from '../src/diagnose.mjs';
-import { attemptHealRepair, beginHealSession } from '../src/heal.mjs';
-import { beginRunLedger, finalizeRunLedger } from '../src/ledger.mjs';
-import { redactSecrets } from '../src/proc.mjs';
-import { executeSuiteCore } from '../src/runner.mjs';
-import { WORKBENCH_VERSION } from '../src/version.mjs';
+import {
+  WORKBENCH_VERSION,
+  analyzeHealerDiffText,
+  attemptHealRepair,
+  beginHealSession,
+  beginRunLedger,
+  executeSuiteCore,
+  finalizeRunLedger,
+  redactSecrets,
+  runAuditForQaDir,
+  runCli,
+  suggestFailureCategory,
+} from '../src/app/index.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -198,9 +203,11 @@ async function runBenchmark() {
 
     // C-class & D-class mis-heal attempts
     for (const errMsg of ['[Same-Origin 5xx Guard]\n500 GET /api/courses', 'Ambiguous spec: missing REQ-999']) {
+      const bFail = beginRunLedger(qaDir, { suite: 'e2e', command: 'playwright test', repoDir: benchTmp });
       fs.writeFileSync(
         rp,
         JSON.stringify({
+          config: { metadata: { runId: bFail.runId } },
           suites: [
             {
               file: 'tests/e2e/campus-portal.spec.ts',
@@ -210,7 +217,11 @@ async function runBenchmark() {
         }),
         'utf8'
       );
+      finalizeRunLedger(qaDir, bFail.runId, { exitCode: 1, resultsPath: rp });
       const hs = beginHealSession(qaDir);
+      if (!hs.ok || !hs.session) {
+        throw new Error(`Expected valid heal session for mis-heal probe, got: ${hs.error}`);
+      }
       const attempt = await attemptHealRepair(qaDir, { sessionId: hs.session.sessionId, skipRun: true });
       if (attempt.ok) misHeals += 1;
     }
@@ -343,11 +354,10 @@ async function runBenchmark() {
       seededDetails,
     };
 
-    // Write to gitignored reports/ by default so `npm run bench` never dirties tracked Git files (`Q-09`)
-    const updateTracked = process.argv.includes('--update-scorecard');
-    const outDir = updateTracked ? path.join(ROOT, 'bench') : path.join(ROOT, 'reports');
+    // Always write scorecard to gitignored reports/ so `npm run bench` never leaves tracked artifacts (`WU-03`)
+    const outDir = path.join(ROOT, 'reports');
     fs.mkdirSync(outDir, { recursive: true });
-    const scorecardPath = path.join(outDir, updateTracked ? 'scorecard.json' : 'bench-scorecard.json');
+    const scorecardPath = path.join(outDir, 'bench-scorecard.json');
     fs.writeFileSync(scorecardPath, JSON.stringify(scorecard, null, 2) + '\n', 'utf8');
 
     console.log(

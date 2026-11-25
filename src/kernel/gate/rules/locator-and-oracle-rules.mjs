@@ -101,13 +101,23 @@ export const ruleG114 = {
 
     for (const ev of diffEventSnippets(baseSum?.events?.routeFulfills, headSum?.events?.routeFulfills)) {
       if (canWaive(ev.snippet) || canWaive('AITEST-G114')) continue;
-      // Fault injection (4xx/5xx error responses) tests error resilience, not fake-green 200 mocks
-      if (ev.isFaultInjection) continue;
+      const scopedAssertions = ev.testTitle
+        ? headAssertions.filter((a) => a.testTitle === ev.testTitle)
+        : headAssertions;
+      const fulfilledCodes = new Set((ev.statusCodes || []).map((c) => Number(c)));
+      const stubsAssertedStatus =
+        fulfilledCodes.size > 0 &&
+        scopedAssertions.some((a) => {
+          if (Array.isArray(a.statusCodes) && a.statusCodes.some((c) => fulfilledCodes.has(Number(c)))) {
+            return true;
+          }
+          const expNum = Number(String(a.expectedArg || '').trim());
+          return Number.isFinite(expNum) && fulfilledCodes.has(expNum);
+        });
+      // Fault injection (4xx/5xx error responses) tests error resilience, NOT forging the exact 4xx/5xx status the test asserts (e.g. mocking 403 for an RBAC test).
+      if (ev.isFaultInjection && !stubsAssertedStatus) continue;
       // Security honeypot trap: route callback sets an external flag/array and the test asserts it stayed false / empty / 0
       if (ev.setsExternalTrapVar) {
-        const scopedAssertions = ev.testTitle
-          ? headAssertions.filter((a) => a.testTitle === ev.testTitle)
-          : headAssertions;
         const hasZeroOrFalseTrapAssertion = scopedAssertions.some(
           (a) =>
             (a.matcher === 'toBe' && (a.expectedArg === 'false' || a.expectedArg === '0')) ||

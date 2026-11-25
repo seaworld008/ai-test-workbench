@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,6 +15,10 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(__dirname, '..', 'fixtures', 't2-attestation');
 const ROOT_CA_PEM = path.join(FIXTURES, 'trusted-root-ca.pem');
+const ROOT_CA_SHA256 = crypto
+  .createHash('sha256')
+  .update(new crypto.X509Certificate(fs.readFileSync(ROOT_CA_PEM, 'utf8')).raw)
+  .digest('hex');
 const VALID_ATT = path.join(FIXTURES, 'valid-attestation.json');
 const VALID_BUNDLE = path.join(FIXTURES, 'valid-t2.sigstore.json');
 const WRONG_ISSUER_BUNDLE = path.join(FIXTURES, 'wrong-issuer-t2.sigstore.json');
@@ -26,10 +31,12 @@ test('Offline T2 Attestation Verification: valid Sigstore bundle passes with tru
     expectWorkflow: '.github/workflows/aitest-verify.yml',
     expectRef: 'refs/heads/main',
     trustedRootCertPath: ROOT_CA_PEM,
+    trustedRootSha256: ROOT_CA_SHA256,
   });
 
   assert.equal(res.ok, true, res.errors.join('\n'));
   assert.equal(res.trustLevel, 'T2');
+  assert.equal(res.trustRoot, 'pinned-custom');
   assert.equal(res.mergeGradeGreen, true);
   assert.equal(res.reasonCode, 'T2_VERIFIED');
   assert.equal(res.identity?.oidcIssuer, 'https://token.actions.githubusercontent.com');

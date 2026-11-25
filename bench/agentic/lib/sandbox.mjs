@@ -5,10 +5,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runCli } from '../../../src/cli.mjs';
-import { generateDiagnosticsMarkdown } from '../../../src/diagnose.mjs';
-import { beginRunLedger, finalizeRunLedger } from '../../../src/ledger.mjs';
-import { executeSuiteCore } from '../../../src/runner.mjs';
+import {
+  beginRunLedger,
+  executeSuiteCore,
+  finalizeRunLedger,
+  generateDiagnosticsMarkdown,
+  runCli,
+} from '../../../src/app/index.mjs';
 import {
   buildAppServerSource,
   buildFastModeResultsFromOracle,
@@ -26,7 +29,7 @@ export const TEMPLATE_MODULES_DIR = path.join(REPO_ROOT, 'templates', 'playwrigh
  * @param {Record<string, string | undefined>} [env]
  */
 export function gitExec(cwd, args, env) {
-  const res = spawnSync('git', ['-c', 'core.quotePath=off', ...args], {
+  const res = spawnSync('git', ['-c', 'core.quotePath=off', '-c', 'core.hooksPath=.aitest-no-hooks', '-c', 'core.fsmonitor=false', ...args], {
     cwd,
     env: env || process.env,
     shell: false,

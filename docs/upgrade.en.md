@@ -1,21 +1,21 @@
-# v5.x to v6.0.0 Upgrade & Migration Guide (`upgrade.en.md`)
+# v5.x to v6.2.0 Upgrade & Migration Guide (`upgrade.en.md`)
 
 > [简体中文 (默认)](./upgrade.md) · [Version Compatibility Matrix](../VERSION.en.md) · [Governance Guide](./governance.en.md) · [Changelog](../CHANGELOG.en.md)
 
-This guide documents all breaking changes from **`v5.1.1`** to **`v6.0.0`**, backward-compatibility aliases retained throughout `v6.x` (removed in `v7.0.0`), the automated `upgrade` workflow, and `@playwright/test` maintenance steps.
+This guide documents all breaking changes from **`v5.1.1` / `v6.1.0`** to **`v6.2.0`**, backward-compatibility aliases retained throughout `v6.x` (removed in `v7.0.0`), the automated `upgrade` workflow, and `@playwright/test` maintenance steps.
 
 ---
 
-## 1. Breaking Changes Summary (`v5.x -> v6.0.0`)
+## 1. Breaking Changes Summary (`v5.x / v6.1 -> v6.2.0`)
 
-| Area | `v5.1.1` Behavior | `v6.0.0` Behavior | Compatibility & Removal Window |
+| Area | `v5.1.1` / `v6.1.0` Behavior | `v6.2.0` Behavior | Compatibility & Removal Window |
 |---|---|---|---|
-| **MCP Tool Surface (21 -> 17)** | Separate tools `aitest_heal_begin`, `aitest_heal_attempt`, `aitest_heal_conclude` and `aitest_job_status`, `aitest_job_result`, `aitest_job_cancel` | Consolidated into **`aitest_heal`** (`action: "begin" \| "attempt" \| "conclude"`) and **`aitest_job`** (`action: "status" \| "result" \| "cancel"`); `tools/list` exposes **17 canonical tools** | `tools/call` accepts all 6 v5 names throughout `v6.x`, forwarding automatically with `structuredContent.data._deprecation` and a warning in `summary` (removed in `v7.0.0`) |
-| **Per-Command Strict CLI Flags** | Single 89-flag global bag silently ignored unrelated options | Each of the 22 subcommands declares its exact allowed flags in `src/cli/commands.mjs`; unrelated flags exit `1` with closest-flag suggestion; `<cmd> --help` lists valid flags | `governance approve` retains `--approver` -> `--by` as a deprecated warning alias (removed in `v7.0.0`) |
-| **Unified CLI `--json` & Exit Codes** | `init` lacked `--json`; `run --audit` exited `1` on `blocked` | All `blocked` gate outcomes uniformly exit **`2`**; `init --json` emits structured JSON plan/results | Existing top-level JSON data keys preserved |
-| **6 Fail-Closed Tightening Changes** | Missing TS compiler passed Layer 3; missing `tsc/eslint` in CI warned only; custom `--results` skipped Ledger; uninitialized dirs passed; malformed URLs passed; corrupt `aitest.config.json` fell back to defaults | All 6 paths now return `outcome: "blocked"` (exit code `2`) | Actionable error guidance printed; CLI-only `--allow-unbound-results` remains for explicit human offline T0 audits (never exposed to MCP) |
-| **Kernel Programmatic Imports** | Internal scripts imported `templates/playwright-qa/support/*.mjs` | Authoritative source lives in `src/kernel/*` and exports via `ai-test-workbench`, `ai-test-workbench/kernel`, `ai-test-workbench/target-guard`, and `ai-test-workbench/schema-validator` | `templates/playwright-qa/support/` stays synced as a standalone offline mirror for user `<repo>/qa` directories |
-| **`aitest.config.json` Schema & Rule Overrides** | No schema validation or per-rule config | Strict JSON Schema validation enabled; optional `rules` map supports per-rule overrides (`AITEST-G101..G115`), protected by `governance.lock` | All valid `v5` `aitest.config.json` files remain 100% compatible |
+| **MCP Tool Surface (21 -> 16)** | Separate `aitest_heal_*`, `aitest_job_*`, `aitest_flaky_report`, `aitest_trace_matrix` | Consolidated into **`aitest_heal`** (with `discard`), **`aitest_job`**, and **`aitest_report`** (`view: "summary" \| "flaky" \| "traceability"`), plus **`aitest_bootstrap`**; `tools/list` exposes **16 canonical tools** | `tools/call` forwards all **8 legacy names** throughout `v6.x` with `structuredContent.data._deprecation` and summary warnings (removed in `v7.0.0`) |
+| **Per-Command Strict CLI Flags** | Single 89-flag global bag silently ignored unrelated options | Every subcommand (including `bootstrap` and `report --view`) declares exact flags in `src/cli/commands.mjs`; `--json` usage errors exit **`64`** | `governance approve` retains `--approver` -> `--by`; `flaky` / `trace-matrix` remain forwarded to `report --view` (`v7.0.0` removal) |
+| **Unified `CommandResult v2`, Framed IPC & Exit Codes** | Tail-text stdout scraping for MCP child JSON; mixed usage exit codes | Uniform `CommandResult v2` envelopes (`0=pass / 1=fail / 2=blocked / 64=usage`) over `AITEST_RESULT_FILE` framed IPC | Existing top-level JSON data keys preserved alongside `schemaVersion`, `blockerKind`, `recoverySteps` |
+| **Immutable `TrustContext`, Sticky T1 & Redirect Firewall** | Cross-machine lock fallback could relax missing `mac`; `aitest_init` re-signed missing locks | Frozen `TrustContext` opened once; multi-machine `macs` map + sticky T1 anti-strip; `aitest_init` seals clean untouched templates only; 10-hop redirect re-validation | CLI offline `--allow-unbound-results` (T0) remains CLI-only; clean CI verifies protected-file SHA-256 and downgrades unsigned T1 to T0 |
+| **Kernel SSoT, App Facade & Exports** | Scripts coupled directly to internals or `templates/playwright-qa/support/*.mjs` | Authoritative `src/kernel/*` wrapped behind `src/app/index.mjs`; exports `.`, `./kernel`, `./target-guard`, `./schema-validator` | `templates/playwright-qa/support/` stays synced by transitive closure for standalone host `<repo>/qa` runs |
+| **`aitest.config.json` Schema, SymbolTable & Dieselgate** | `AITEST-G101..G115` (15 rules) | Adds `SymbolTable`, `AITEST-G116` (HTTP status equivalence), and `AITEST-G117` (Dieselgate product-branching guard) for `17` toggleable rules plus `.aitest/baseline-ref` branch-new exemption | All valid `v5` / `v6.0` `aitest.config.json` files remain 100% compatible |
 
 ---
 
@@ -31,6 +31,8 @@ Update prompts, scripts, or agent rules referencing legacy v5 tool names as foll
 | `aitest_job_status({ jobId })` | `aitest_job({ action: "status", jobId })` |
 | `aitest_job_result({ jobId, waitMs })` | `aitest_job({ action: "result", jobId, waitMs })` |
 | `aitest_job_cancel({ jobId })` | `aitest_job({ action: "cancel", jobId })` |
+| `aitest_flaky_report({ target })` *(v5/v6.1)* | `aitest_report({ view: "flaky", target })` |
+| `aitest_trace_matrix({ target })` *(v5/v6.1)* | `aitest_report({ view: "traceability", target })` |
 
 ---
 
@@ -40,17 +42,17 @@ Update prompts, scripts, or agent rules referencing legacy v5 tool names as foll
 
 ```bash
 # 1. Preview planned updates and any local conflicts
-npx ai-test-workbench@6.1.0 upgrade --target /path/to/repo --dry-run
+npx ai-test-workbench@6.2.0 upgrade --target /path/to/repo --dry-run
 
 # 2. Apply upgrade (defaults to support/** and scripts/audit-results.mjs; pass --scope all for full template check)
-npx ai-test-workbench@6.1.0 upgrade --target /path/to/repo
+npx ai-test-workbench@6.2.0 upgrade --target /path/to/repo
 
 # 3. Review changes and re-seal governance.lock locally as a human reviewer
-npx ai-test-workbench@6.1.0 governance status --target /path/to/repo
-npx ai-test-workbench@6.1.0 governance approve --target /path/to/repo --by "alice@team" --reason "Upgrade to ai-test-workbench v6.0.0 kernel"
+npx ai-test-workbench@6.2.0 governance status --target /path/to/repo
+npx ai-test-workbench@6.2.0 governance approve --target /path/to/repo --by "alice@team" --reason "Upgrade to ai-test-workbench v6.0.0 kernel"
 
 # 4. Verify zero kernel version drift
-npx ai-test-workbench@6.1.0 doctor --target /path/to/repo
+npx ai-test-workbench@6.2.0 doctor --target /path/to/repo
 ```
 
 ---
@@ -64,8 +66,8 @@ npx ai-test-workbench@6.1.0 doctor --target /path/to/repo
    ```
 3. Preview and sync official Test Agents definitions:
    ```bash
-   npx ai-test-workbench@6.1.0 update-agents --target /path/to/repo --loop codex,claude --dry-run
-   npx ai-test-workbench@6.1.0 update-agents --target /path/to/repo --loop codex,claude
+   npx ai-test-workbench@6.2.0 update-agents --target /path/to/repo --loop codex,claude --dry-run
+   npx ai-test-workbench@6.2.0 update-agents --target /path/to/repo --loop codex,claude
    ```
 4. If an agent file was customized locally, the incoming template is written to `<file>.aitest-new` (exit code `2`). Merge and remove `.aitest-new` (or pass `--force` explicitly).
 5. Run `npm run typecheck && npm run lint`, offline `smoke`, and target regressions, then re-seal via human `governance approve`.

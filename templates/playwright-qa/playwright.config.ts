@@ -1,13 +1,34 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, devices } from '@playwright/test';
-import { assertTargetSafety, loadEnvFileIfPresent } from './support/target-guard.mjs';
+import {
+  applyEnvFileToProcess,
+  assertTargetSafety,
+  loadRuntimeConfig,
+  resolveDefaultMutationPolicy,
+} from './support/target-guard.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-loadEnvFileIfPresent(path.join(__dirname, '.env'));
+applyEnvFileToProcess(path.join(__dirname, '.env'));
+
+const runtimeCfgRes = loadRuntimeConfig(__dirname);
+if (runtimeCfgRes.exists && !runtimeCfgRes.ok) {
+  throw new Error(`[AI Test Workbench Runtime Config Error] ${runtimeCfgRes.errors.join(' | ')}`);
+}
+const runtimeCfg = runtimeCfgRes.config;
+if (!process.env.TEST_BASE_URL && runtimeCfg?.baseURL) {
+  process.env.TEST_BASE_URL = runtimeCfg.baseURL;
+}
 
 const safety = assertTargetSafety(process.env);
 const baseURL = safety.baseURL;
+const mutationDefaults = resolveDefaultMutationPolicy(process.env, baseURL);
+if (process.env.TEST_ALLOW_MUTATION === undefined && mutationDefaults.allowMutation) {
+  process.env.TEST_ALLOW_MUTATION = '1';
+}
+if (process.env.TEST_STRICT_READONLY === undefined) {
+  process.env.TEST_STRICT_READONLY = mutationDefaults.strictReadonly ? '1' : '0';
+}
 const authStateFile = path.join(__dirname, 'playwright', '.auth', 'user.json');
 
 // Fail early at config time if user explicitly invoked `playwright test --project=e2e|api|setup` without TEST_BASE_URL
@@ -17,12 +38,25 @@ const requestedOnlineProject = process.argv.some((arg) =>
 );
 if (isTestRun && requestedOnlineProject && !baseURL) {
   throw new Error(
-    '[AI Test Workbench Config Error] Online projects (e2e, api, setup) require TEST_BASE_URL to be configured. Refusing to silently skip.'
+    '[AI Test Workbench Config Error] Online projects (e2e, api, setup) require TEST_BASE_URL or aitest.runtime.json baseURL. Refusing to silently skip.'
   );
 }
 
+const configuredWebServer =
+  runtimeCfg?.webServer && process.env.AITEST_DISABLE_WEBSERVER !== '1'
+    ? {
+        command: runtimeCfg.webServer.command,
+        ...(runtimeCfg.webServer.cwd ? { cwd: path.resolve(__dirname, '..', runtimeCfg.webServer.cwd) } : {}),
+        ...(runtimeCfg.webServer.url ? { url: runtimeCfg.webServer.url } : {}),
+        timeout: runtimeCfg.webServer.timeoutMs || 45_000,
+        reuseExistingServer: process.env.CI ? false : runtimeCfg.webServer.reuseExistingServer !== false,
+        ...(runtimeCfg.webServer.env ? { env: runtimeCfg.webServer.env } : {}),
+      }
+    : undefined;
+
 export default defineConfig({
   testDir: './tests',
+  ...(configuredWebServer ? { webServer: configuredWebServer } : {}),
   metadata: {
     runId: process.env.AITEST_RUN_ID || undefined,
     suite: process.env.AITEST_ACTIVE_SUITE || undefined,

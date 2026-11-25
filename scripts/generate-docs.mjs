@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { TOOL_REGISTRY } from '../src/mcp/registry.mjs';
+import { TOOL_REGISTRY } from '../src/app/index.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(__dirname, '..');
@@ -59,8 +59,8 @@ export function renderMcpToolsTable(lang = 'en') {
   });
 
   const footnote = isZh
-    ? `\n> 自动生成自 \`src/mcp/registry.mjs\`（共 \`${TOOL_REGISTRY.length}\` 个权威工具；\`governance approve\` 仅限人类本地 CLI，永不注册为 MCP 工具；6 个 v5 旧名 \`aitest_heal_*\` / \`aitest_job_*\` 在 v6.x 中作为弃用转发别名保留）。`
-    : `\n> Auto-generated from \`src/mcp/registry.mjs\` (\`${TOOL_REGISTRY.length}\` canonical tools; \`governance approve\` is human-CLI-only and never registered; 6 v5 names \`aitest_heal_*\` / \`aitest_job_*\` remain as deprecated forwarding aliases in v6.x).`;
+    ? `\n> 自动生成自 \`src/mcp/registry.mjs\`（共 \`${TOOL_REGISTRY.length}\` 个权威工具；\`governance approve\` 仅限人类本地 CLI，永不注册为 MCP 工具；\`v5\`/\`v6.1\` 共 8 个旧工具名在 \`v6.x\` 中作为弃用转发别名保留，详见 \`docs/upgrade.md\`）。`
+    : `\n> Auto-generated from \`src/mcp/registry.mjs\` (\`${TOOL_REGISTRY.length}\` canonical tools; \`governance approve\` is human-CLI-only and never registered; 8 legacy v5/v6.1 tool names remain as deprecated forwarding aliases in \`v6.x\`, see \`docs/upgrade.en.md\`).`;
 
   return [header, sep, ...rows].join('\n') + '\n' + footnote;
 }

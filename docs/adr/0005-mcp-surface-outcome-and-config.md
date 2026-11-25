@@ -1,9 +1,9 @@
-# ADR-0005：MCP 工具面收敛（21 -> 17）、统一结果模型与集中式配置层
+# ADR-0005：MCP 工具面收敛（21 -> 16）、统一结果模型与集中式配置层
 
 > [English Version](./0005-mcp-surface-outcome-and-config.en.md) · [简体中文主文档](../../README.md) · [升级指南](../upgrade.md)
 
-- **状态**：已采纳（Accepted，落地于 `v6.0.0`）
-- **决策日期**：`2026-11-24`
+- **状态**：已采纳（Accepted，落地于 `v6.0.0`，并在 `v6.2.0` 进一步收敛为 `16` 个权威工具 + `CommandResult v2`）
+- **决策日期**：`2026-11-25`
 
 ---
 
@@ -20,10 +20,10 @@
 
 ## 2. 最终决策
 
-1. **环路清零与工具面收敛（21 -> 17）**：
+1. **环路清零与工具面收敛（21 -> 16）**：
    - 抽离纯数据模块 `src/mcp-hub/catalog.mjs`，将 `mcp serve` 路由移至 `src/cli/commands.mjs`，实现 `src/**` 零循环导入（由单测强执）。
    - 将 `src/mcp/registry.mjs` 拆分为 `src/mcp/tools/{shared,discovery,verification,stateful}.mjs`，支持声明式 `execute(args, ctx)` 与 `validateExtra(args)` 钩子，清除 `protocol.mjs` 内硬编码分支。
-   - 合并为 `aitest_heal(action: "begin"|"attempt"|"conclude")` 与 `aitest_job(action: "status"|"result"|"cancel")`，`tools/list` 收敛至 **17 个权威工具**；`tools/call` 在整个 `v6.x` 保留 6 个旧工具名自动转发并附带 `data._deprecation` 与 `summary` 弃用告警。
+   - 在 `v6.0` 合并 `aitest_heal_*`/`aitest_job_*` 至 17 工具的基础上，`v6.2` 进一步新增 `aitest_bootstrap` 并把高频只读报告统一收入 `aitest_report(view: "summary"|"flaky"|"traceability")`，最终使 `tools/list` 收敛至 **16 个权威工具**（同时在 `v6.x` 保留全部 8 个旧名转发告警别名）。
 2. **按命令严格 CLI 参数表（`src/cli/commands.mjs`）**：
    - 22 个子命令各自声明允许的参数集合，传入无关旗标直接退出码 `1` 并提示拼写建议；同时在 `governance` 上保留 `--approver -> --by` 的 `v6.x` 弃用告警别名。
 3. **统一 `Outcome` / 退出码与集中配置层**：

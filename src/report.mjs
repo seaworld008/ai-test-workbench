@@ -2,6 +2,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
+import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
+import { runFlakyCommand } from './flaky.mjs';
+import { runTraceMatrixCommand } from './traceability.mjs';
 
 /**
  * @param {string} dir
@@ -20,10 +23,29 @@ function findTraceZips(dir) {
 }
 
 /**
- * @param {{ lang?: string, target?: string, qaDir?: string, dryRun?: boolean, force?: boolean, json?: boolean }} [options]
+ * @param {{ lang?: string, target?: string, qaDir?: string, view?: string, syncQuarantine?: boolean, dryRun?: boolean, force?: boolean, json?: boolean }} [options]
  * @returns {Promise<number>}
  */
 export async function runReportCommand(options = {}) {
+  const view = String(options.view || 'artifacts').toLowerCase();
+  if (view === 'flaky') {
+    return runFlakyCommand({
+      lang: options.lang,
+      target: options.target,
+      qaDir: options.qaDir,
+      syncQuarantine: Boolean(options.syncQuarantine),
+      json: Boolean(options.json),
+    });
+  }
+  if (view === 'traceability' || view === 'trace-matrix') {
+    return runTraceMatrixCommand({
+      lang: options.lang,
+      target: options.target,
+      qaDir: options.qaDir,
+      dryRun: Boolean(options.dryRun),
+      json: Boolean(options.json),
+    });
+  }
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   if (!options.target) {
     console.error(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
@@ -81,26 +103,36 @@ export async function runReportCommand(options = {}) {
   );
 
   const exitCode = hasAny ? 0 : 1;
-  if (options.json) {
-    console.log(JSON.stringify({ ok: hasAny, exitCode, ...payload }, null, 2));
-    return exitCode;
+  if (!options.json) {
+    console.log(`\n=== ${lang === 'zh' ? '本地测试报告、知识图谱与证据索引 (report)' : 'Local Test Reports, Code Map & Artifacts'} ===`);
+    console.log(`HTML Report     : ${payload.htmlReport || '(not generated yet)'}`);
+    console.log(`JUnit XML       : ${payload.junitXml || '(not generated yet)'}`);
+    console.log(`Results JSON    : ${payload.resultsJson || '(not generated yet)'}`);
+    console.log(`Verdict Summary : ${payload.verdictSummary || '(not generated yet — run "verify-change")'}`);
+    console.log(`SARIF Report    : ${payload.verdictSarif || '(not generated yet)'}`);
+    console.log(`AI Diagnostics  : ${payload.aiDiagnostics || '(not generated yet — run "diagnose" on failure)'}`);
+    console.log(`Trace Matrix    : ${payload.traceMatrix || '(not generated yet — run "trace-matrix")'}`);
+    console.log(`System Atlas    : ${payload.systemOverview || '(not explored yet)'}`);
+    console.log(`Living Code Map : ${payload.systemMap || '(not synced yet — run "map")'}`);
+    console.log(`Perf Summary    : ${payload.perfSummary || '(not benchmarked yet — run "perf")'}`);
+    console.log(`Failure Traces  : ${traces.length} trace file(s)`);
+    for (const tr of traces.slice(0, 10)) {
+      console.log(`  -> npx playwright show-trace "${tr}"`);
+    }
+    console.log('');
   }
 
-  console.log(`\n=== ${lang === 'zh' ? '本地测试报告、知识图谱与证据索引 (report)' : 'Local Test Reports, Code Map & Artifacts'} ===`);
-  console.log(`HTML Report     : ${payload.htmlReport || '(not generated yet)'}`);
-  console.log(`JUnit XML       : ${payload.junitXml || '(not generated yet)'}`);
-  console.log(`Results JSON    : ${payload.resultsJson || '(not generated yet)'}`);
-  console.log(`Verdict Summary : ${payload.verdictSummary || '(not generated yet — run "verify-change")'}`);
-  console.log(`SARIF Report    : ${payload.verdictSarif || '(not generated yet)'}`);
-  console.log(`AI Diagnostics  : ${payload.aiDiagnostics || '(not generated yet — run "diagnose" on failure)'}`);
-  console.log(`Trace Matrix    : ${payload.traceMatrix || '(not generated yet — run "trace-matrix")'}`);
-  console.log(`System Atlas    : ${payload.systemOverview || '(not explored yet)'}`);
-  console.log(`Living Code Map : ${payload.systemMap || '(not synced yet — run "map")'}`);
-  console.log(`Perf Summary    : ${payload.perfSummary || '(not benchmarked yet — run "perf")'}`);
-  console.log(`Failure Traces  : ${traces.length} trace file(s)`);
-  for (const tr of traces.slice(0, 10)) {
-    console.log(`  -> npx playwright show-trace "${tr}"`);
-  }
-  console.log('');
-  return hasAny ? 0 : 1;
+  return emitCommandResult(
+    buildCommandResult({
+      tool: 'report',
+      outcome: hasAny ? 'pass' : 'fail',
+      ok: hasAny,
+      exitCode,
+      summary: hasAny
+        ? `Indexed QA artifacts (${traces.length} trace(s), results=${Boolean(payload.resultsJson)})`
+        : 'No test reports or artifacts found yet in QA workspace.',
+      data: payload,
+    }),
+    { asJson: Boolean(options.json) }
+  );
 }

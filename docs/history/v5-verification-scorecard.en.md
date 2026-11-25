@@ -1,6 +1,6 @@
 # AI Test Workbench v5.0 Verification & Benchmark Scorecard
 
-> [简体中文 (默认)](./v5-verification-scorecard.md) · [Architecture Review (2026-11)](./v4-architecture-code-review-2026-11.en.md) · [Optimization Roadmap](./v5-optimization-roadmap-2026-2027.en.md) · [Raw Machine Scorecard](../../bench/scorecard.json)
+> [简体中文 (默认)](./v5-verification-scorecard.md) · [Architecture Review (2026-11)](./v4-architecture-code-review-2026-11.en.md) · [Optimization Roadmap](./v5-optimization-roadmap-2026-2027.en.md) · [Benchmark Runner](../../scripts/run-bench.mjs)
 
 This scorecard records the measured **before-and-after North-Star metrics** and **P0 closure matrix** after completing the `v5.0.0` deep optimization. Every number below is deterministically reproducible via `npm test`, `npm run demo:verify`, and `npm run bench`.
 

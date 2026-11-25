@@ -4,14 +4,97 @@ import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
 import { runAuditForQaDir } from './audit.mjs';
 import { syncLivingCodeMap } from './codemap.mjs';
-import { outcomeToExitCode } from './core/outcome.mjs';
+import { loadWorkbenchConfig } from './core/config.mjs';
+import { buildCommandResult, emitCommandResult, outcomeToExitCode } from './core/outcome.mjs';
 import { resolvePlaywrightCli } from './core/playwright-resolve.mjs';
 import { runPlaywright } from './core/proc.mjs';
 import { redactSecrets } from './core/redact.mjs';
+import { loadRuntimeConfig } from './core/runtime-config.mjs';
 import { syncQuarantineFromLedger } from './flaky.mjs';
 import { computeImpact } from './impact.mjs';
 import { beginRunLedger, finalizeRunLedger } from './ledger.mjs';
 import { evaluateTargetSafety, loadMergedQaEnv } from './origin-guard.mjs';
+
+const PLAYWRIGHT_ENV_ALLOWLIST_EXACT = new Set([
+  'PATH',
+  'Path',
+  'HOME',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'LOCALAPPDATA',
+  'APPDATA',
+  'XDG_CONFIG_HOME',
+  'XDG_CACHE_HOME',
+  'XDG_DATA_HOME',
+  'TMP',
+  'TEMP',
+  'TMPDIR',
+  'SYSTEMROOT',
+  'SystemRoot',
+  'COMSPEC',
+  'ComSpec',
+  'PATHEXT',
+  'SystemDrive',
+  'WINDIR',
+  'windir',
+  'SHELL',
+  'TERM',
+  'LANG',
+  'LC_ALL',
+  'LC_MESSAGES',
+  'TZ',
+  'NODE_ENV',
+  'NODE_OPTIONS',
+  'CI',
+  'GITHUB_ACTIONS',
+  'GITLAB_CI',
+  'BUILDKITE',
+  'REQUIRE_TEST_TARGET',
+  'DEBUG',
+  'NO_COLOR',
+  'FORCE_COLOR',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'no_proxy',
+  'DISPLAY',
+  'WAYLAND_DISPLAY',
+  'XAUTHORITY',
+  'DBUS_SESSION_BUS_ADDRESS',
+]);
+
+const PLAYWRIGHT_ENV_ALLOWLIST_PREFIXES = ['PLAYWRIGHT_', 'PW_', 'TEST_', 'E2E_', 'FAIL_ON_'];
+const PLAYWRIGHT_ENV_ALLOWLIST_AITEST = new Set(['AITEST_ACTIVE_SUITE', 'AITEST_RUN_ID', 'AITEST_LANG', 'AITEST_DISABLE_WEBSERVER']);
+
+/**
+ * Builds a strict allowlisted environment for Playwright & target app processes,
+ * stripping `AITEST_HMAC_KEY*`, MCP tokens, cloud credentials, and CI OIDC tokens (`WU-01`).
+ * @param {Record<string, string | undefined>} baseEnv
+ * @param {Record<string, string | undefined>} [extraEnv]
+ * @returns {Record<string, string>}
+ */
+export function buildPlaywrightChildEnv(baseEnv = process.env, extraEnv = {}) {
+  /** @type {Record<string, string>} */
+  const clean = {};
+  const combined = { ...baseEnv, ...extraEnv };
+  for (const [k, v] of Object.entries(combined)) {
+    if (v === undefined) continue;
+    if (k.startsWith('AITEST_HMAC_KEY') || k.startsWith('AITEST_MCP_') || k.startsWith('ACTIONS_ID_TOKEN_REQUEST_')) {
+      continue;
+    }
+    const allowed =
+      PLAYWRIGHT_ENV_ALLOWLIST_EXACT.has(k) ||
+      PLAYWRIGHT_ENV_ALLOWLIST_AITEST.has(k) ||
+      PLAYWRIGHT_ENV_ALLOWLIST_PREFIXES.some((p) => k.startsWith(p));
+    if (allowed) {
+      clean[k] = String(v);
+    }
+  }
+  return clean;
+}
 
 /**
  * @param {string} suite
@@ -58,6 +141,23 @@ export function buildSuitePlaywrightArgs(suite, options = {}) {
 }
 
 /**
+ * Resolves explicit `--files` / `--line` CLI targets for rapid single-file inner loop (`WU-04`).
+ * @param {string | string[] | undefined} files
+ * @param {number | string | undefined} line
+ * @returns {string[]}
+ */
+export function resolveExplicitFileTargets(files, line) {
+  const explicitFiles = Array.isArray(files)
+    ? files.map((s) => String(s).trim()).filter(Boolean)
+    : typeof files === 'string' && files.trim()
+      ? files.split(',').map((s) => s.trim()).filter(Boolean)
+      : [];
+  const lineNum = Number.isInteger(Number(line)) && Number(line) > 0 ? Number(line) : null;
+  if (explicitFiles.length === 0) return [];
+  return lineNum && explicitFiles.length === 1 ? [`${explicitFiles[0]}:${lineNum}`] : explicitFiles;
+}
+
+/**
  * Pure structured core execution for Playwright suites + Run Ledger + optional 4-layer Audit.
  * Never hijacks console; returns rich structured data for both CLI and MCP.
  * @param {Record<string, any>} [options]
@@ -85,11 +185,18 @@ export async function executeSuiteCore(options = {}) {
     };
   }
 
+  loadWorkbenchConfig({ qaDir });
   const suite = (options.suite || 'smoke').toLowerCase();
+  const runtimeCfgRes = loadRuntimeConfig(qaDir);
   /** @type {Record<string, string>} */
   const overrides = {};
-  if (options.baseUrl) overrides.TEST_BASE_URL = options.baseUrl;
-  if (options.allowMutation) overrides.TEST_ALLOW_MUTATION = '1';
+  if (options.baseUrl) {
+    overrides.TEST_BASE_URL = options.baseUrl;
+  } else if (!process.env.TEST_BASE_URL && runtimeCfgRes.ok && runtimeCfgRes.config?.baseURL) {
+    overrides.TEST_BASE_URL = runtimeCfgRes.config.baseURL;
+  }
+  if (options.allowMutation === true) overrides.TEST_ALLOW_MUTATION = '1';
+  else if (options.allowMutation === false) overrides.TEST_ALLOW_MUTATION = '0';
 
   const mergedEnv = loadMergedQaEnv(qaDir, { ...process.env, ...overrides });
   const safety = evaluateTargetSafety(mergedEnv);
@@ -117,7 +224,11 @@ export async function executeSuiteCore(options = {}) {
 
   let pwArgs = [];
   let impactResult = null;
-  if (suite === 'impact') {
+  const fileTargets = resolveExplicitFileTargets(options.files, options.line);
+
+  if (fileTargets.length > 0) {
+    pwArgs = ['test', ...fileTargets];
+  } else if (suite === 'impact') {
     impactResult = options.precomputedImpact || (await computeImpact(target, { qaDir: options.qaDir, base: options.base }));
     if (impactResult.mode === 'targeted') {
       pwArgs.push('test', 'tests/smoke', ...impactResult.specs, '--project=smoke');
@@ -158,13 +269,13 @@ export async function executeSuiteCore(options = {}) {
     repoDir,
   });
 
-  const runEnv = {
-    ...process.env,
+  const runEnv = buildPlaywrightChildEnv(process.env, {
     ...overrides,
-    ...(mergedEnv.TEST_STRICT_READONLY === undefined && !safety.allowMutation ? { TEST_STRICT_READONLY: '1' } : {}),
+    ...(safety.allowMutation ? { TEST_ALLOW_MUTATION: '1' } : {}),
+    ...(mergedEnv.TEST_STRICT_READONLY === undefined ? { TEST_STRICT_READONLY: safety.strictReadonly ? '1' : '0' } : {}),
     AITEST_ACTIVE_SUITE: suite,
     AITEST_RUN_ID: ledgerBegin.runId,
-  };
+  });
 
   if (typeof options.onProgress === 'function') {
     options.onProgress({ progress: 10, total: 100, message: `Starting suite "${suite}" (runId=${ledgerBegin.runId})` });
@@ -227,14 +338,35 @@ export async function executeSuiteCore(options = {}) {
   const failedSpecs = (ledgerFinal?.tests || [])
     .filter((t) => t.status === 'unexpected' || t.status === 'flaky')
     .slice(0, 15)
-    .map((t) => ({
-      testId: t.testId,
-      file: t.file,
-      line: t.line,
-      title: redactSecrets(t.title),
-      status: t.status,
-      error: t.errorSnippet ? redactSecrets(t.errorSnippet) : null,
-    }));
+    .map((t) => {
+      let errorContextAria = null;
+      const ariaAtt = (t.attachments || []).find(
+        (/** @type {any} */ a) =>
+          (a?.name === 'error-context' || String(a?.path || '').endsWith('.md')) && a?.path && fs.existsSync(a.path)
+      );
+      if (ariaAtt?.path) {
+        try {
+          errorContextAria = redactSecrets(fs.readFileSync(ariaAtt.path, 'utf8')).slice(0, 1800);
+        } catch {
+          errorContextAria = null;
+        }
+      }
+      const errMsg = t.errorSnippet ? redactSecrets(t.errorSnippet) : null;
+      const locatorSuggestions = [];
+      if (errMsg && /locator|strict mode|getBy/i.test(errMsg)) {
+        locatorSuggestions.push('Inspect errorContextAria and bind a unique semantic locator (getByRole / getByLabel / getByTestId).');
+      }
+      return {
+        testId: t.testId,
+        file: t.file,
+        line: t.line,
+        title: redactSecrets(t.title),
+        status: t.status,
+        error: errMsg,
+        ...(errorContextAria ? { errorContextAria } : {}),
+        ...(locatorSuggestions.length > 0 ? { locatorSuggestions } : {}),
+      };
+    });
 
   return {
     ok: finalCode === 0,
@@ -273,35 +405,43 @@ export async function runSuiteCommand(options = {}) {
     inheritStdio: !options.json,
   });
 
-  if (options.json) {
-    console.log(JSON.stringify(res, null, 2));
-    return res.exitCode;
-  }
-
-  if (!res.runId && res.error) {
-    console.error(res.error);
-    return res.exitCode;
-  }
-
-  if (res.impact) {
-    console.log(`[Impact] ${res.impact.mode.toUpperCase()}: ${res.impact.reason}`);
-  }
-  console.log(`[Runner] runId=${res.runId} suite=${res.suite} scope=${res.acceptanceScope}`);
-  if (res.codeMapRevision !== null) {
-    console.log(`[CodeMap] Revision #${res.codeMapRevision}`);
-  }
-  if (res.audit) {
-    if (res.counts) {
-      console.log(
-        `\n[Audit] runId=${res.runId} passed=${res.counts.passed} failed=${res.counts.failed} flaky=${res.counts.flaky} skipped=${res.counts.skipped}`
-      );
-    }
-    for (const w of res.audit.warnings) console.warn(`[Audit WARN] ${w}`);
-    if (!res.audit.ok) {
-      for (const e of res.audit.errors) console.error(`[Audit FAIL] ${e}`);
+  if (!options.json) {
+    if (!res.runId && res.error) {
+      console.error(res.error);
     } else {
-      console.log('[Audit OK] All 4 governance, static & runtime quality gates passed.');
+      if (res.impact) {
+        console.log(`[Impact] ${res.impact.mode.toUpperCase()}: ${res.impact.reason}`);
+      }
+      console.log(`[Runner] runId=${res.runId} suite=${res.suite} scope=${res.acceptanceScope}`);
+      if (res.codeMapRevision !== null) {
+        console.log(`[CodeMap] Revision #${res.codeMapRevision}`);
+      }
+      if (res.audit) {
+        if (res.counts) {
+          console.log(
+            `\n[Audit] runId=${res.runId} passed=${res.counts.passed} failed=${res.counts.failed} flaky=${res.counts.flaky} skipped=${res.counts.skipped}`
+          );
+        }
+        for (const w of res.audit.warnings) console.warn(`[Audit WARN] ${w}`);
+        if (!res.audit.ok) {
+          for (const e of res.audit.errors) console.error(`[Audit FAIL] ${e}`);
+        } else {
+          console.log('[Audit OK] All 4 governance, static & runtime quality gates passed.');
+        }
+      }
     }
   }
-  return res.exitCode;
+  return emitCommandResult(
+    buildCommandResult({
+      tool: 'run',
+      outcome: res.exitCode === 2 ? 'blocked' : res.ok ? 'pass' : 'fail',
+      ok: Boolean(res.ok),
+      exitCode: res.exitCode,
+      summary: res.error
+        ? res.error
+        : `Suite "${res.suite}" ${res.ok ? 'passed' : 'failed'} (runId=${res.runId || 'none'}, passed=${res.counts?.passed ?? 0}, failed=${res.counts?.failed ?? 0})`,
+      data: res,
+    }),
+    { asJson: Boolean(options.json) }
+  );
 }

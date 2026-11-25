@@ -97,7 +97,9 @@ export function pushBool(arr, flag, val) {
  * @typedef {{
  *   deprecatedTool: string,
  *   targetTool: string,
- *   fixedAction: string,
+ *   fixedAction?: string,
+ *   fixedArgs?: Record<string, any>,
+ *   replacement?: string,
  *   deprecatedSince: string,
  *   removeIn: string,
  * }} DeprecatedToolAliasSpec

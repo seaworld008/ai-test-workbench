@@ -22,7 +22,7 @@ const EXPECTED_VERSIONS = ['2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25
 const VALID_SCHEMA_TYPES = new Set(['string', 'number', 'integer', 'boolean', 'object', 'array', 'null']);
 
 function validateToolSchemas(tools) {
-  assert.equal(tools.length, 17, `Expected exactly 17 canonical MCP tools, got ${tools.length}`);
+  assert.equal(tools.length, 16, `Expected exactly 16 canonical MCP tools, got ${tools.length}`);
   const seenNames = new Set();
   for (const tool of tools) {
     assert.equal(typeof tool.name, 'string');
@@ -76,7 +76,7 @@ async function runSdkClientLifecycleSuite(label, createTransport, tmpWs) {
     // 2. Ping health check
     await client.ping();
 
-    // 3. tools/list: exactly 17 canonical tools with valid schemas
+    // 3. tools/list: exactly 16 canonical tools with valid schemas
     const listRes = await client.listTools();
     validateToolSchemas(listRes.tools);
 
@@ -325,7 +325,7 @@ test('MCP SDK 1.32.2 Reference Client interoperability across stdio, Streamable 
     assert.equal(await negotiateVersionOverLegacySse(baseUrl, '2099-01-01'), '2025-11-25');
   });
 
-  await t.test('StdioClientTransport: init, 17 tools + valid schemas, structuredContent, progress, cancellation', async () => {
+  await t.test('StdioClientTransport: init, 16 tools + valid schemas, structuredContent, progress, cancellation', async () => {
     await runSdkClientLifecycleSuite(
       'stdio',
       () =>
@@ -339,7 +339,7 @@ test('MCP SDK 1.32.2 Reference Client interoperability across stdio, Streamable 
     );
   });
 
-  await t.test('StreamableHTTPClientTransport (/mcp): init, 17 tools + valid schemas, structuredContent, progress, cancellation', async () => {
+  await t.test('StreamableHTTPClientTransport (/mcp): init, 16 tools + valid schemas, structuredContent, progress, cancellation', async () => {
     await runSdkClientLifecycleSuite(
       'streamable-http',
       () => new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`)),
@@ -347,7 +347,7 @@ test('MCP SDK 1.32.2 Reference Client interoperability across stdio, Streamable 
     );
   });
 
-  await t.test('SSEClientTransport (/sse + /messages): init, 17 tools + valid schemas, structuredContent, progress, cancellation', async () => {
+  await t.test('SSEClientTransport (/sse + /messages): init, 16 tools + valid schemas, structuredContent, progress, cancellation', async () => {
     await runSdkClientLifecycleSuite(
       'legacy-sse',
       () => new SSEClientTransport(new URL(`${baseUrl}/sse`)),

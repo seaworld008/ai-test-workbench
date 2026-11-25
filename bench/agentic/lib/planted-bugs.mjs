@@ -174,7 +174,14 @@ async function fetchLocal(url, init = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 5000);
   try {
-    const res = await fetch(url, { ...init, signal: ctrl.signal });
+    const res = await fetch(url, {
+      ...init,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; StandardClient/1.0)',
+        ...(init.headers || {}),
+      },
+      signal: ctrl.signal,
+    });
     const text = await res.text();
     return { status: res.status, text };
   } finally {
@@ -224,10 +231,11 @@ export async function evaluateHiddenOracle(bugId, baseURL) {
         detail: `GET /admin -> status=${adminPage.status}`,
       });
 
+      const randSuffix = Math.random().toString(36).slice(2, 8);
       const login = await fetchLocal(`${baseURL}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'oracle_student', password: 'qa-pass-123' }),
+        body: JSON.stringify({ username: `oracle_student_${randSuffix}`, password: 'qa-pass-123' }),
       });
       const token = login.status === 200 ? JSON.parse(login.text)?.token : null;
       const auditRes = await fetchLocal(`${baseURL}/api/admin/audit`, {
@@ -270,10 +278,11 @@ export async function evaluateHiddenOracle(bugId, baseURL) {
         detail: `GET /api/courses -> status=${res.status}, allSeatsInt=${allSeatsInt}`,
       });
     } else if (bugId === 'BUG-DUPLICATE-ENROLL') {
+      const randSuffix = Math.random().toString(36).slice(2, 8);
       const login = await fetchLocal(`${baseURL}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'oracle_dup_student', password: 'qa-pass-123' }),
+        body: JSON.stringify({ username: `oracle_dup_${randSuffix}`, password: 'qa-pass-123' }),
       });
       const token = login.status === 200 ? JSON.parse(login.text)?.token : null;
       const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token || ''}` };

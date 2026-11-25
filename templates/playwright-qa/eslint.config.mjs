@@ -94,7 +94,27 @@ export default [
     },
   },
   {
-    files: ['tests/seed.spec.ts', 'tests/*.setup.ts', 'tests/fixtures/**/*.ts'],
+    files: ['tests/**/*.setup.ts', 'tests/**/*.setup.js'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@playwright/test',
+              message: '[aitest/setup-must-use-base-fixture] Setup files MUST import test/expect from fixtures/base instead of @playwright/test.',
+            },
+            { name: 'http', message: '[aitest/no-raw-http] Use the guarded { request } fixture from fixtures/base.ts.' },
+            { name: 'https', message: '[aitest/no-raw-http] Use the guarded { request } fixture from fixtures/base.ts.' },
+            { name: 'node:http', message: '[aitest/no-raw-http] Use the guarded { request } fixture from fixtures/base.ts.' },
+            { name: 'node:https', message: '[aitest/no-raw-http] Use the guarded { request } fixture from fixtures/base.ts.' },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['tests/seed.spec.ts', 'tests/*.setup.ts', 'tests/setup/*.setup.ts', 'tests/fixtures/**/*.ts'],
     rules: {
       'playwright/expect-expect': 'off',
       'playwright/no-conditional-in-test': 'off',
