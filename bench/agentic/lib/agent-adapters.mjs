@@ -78,7 +78,37 @@ export function getAdapterKind(adapterName) {
 }
 
 /**
+ * Resolves a Windows npm `.cmd` shim to its underlying Node.js entrypoint so multiline prompts
+ * can be passed directly via `process.execPath` (`shell: false`) without `cmd.exe` shell injection (`P1-6`).
+ * @param {string} cmdName
+ * @returns {{ bin: string, prefixArgs: string[] } | null}
+ */
+function resolveWindowsCliBinary(cmdName) {
+  const probe = spawnSync('where.exe', [cmdName], { encoding: 'utf8', windowsHide: true });
+  if (probe.status !== 0 || !probe.stdout) return null;
+  const candidates = probe.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  for (const cand of candidates) {
+    if (/\.exe$/i.test(cand) && fs.existsSync(cand)) {
+      return { bin: cand, prefixArgs: [] };
+    }
+    if (/\.cmd$/i.test(cand) && fs.existsSync(cand)) {
+      const content = fs.readFileSync(cand, 'utf8');
+      const m = /"%?~?dp0%?\\([^"\r\n]+\.(?:c?js|mjs))"/i.exec(content);
+      if (m) {
+        const jsPath = path.resolve(path.dirname(cand), m[1]);
+        if (fs.existsSync(jsPath)) {
+          return { bin: process.execPath, prefixArgs: [jsPath] };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Runs a live external coding agent CLI (`claude` | `codex` | `gemini` | `custom`) inside `sandbox.workspaceDir`.
+ * Never invokes `cmd.exe` (`shell: true`) with multiline prompts on Windows — resolves direct executables/Node shims
+ * or passes prompt via `stdin` to eliminate command injection and newline truncation.
  * @param {string} adapterName
  * @param {Record<string, any>} sandbox
  * @param {Record<string, any>} task
@@ -93,6 +123,7 @@ function runLiveCliAgent(adapterName, sandbox, task, options = {}) {
   const env = {
     ...process.env,
     AITEST_HMAC_KEY_FILE: sandbox.t1KeyFile,
+    AITEST_PROMPT_FILE: promptFile,
   };
   delete env.AITEST_HMAC_KEY;
 
@@ -101,21 +132,37 @@ function runLiveCliAgent(adapterName, sandbox, task, options = {}) {
   /** @type {string[]} */
   let args;
   let useShell = false;
+  /** @type {string | undefined} */
+  let stdinInput = undefined;
 
-  if (adapterName === 'claude') {
-    bin = process.platform === 'win32' ? 'claude.cmd' : 'claude';
-    useShell = process.platform === 'win32';
-    args = ['-p', prompt, '--dangerously-skip-permissions'];
-    if (options.model) args.push('--model', options.model);
-  } else if (adapterName === 'codex') {
-    bin = process.platform === 'win32' ? 'codex.cmd' : 'codex';
-    useShell = process.platform === 'win32';
-    args = ['exec', '--full-auto', prompt];
-    if (options.model) args.push('--model', options.model);
-  } else if (adapterName === 'gemini') {
-    bin = process.platform === 'win32' ? 'gemini.cmd' : 'gemini';
-    useShell = process.platform === 'win32';
-    args = ['-p', prompt, '--yolo'];
+  if (adapterName === 'claude' || adapterName === 'codex' || adapterName === 'gemini') {
+    const resolvedWin = process.platform === 'win32' ? resolveWindowsCliBinary(adapterName) : null;
+    if (resolvedWin) {
+      bin = resolvedWin.bin;
+      args = [...resolvedWin.prefixArgs];
+      useShell = false;
+    } else if (process.platform === 'win32') {
+      // Fallback: pass prompt strictly over stdin (never in cmd.exe argv)
+      bin = `${adapterName}.cmd`;
+      args = [];
+      useShell = true;
+      stdinInput = `${prompt}\n`;
+    } else {
+      bin = adapterName;
+      args = [];
+      useShell = false;
+    }
+
+    if (adapterName === 'claude') {
+      if (stdinInput !== undefined) args.push('-p', '--dangerously-skip-permissions');
+      else args.push('-p', prompt, '--dangerously-skip-permissions');
+    } else if (adapterName === 'codex') {
+      if (stdinInput !== undefined) args.push('exec', '--full-auto', '-');
+      else args.push('exec', '--full-auto', prompt);
+    } else {
+      if (stdinInput !== undefined) args.push('--yolo');
+      else args.push('-p', prompt, '--yolo');
+    }
     if (options.model) args.push('--model', options.model);
   } else if (adapterName === 'custom') {
     if (!options.agentCmd) {
@@ -138,6 +185,7 @@ function runLiveCliAgent(adapterName, sandbox, task, options = {}) {
     cwd: sandbox.workspaceDir,
     env,
     shell: useShell,
+    input: stdinInput,
     encoding: 'utf8',
     windowsHide: true,
     timeout: timeoutMs,

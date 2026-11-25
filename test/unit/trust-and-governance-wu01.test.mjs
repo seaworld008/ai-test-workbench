@@ -96,6 +96,31 @@ test('WU-01: Non-TTY governance approve requires explicit --yes when not in CI',
         });
         assert.equal(rejectedCode, 2);
 
+        // v6.2.1: CI=1 alone MUST NOT auto-grant non-interactive governance approval
+        const ciRejectedCode = await runGovernanceCommand({
+          action: 'approve',
+          target: repoDir,
+          by: 'alice@example.com',
+          reason: 'ci auto grant must be blocked',
+          isTTY: false,
+          yes: true,
+          env: { AITEST_HMAC_KEY_FILE: keyFile, CI: '1' },
+        });
+        assert.equal(ciRejectedCode, 2);
+
+        // v6.2.1: Agent session env vars (CLAUDECODE, ANTIGRAVITY_CONVERSATION_ID, etc.) MUST be blocked
+        const agentEnvBlockedCode = await runGovernanceCommand({
+          action: 'approve',
+          target: repoDir,
+          by: 'alice@example.com',
+          reason: 'agent env spoof must be blocked',
+          isTTY: false,
+          yes: true,
+          env: { AITEST_HMAC_KEY_FILE: keyFile, AITEST_APPROVE_NON_INTERACTIVE: '1', CLAUDECODE: '1' },
+        });
+        assert.equal(agentEnvBlockedCode, 2);
+
+        // Legitimate human non-interactive approval requires explicit AITEST_APPROVE_NON_INTERACTIVE=1 + --yes and no agent env
         const approvedCode = await runGovernanceCommand({
           action: 'approve',
           target: repoDir,
@@ -103,7 +128,7 @@ test('WU-01: Non-TTY governance approve requires explicit --yes when not in CI',
           reason: 'legitimate test with --yes',
           isTTY: false,
           yes: true,
-          env: { AITEST_HMAC_KEY_FILE: keyFile },
+          env: { AITEST_HMAC_KEY_FILE: keyFile, AITEST_APPROVE_NON_INTERACTIVE: '1' },
         });
         assert.equal(approvedCode, 0);
       }

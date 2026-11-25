@@ -13,4 +13,6 @@ blob-report/
 .aitest/runs/
 .aitest/heals/
 .aitest/jobs/
+.aitest/baseline-ref
+.aitest/t1-sticky.json
 *.log

@@ -55,7 +55,22 @@ function compileOptionalRegexList(raw: string | undefined): RegExp[] {
 }
 
 function buildRequestGuardConfig(baseURL: string | undefined) {
-  const allowedHosts = parseLowerCsvList(process.env.TEST_ALLOWED_HOSTS ?? '127.0.0.1,localhost');
+  let defaultAllowedHosts = ['127.0.0.1', 'localhost'];
+  if (baseURL && process.env.TEST_ALLOWED_HOSTS === undefined) {
+    try {
+      const bp = new URL(baseURL);
+      const h = bp.hostname.toLowerCase();
+      if ((h === '127.0.0.1' || h === 'localhost' || h === '::1') && bp.port) {
+        defaultAllowedHosts = [`127.0.0.1:${bp.port}`, `localhost:${bp.port}`];
+      }
+    } catch {
+      // fallback to default loopback hosts
+    }
+  }
+  const allowedHosts =
+    process.env.TEST_ALLOWED_HOSTS !== undefined
+      ? parseLowerCsvList(process.env.TEST_ALLOWED_HOSTS)
+      : defaultAllowedHosts;
   const allowedOrigins = parseLowerCsvList(process.env.TEST_ALLOWED_ORIGINS ?? '');
   const deniedOrigins = parseLowerCsvList(process.env.TEST_DENIED_ORIGINS ?? '');
   const extraEgressHosts = parseLowerCsvList(process.env.TEST_EGRESS_EXTRA_HOSTS ?? '');
@@ -371,7 +386,6 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
       };
 
       // Guard ALL pages/frames/popups in BrowserContext (`E-03`)
-      const rawContextRequest = context.request;
       guardRequestPropertyOnObject(context, guardConfig, trace.traceparent);
       attachPageRuntimeGuards(page);
       context.on('page', (popupPage) => {
@@ -391,14 +405,15 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
         });
       }
 
-      // Guard ALL HTTP(S) requests & redirect hops in BrowserContext + inject W3C `traceparent` (`D-02`, `S-03`, `WU-03`)
+      // Guard ALL HTTP(S) requests & redirect hops in BrowserContext + inject W3C `traceparent` (`D-02`, `S-03`, `WU-03`, v6.2.1)
+      const redirectHopTracker = new Map<string, { depth: number; ts: number }>();
       await context.route('**/*', async (route) => {
         const req = route.request();
-        let curMethod = req.method().toUpperCase();
-        let curUrl = req.url();
-        let curBody: string | Buffer | null = req.postDataBuffer() ?? req.postData() ?? null;
-        let curBodyText = req.postData() || null;
-        let curHeaders: Record<string, string> = { ...req.headers() };
+        const curMethod = req.method().toUpperCase();
+        const curUrl = req.url();
+        const curBodyText = req.postData() || null;
+        const resourceType = req.resourceType();
+        const curHeaders: Record<string, string> = { ...req.headers() };
         if (!curHeaders.traceparent) {
           curHeaders.traceparent = trace.traceparent;
         }
@@ -418,53 +433,43 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
           return;
         }
 
+        const trackedKey = `${resourceType}:${curUrl}`;
+        const trackedEntry = redirectHopTracker.get(trackedKey);
+        const redirectDepth = trackedEntry && Date.now() - trackedEntry.ts < 30_000 ? trackedEntry.depth : 0;
+        redirectHopTracker.delete(trackedKey);
+        if (redirectDepth >= MAX_REDIRECT_HOPS) {
+          blockedRequests.push(`Blocked redirect loop exceeding ${MAX_REDIRECT_HOPS} hops (${curUrl})`);
+          await route.abort('blockedbyclient');
+          return;
+        }
+
         try {
-          for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop += 1) {
-            const res =
-              hop === 0
-                ? await route.fetch({ maxRedirects: 0, headers: curHeaders })
-                : await rawContextRequest.fetch(curUrl, {
-                    method: curMethod,
-                    headers: curHeaders,
-                    ...(curBody !== null && curBody !== undefined ? { data: curBody } : {}),
-                    maxRedirects: 0,
-                  });
-            const status = res.status();
-            const location = res.headers()?.location;
-            if (REDIRECT_STATUSES.has(status) && location) {
-              if (hop >= MAX_REDIRECT_HOPS) {
-                blockedRequests.push(`Blocked redirect loop exceeding ${MAX_REDIRECT_HOPS} hops (${curUrl})`);
-                await route.abort('blockedbyclient');
-                return;
-              }
-              const next = computeNextRedirectRequest(curMethod, status, location, curUrl, curHeaders);
-              const hopBodyText = next.dropBody ? null : curBodyText;
-              const hopCheck = checkOutgoingRequestSafety(next.method, next.url, {
-                ...guardConfig,
-                postData: hopBodyText,
-              });
-              if (hopCheck.blocked && hopCheck.reason) {
-                blockedRequests.push(hopCheck.reason);
-                await route.abort('blockedbyclient');
-                return;
-              }
-              curMethod = next.method;
-              curUrl = next.url;
-              curHeaders = next.headers;
-              if (next.dropBody) {
-                curBody = null;
-                curBodyText = null;
-              }
-              continue;
+          const res = await route.fetch({ maxRedirects: 0, headers: curHeaders });
+          const status = res.status();
+          const location = res.headers()?.location;
+          if (REDIRECT_STATUSES.has(status) && location) {
+            const nextDepth = redirectDepth + 1;
+            if (nextDepth > MAX_REDIRECT_HOPS) {
+              blockedRequests.push(`Blocked redirect loop exceeding ${MAX_REDIRECT_HOPS} hops (${curUrl})`);
+              await route.abort('blockedbyclient');
+              return;
             }
-            if (hop === 0) {
-              await route.fulfill({ response: res });
-            } else {
-              const bodyBuf = await res.body();
-              await route.fulfill({ status, headers: res.headers(), body: bodyBuf });
+            const next = computeNextRedirectRequest(curMethod, status, location, curUrl, curHeaders);
+            const hopBodyText = next.dropBody ? null : curBodyText;
+            const hopCheck = checkOutgoingRequestSafety(next.method, next.url, {
+              ...guardConfig,
+              postData: hopBodyText,
+            });
+            if (hopCheck.blocked && hopCheck.reason) {
+              blockedRequests.push(hopCheck.reason);
+              await route.abort('blockedbyclient');
+              return;
             }
-            return;
+            if (redirectHopTracker.size > 200) redirectHopTracker.clear();
+            redirectHopTracker.set(`${resourceType}:${next.url}`, { depth: nextDepth, ts: Date.now() });
           }
+          // Return checked 3xx/non-3xx response directly so Chromium natively follows redirects & preserves real origin/page.url()
+          await route.fulfill({ response: res });
         } catch {
           try {
             await route.abort('failed');

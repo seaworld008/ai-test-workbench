@@ -50,8 +50,8 @@ export const MCP_PRESETS = {
     pillar: 'observability',
     description: 'Read-only Grafana dashboards, alerts & correlated Prometheus/Loki datasource queries',
     command: 'uvx',
-    args: ['mcp-grafana==0.7.8', '--disable-write'],
-    pinnedVersion: '0.7.8',
+    args: ['mcp-grafana==2.2.0', '--disable-write'],
+    pinnedVersion: '2.2.0',
     riskLevel: 'read',
     readonly: true,
     env: {
@@ -80,17 +80,19 @@ export const MCP_PRESETS = {
   },
   loki: {
     pillar: 'observability',
-    description: 'Read-only LogQL microservice log search correlated by traceId & test time window',
+    description: 'Read-only LogQL microservice log search via official Grafana MCP Loki toolset (correlated by traceId)',
     command: 'uvx',
-    args: ['loki-mcp-server==0.3.1'],
-    pinnedVersion: '0.3.1',
+    args: ['mcp-grafana==2.2.0', '--disable-write', '--enabled-tools=loki'],
+    pinnedVersion: '2.2.0',
     riskLevel: 'read',
     readonly: true,
     env: {
-      LOKI_URL: '${LOKI_URL}',
+      GRAFANA_URL: '${GRAFANA_URL}',
+      GRAFANA_SERVICE_ACCOUNT_TOKEN: '${GRAFANA_SERVICE_ACCOUNT_TOKEN}',
     },
     envTemplate: {
-      LOKI_URL: 'https://loki.staging.internal',
+      GRAFANA_URL: 'https://grafana.staging.internal',
+      GRAFANA_SERVICE_ACCOUNT_TOKEN: 'glsa_replace_with_readonly_viewer_token',
     },
   },
   sentry: {
@@ -154,8 +156,8 @@ export const MCP_PRESETS = {
     pillar: 'middleware',
     description: 'Redis read-only cache, session & queue key inspection (--readonly enforced)',
     command: 'uvx',
-    args: ['redis-mcp-server==0.3.0', '--readonly'],
-    pinnedVersion: '0.3.0',
+    args: ['redis-mcp-server==0.5.1', '--readonly'],
+    pinnedVersion: '0.5.1',
     riskLevel: 'read',
     readonly: true,
     env: {
@@ -167,10 +169,10 @@ export const MCP_PRESETS = {
   },
   k6: {
     pillar: 'performance',
-    description: 'Grafana k6 load, stress & soak script execution (remote-effect load generator: staging only)',
-    command: 'uvx',
-    args: ['mcp-k6==0.4.0'],
-    pinnedVersion: '0.4.0',
+    description: 'Official Grafana k6 MCP container for load, stress & soak script execution (remote-effect: staging only)',
+    command: 'docker',
+    args: ['run', '-i', '--rm', '-e', 'K6_PROMETHEUS_RW_SERVER_URL', 'grafana/mcp-k6:0.7.2'],
+    pinnedVersion: '0.7.2',
     riskLevel: 'remote-effect',
     readonly: false,
     envTemplate: {

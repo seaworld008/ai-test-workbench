@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import { resolveQaDirectory } from './domains/workspace/resolve.mjs';
 import { resolvePlaywrightCli, runPlaywright } from './proc.mjs';
 
@@ -386,16 +387,30 @@ export async function syncOfficialAgents(qaDir, options = {}) {
  */
 export async function runUpdateAgents(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
+  const asJson = Boolean(options.json);
+  /** @param {number} exitCode @param {string} msg @param {Record<string, any>} [data] */
+  const finishAgents = (exitCode, msg, data = {}) => {
+    if (!asJson && exitCode !== 0) console.error(msg);
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'update-agents',
+        outcome: exitCode === 0 ? 'pass' : exitCode === 2 ? 'blocked' : 'fail',
+        ok: exitCode === 0,
+        exitCode,
+        summary: msg,
+        data: exitCode === 0 ? data : { error: msg, ...data },
+      }),
+      { asJson, compatSpreadData: false }
+    );
+  };
   const target = options.target ? path.resolve(options.target) : null;
   if (!target) {
-    console.error(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
-    return 1;
+    return finishAgents(1, lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
   }
 
   const qaDir = resolveQaDirectory(target, options.qaDir);
   if (!qaDir) {
-    console.error(lang === 'zh' ? `未在 ${target} 找到已初始化的 QA 目录` : `No initialized QA directory found at ${target}`);
-    return 1;
+    return finishAgents(1, lang === 'zh' ? `未在 ${target} 找到已初始化的 QA 目录` : `No initialized QA directory found at ${target}`);
   }
 
   const loops = (options.loop || 'codex')
@@ -404,23 +419,25 @@ export async function runUpdateAgents(options = {}) {
     .filter((s) => s && s !== 'none');
 
   if (loops.length === 0) {
-    console.log(lang === 'zh' ? '未指定有效的 --loop，跳过。' : 'No loop specified, skipping.');
-    return 0;
+    const msg = lang === 'zh' ? '未指定有效的 --loop，跳过。' : 'No loop specified, skipping.';
+    if (!asJson) console.log(msg);
+    return finishAgents(0, msg, { skipped: true, loops: [] });
   }
 
   const dryRun = Boolean(options.dryRun);
   const force = Boolean(options.force);
   const pwCli = resolvePlaywrightCli(qaDir);
   if (!pwCli) {
-    console.error(lang === 'zh' ? `请先在 ${qaDir} 安装依赖 (npm install / npm ci)` : `Install dependencies in ${qaDir} first`);
-    return 1;
+    return finishAgents(1, lang === 'zh' ? `请先在 ${qaDir} 安装依赖 (npm install / npm ci)` : `Install dependencies in ${qaDir} first`);
   }
 
   const verRes = await runPlaywright(qaDir, ['--version'], { timeoutMs: 8000 });
-  console.log(
-    `${lang === 'zh' ? '同步 Playwright Test Agents' : 'Syncing Playwright Test Agents'} (${verRes.stdout.trim()})${dryRun ? ' [DRY-RUN]' : ''}${force ? ' [FORCE]' : ''}`
-  );
-  console.log(`${lang === 'zh' ? '目标 QA 目录' : 'Target QA dir'}: ${qaDir}`);
+  if (!asJson) {
+    console.log(
+      `${lang === 'zh' ? '同步 Playwright Test Agents' : 'Syncing Playwright Test Agents'} (${verRes.stdout.trim()})${dryRun ? ' [DRY-RUN]' : ''}${force ? ' [FORCE]' : ''}`
+    );
+    console.log(`${lang === 'zh' ? '目标 QA 目录' : 'Target QA dir'}: ${qaDir}`);
+  }
 
   const { results, conflictCount } = await syncOfficialAgents(qaDir, {
     loops,
@@ -430,25 +447,26 @@ export async function runUpdateAgents(options = {}) {
     preserveSeed: true,
   });
 
-  for (const r of results) {
-    console.log(`\nLoop: ${r.loop}`);
-    for (const act of r.actions) {
-      if (act.status === 'CONFLICT') {
-        console.log(`  [CONFLICT] ${act.file} (user changes preserved; new upstream template written to ${act.sidecar})`);
-      } else {
-        console.log(`  [${act.status}] ${act.file}`);
+  if (!asJson) {
+    for (const r of results) {
+      console.log(`\nLoop: ${r.loop}`);
+      for (const act of r.actions) {
+        if (act.status === 'CONFLICT') {
+          console.log(`  [CONFLICT] ${act.file} (user changes preserved; new upstream template written to ${act.sidecar})`);
+        } else {
+          console.log(`  [${act.status}] ${act.file}`);
+        }
       }
     }
   }
 
   if (conflictCount > 0) {
-    console.error(
+    const msg =
       lang === 'zh'
-        ? `\n检测到 ${conflictCount} 个已修改的 Agent 定义冲突，原文件未覆盖，新版本已写入 *.aitest-new。请手工合并或加 --force 强制更新。`
-        : `\nDetected ${conflictCount} modified agent file conflict(s). Existing files were preserved and incoming templates saved to *.aitest-new. Merge manually or pass --force.`
-    );
-    return 2;
+        ? `检测到 ${conflictCount} 个已修改的 Agent 定义冲突，原文件未覆盖，新版本已写入 *.aitest-new。请手工合并或加 --force 强制更新。`
+        : `Detected ${conflictCount} modified agent file conflict(s). Existing files were preserved and incoming templates saved to *.aitest-new. Merge manually or pass --force.`;
+    return finishAgents(2, msg, { qaDir, results, conflictCount });
   }
 
-  return 0;
+  return finishAgents(0, `Synced ${results.length} Playwright agent loop(s)`, { qaDir, results, conflictCount: 0 });
 }

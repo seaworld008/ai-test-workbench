@@ -30,9 +30,46 @@ const STATIC_SPEC_RULE_CODES = new Set([
   'AITEST-G114',
 ]);
 
+const FORBIDDEN_TEST_IMPORT_RE =
+  /(?:from\s+|require\s*\(\s*)['"](?:(?:node:)?(?:http|https|http2|net|tls|dgram|dns|child_process|worker_threads)|undici|axios|node-fetch|got)['"]/;
+const DIRECT_PW_IMPORT_RE = /(?:from\s+|require\s*\(\s*)['"]@playwright\/test['"]/;
+const RAW_GLOBAL_FETCH_RE =
+  /(?:(?<![.\w$])fetch\s*\(|\b(?:globalThis|window|self|global)\s*(?:\.\s*fetch|\[\s*['"]fetch['"]\s*\]))/;
+const RAW_WS_OR_DYN_IMPORT_RE = /\bnew\s+WebSocket\s*\(|\bimport\s*\(/;
+
+/**
+ * Checks universal safety prohibitions across ALL `tests` TS/JS/MJS files (excluding locked `fixtures/base.ts`):
+ * direct `@playwright/test` import (when workspace defines `fixtures/base.ts`), raw `fetch`/`globalThis.fetch`,
+ * `new WebSocket`, dynamic `import()`, raw `request.newContext()`, and Node network/exec imports (`VULN-05`, v6.2.1).
+ * @param {string} rel
+ * @param {string} stripped
+ * @param {string[]} errors
+ * @param {boolean} hasGuardedBaseFixture
+ */
+function checkUniversalTestSafety(rel, stripped, errors, hasGuardedBaseFixture) {
+  if (hasGuardedBaseFixture && DIRECT_PW_IMPORT_RE.test(stripped)) {
+    errors.push(
+      `[Static Check] File ${rel} MUST import test/expect from fixtures/base (direct '@playwright/test' import bypasses workbench guards).`
+    );
+  }
+  if (/\brequest\.newContext\s*\(/.test(stripped)) {
+    errors.push(`[Static Check] Raw request.newContext() bypasses API safety guard in ${rel}; use { request } fixture from base.ts.`);
+  }
+  if (FORBIDDEN_TEST_IMPORT_RE.test(stripped) || RAW_GLOBAL_FETCH_RE.test(stripped)) {
+    errors.push(`[Static Check] Raw Node HTTP/network/exec or global fetch bypasses target/egress safety guard in ${rel}; use { request } fixture from base.ts.`);
+  }
+  if (RAW_WS_OR_DYN_IMPORT_RE.test(stripped)) {
+    errors.push(`[Static Check] Raw WebSocket or dynamic import() is forbidden in ${rel} (prevents egress/static guard bypass).`);
+  }
+  if (/\bexpect\.extend\s*\(/.test(stripped)) {
+    errors.push(`[Static Check] Custom expect.extend() in unlocked test/fixture file ${rel} is forbidden (prevents always-true matcher bypass).`);
+  }
+}
+
 /**
  * AST + Structural Static Spec Scanner (`Layer 2`).
- * Scans `*.spec.ts`, `*.spec.js`, `*.test.ts`, `*.test.js`, and nested `seed.spec.ts` (exempting only root `tests/seed.spec.ts`).
+ * Scans ALL `tests` TS/JS/MJS files (except locked `fixtures/base.ts`) for egress/import safety,
+ * and runs full AST semantic rules on executable `*.spec.*` / `*.test.*` specs.
  * @param {string} testsDir
  * @param {{ assertFunctionNames?: string[], activeWaivers?: Array<Record<string, any>>, qaDir?: string, rulesConfig?: Record<string, any> }} [options]
  */
@@ -43,6 +80,7 @@ export function scanSpecFilesFallback(testsDir, options = {}) {
 
   const assertRegex = buildAssertRegex(assertFunctionNames);
   const ts = resolveTypeScriptCompiler(qaDir || path.dirname(testsDir));
+  const hasGuardedBaseFixture = fs.existsSync(path.join(testsDir, 'fixtures', 'base.ts'));
 
   /** @param {string} dir */
   const walk = (dir) => {
@@ -53,30 +91,20 @@ export function scanSpecFilesFallback(testsDir, options = {}) {
         continue;
       }
       const rel = path.relative(testsDir, full).replace(/\\/g, '/');
-      if (/^(?:[^/]+\/)*[^/]+\.setup\.[jt]s$/.test(rel)) {
-        const rawSetup = fs.readFileSync(full, 'utf8');
-        const strippedSetup = rawSetup.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-        if (/from\s+['"]@playwright\/test['"]/.test(strippedSetup)) {
-          errors.push(
-            `[Static Check] Setup file ${rel} MUST import test/expect from fixtures/base (direct '@playwright/test' import bypasses workbench guards).`
-          );
-        }
-        continue;
-      }
-      if (!/\.(?:spec|test)\.[jt]s$/.test(entry.name)) continue;
-      if (rel === 'seed.spec.ts' || entry.name.endsWith('.official.example.ts')) continue;
+      if (!/\.(?:ts|tsx|js|jsx|mjs)$/i.test(entry.name)) continue;
+      if (rel === 'fixtures/base.ts' || entry.name.endsWith('.official.example.ts')) continue;
 
       const raw = fs.readFileSync(full, 'utf8');
       const stripped = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
+      // Enforce universal guardrails on ALL files under tests/ (including fixtures/custom/** and *.setup.ts)
+      checkUniversalTestSafety(rel, stripped, errors, hasGuardedBaseFixture);
+
+      if (!/\.(?:spec|test)\.[jt]s$/.test(entry.name)) continue;
+      if (rel === 'seed.spec.ts') continue;
+
       if (/\bwaitForTimeout\s*\(/.test(stripped)) {
         errors.push(`[Static Check] Hardcoded waitForTimeout() forbidden in ${rel}`);
-      }
-      if (/\brequest\.newContext\s*\(/.test(stripped)) {
-        errors.push(`[Static Check] Raw request.newContext() bypasses API safety guard in ${rel}; use { request } fixture from base.ts.`);
-      }
-      if (/\b(?:fetch\s*\(|from\s+['"](?:node:http|node:https|http|https|undici|axios)['"])/.test(stripped)) {
-        errors.push(`[Static Check] Raw Node HTTP/fetch bypasses target/egress safety guard in ${rel}; use { request } fixture from base.ts.`);
       }
 
       if (ts) {

@@ -56,7 +56,7 @@ export function isProtectedDiffPath(filePath, extraGlobs = []) {
   const norm = String(filePath || '').replace(/\\/g, '/').replace(/^\.\//, '');
   if (!norm) return false;
 
-  if (/(^|\/)\.aitest\/(governance\.lock|quarantine\.json|governance-audit\.jsonl|template-manifest\.json)$/i.test(norm)) {
+  if (/(^|\/)\.aitest\/(governance\.lock|quarantine\.json|governance-audit\.jsonl|template-manifest\.json|baseline-ref)$/i.test(norm)) {
     return true;
   }
   if (/(^|\/)\.env(?:\.[^/]+)?$/i.test(norm) && !/\.env\.example$/i.test(norm) && !/\.env\.mcp\.example$/i.test(norm)) {
@@ -166,6 +166,22 @@ export function isInitializedQaWorkspace(qaDir) {
 }
 
 /**
+ * Computes a deterministic content-only SHA-256 digest of `.aitest/template-manifest.json`'s `files` map
+ * using code-unit key sorting (excludes volatile metadata such as `updatedAt`).
+ * @param {Record<string, any> | null | undefined} manifestObj
+ * @returns {string | null}
+ */
+export function computeTemplateManifestDigest(manifestObj) {
+  if (!manifestObj || typeof manifestObj !== 'object' || !manifestObj.files || typeof manifestObj.files !== 'object') {
+    return null;
+  }
+  const sortedEntries = Object.entries(/** @type {Record<string, string>} */ (manifestObj.files)).sort(([a], [b]) =>
+    a < b ? -1 : a > b ? 1 : 0
+  );
+  return `sha256:${sha256Hex(JSON.stringify(Object.fromEntries(sortedEntries)))}`;
+}
+
+/**
  * Verifies that an `aitest-init` lock has NOT drifted from the recorded factory template manifest.
  * @param {string} qaDir
  * @param {Record<string, any>} lockObj
@@ -200,10 +216,14 @@ function verifyInitLockAgainstFactoryManifest(qaDir, lockObj, currentHashes) {
       '[Governance Tamper Blocked] Governance lock has source="aitest-init" without mandatory templateManifestDigest binding.'
     );
   } else {
-    const actualManifestDigest = `sha256:${sha256Hex(manifestRaw.replace(/\r\n/g, '\n'))}`;
-    if (actualManifestDigest !== lockObj.templateManifestDigest) {
+    const actualCanonicalDigest = computeTemplateManifestDigest(manifestObj);
+    const actualRawDigest = `sha256:${sha256Hex(manifestRaw.replace(/\r\n/g, '\n'))}`;
+    if (
+      lockObj.templateManifestDigest !== actualCanonicalDigest &&
+      lockObj.templateManifestDigest !== actualRawDigest
+    ) {
       errors.push(
-        `[Governance Tamper Blocked] .aitest/template-manifest.json digest mismatch (${actualManifestDigest.slice(0, 19)} != ${String(lockObj.templateManifestDigest).slice(0, 19)}) under aitest-init lock.`
+        `[Governance Tamper Blocked] .aitest/template-manifest.json digest mismatch (${String(actualCanonicalDigest || actualRawDigest).slice(0, 19)} != ${String(lockObj.templateManifestDigest).slice(0, 19)}) under aitest-init lock.`
       );
     }
   }

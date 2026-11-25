@@ -76,19 +76,37 @@ export {
  */
 export async function runAuditCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
+  const asJson = Boolean(options.json);
+  /** @param {number} exitCode @param {string} msg */
+  const failAudit = (exitCode, msg) => {
+    if (!asJson) console.error(msg);
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'audit',
+        outcome: exitCode === 2 ? 'blocked' : 'fail',
+        ok: false,
+        exitCode,
+        summary: msg,
+        blockerKind: exitCode === 2 ? 'CONFIG_BLOCKED' : null,
+        data: { error: msg },
+      }),
+      { asJson, compatSpreadData: false }
+    );
+  };
   const target = options.target ? path.resolve(options.target) : null;
   if (!target) {
-    console.error(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
-    return 1;
+    return failAudit(1, lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
   }
 
   const qaDir = resolveQaDirectory(target, options.qaDir);
   if (!qaDir) {
-    console.error(lang === 'zh' ? `未在 ${target} 找到 QA 目录` : `QA directory not found at ${target}`);
-    return 1;
+    return failAudit(1, lang === 'zh' ? `未在 ${target} 找到 QA 目录` : `QA directory not found at ${target}`);
   }
 
   const cfg = loadWorkbenchConfig({ qaDir });
+  if (!cfg.ok) {
+    return failAudit(2, `[Config Blocked] ${cfg.errors.join('; ') || 'Invalid workbench config.'}`);
+  }
   const mergedEnv = loadMergedQaEnv(qaDir);
   const safety = evaluateTargetSafety(mergedEnv);
   const allowMutation =

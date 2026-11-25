@@ -23,8 +23,12 @@ function computeChangesetPoolMetrics(changesetContext, currentFile) {
   let totalHeadMax = 0;
   let siblingAddedCount = 0;
   let siblingAddedStrength = 0;
+  let totalBaseCriticalTags = 0;
+  let totalHeadCriticalTags = 0;
+  let siblingAddedCriticalTags = 0;
 
   for (const e of entries) {
+    if (e.isExecutableSpec === false && e.filePath !== currentFile) continue;
     const bAsserts = e.baseSum?.assertions || [];
     const hAsserts = e.headSum?.assertions || [];
     const bCount = bAsserts.length;
@@ -33,17 +37,22 @@ function computeChangesetPoolMetrics(changesetContext, currentFile) {
     const hStr = hAsserts.reduce((s, a) => s + a.tier, 0);
     const bMax = bCount > 0 ? Math.max(...bAsserts.map((a) => a.tier)) : 0;
     const hMax = hCount > 0 ? Math.max(...hAsserts.map((a) => a.tier)) : 0;
+    const bCrit = (e.baseSum?.criticalTags || []).length;
+    const hCrit = (e.headSum?.criticalTags || []).length;
 
     totalBaseCount += bCount;
     totalHeadCount += hCount;
     totalBaseStrength += bStr;
     totalHeadStrength += hStr;
+    totalBaseCriticalTags += bCrit;
+    totalHeadCriticalTags += hCrit;
     if (bMax > totalBaseMax) totalBaseMax = bMax;
     if (hMax > totalHeadMax) totalHeadMax = hMax;
 
     if (e.filePath !== currentFile) {
       if (hCount > bCount) siblingAddedCount += hCount - bCount;
       if (hStr > bStr) siblingAddedStrength += hStr - bStr;
+      if (hCrit > bCrit) siblingAddedCriticalTags += hCrit - bCrit;
     }
   }
 
@@ -56,6 +65,9 @@ function computeChangesetPoolMetrics(changesetContext, currentFile) {
     totalHeadMax,
     siblingAddedCount,
     siblingAddedStrength,
+    totalBaseCriticalTags,
+    totalHeadCriticalTags,
+    siblingAddedCriticalTags,
   };
 }
 
@@ -89,8 +101,10 @@ export const ruleG102 = {
       isBaselineNewSpec = false,
       baselineTestTitles = null,
       exemptBranchNewRegression = false,
+      exemptScaffoldRemoval = false,
     } = ctx;
     if (!baseSum || !headSum) return [];
+    if (exemptScaffoldRemoval) return [];
     if (isBaselineNewSpec && exemptBranchNewRegression) return [];
 
     const scopeSet = exemptBranchNewRegression ? baselineTestTitles : null;
@@ -178,8 +192,10 @@ export const ruleG103 = {
       isBaselineNewSpec = false,
       baselineTestTitles = null,
       exemptBranchNewRegression = false,
+      exemptScaffoldRemoval = false,
     } = ctx;
     if (!baseSum || !headSum) return [];
+    if (exemptScaffoldRemoval) return [];
     if (isBaselineNewSpec && exemptBranchNewRegression) return [];
 
     const scopeSet = exemptBranchNewRegression ? baselineTestTitles : null;
@@ -240,6 +256,42 @@ export const ruleG103 = {
         },
       ];
     }
+
+    // Per-REQ max assertion strength conservation (`G2-F14`): prevent weakening a REQ-* test block and padding a sibling test
+    const baseBlocks = baseSum.testBlocks || [];
+    const headBlocks = headSum.testBlocks || [];
+    const allHeadBlocks = Array.isArray(changesetContext?.entries)
+      ? changesetContext.entries
+          .filter((/** @type {any} */ e) => e.isExecutableSpec !== false)
+          .flatMap((/** @type {any} */ e) => e.headSum?.testBlocks || [])
+      : headBlocks;
+    if (!consolidatedIntoAria && !canWaive('assertion-weakening') && !canWaive('AITEST-G103')) {
+      for (const bBlock of baseBlocks) {
+        if (!bBlock.reqIds?.length || !bBlock.assertions?.length) continue;
+        if (scopeSet && !scopeSet.has(bBlock.title)) continue;
+        const baseBlockMax = Math.max(...bBlock.assertions.map((/** @type {any} */ a) => a.tier));
+        const matchingHead = allHeadBlocks.filter(
+          (/** @type {any} */ hb) =>
+            hb.title === bBlock.title || (hb.reqIds || []).some((/** @type {string} */ r) => bBlock.reqIds.includes(r))
+        );
+        const headBlockAsserts = matchingHead.flatMap((/** @type {any} */ hb) => hb.assertions || []);
+        if (headBlockAsserts.length === 0) continue;
+        const headBlockMax = Math.max(...headBlockAsserts.map((/** @type {any} */ a) => a.tier));
+        if (headBlockMax < baseBlockMax) {
+          return [
+            {
+              code: 'AITEST-G103',
+              severity: 'error',
+              file,
+              line: bBlock.line,
+              testTitle: bBlock.title,
+              message: `${file}: requirement test block [${bBlock.reqIds.join(', ')}] downgraded max assertion tier (S${baseBlockMax} -> S${headBlockMax}); sibling tests cannot compensate.`,
+              evidence: { reqIds: bBlock.reqIds, testTitle: bBlock.title, baseBlockMax, headBlockMax },
+            },
+          ];
+        }
+      }
+    }
     return [];
   },
 };
@@ -290,12 +342,21 @@ export const ruleG115 = {
       baseSum,
       headSum,
       canWaive = () => false,
+      changesetContext,
       isBaselineNewSpec = false,
       baselineTestTitles = null,
       exemptBranchNewRegression = false,
+      exemptScaffoldRemoval = false,
     } = ctx;
     if (!baseSum || !headSum) return [];
+    if (exemptScaffoldRemoval) return [];
     if (isBaselineNewSpec && exemptBranchNewRegression) return [];
+
+    const pool = computeChangesetPoolMetrics(changesetContext, file);
+    const criticalRelocatedToSibling =
+      pool !== null &&
+      pool.siblingAddedCriticalTags > 0 &&
+      pool.totalHeadCriticalTags >= pool.totalBaseCriticalTags;
 
     let baseTagCount = baseSum.criticalTags.length;
     let headTagCount = headSum.criticalTags.length;
@@ -314,6 +375,7 @@ export const ruleG115 = {
 
     if (
       headTagCount < baseTagCount &&
+      !criticalRelocatedToSibling &&
       !canWaive('tag-removal') &&
       !canWaive('AITEST-G115')
     ) {

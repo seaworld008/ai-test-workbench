@@ -101,12 +101,121 @@ export function isHostT1Sticky(keyPath, env = process.env) {
 }
 
 /**
+ * Canonicalizes a workspace directory path into a stable SHA-256 workspace key.
+ * @param {string} dirPath
+ * @returns {string}
+ */
+function computeWorkspaceKey(dirPath) {
+  const resolved = path.resolve(dirPath);
+  let real = resolved;
+  try {
+    if (fs.existsSync(resolved)) {
+      real = typeof fs.realpathSync.native === 'function' ? fs.realpathSync.native(resolved) : fs.realpathSync(resolved);
+    }
+  } catch {
+    real = resolved;
+  }
+  const normalized = process.platform === 'win32' ? real.toLowerCase() : real;
+  return crypto.createHash('sha256').update(`aitest-ws:${normalized}`, 'utf8').digest('hex').slice(0, 24);
+}
+
+/**
+ * Records that this host's `ctx.keyId` signed `governance.lock` for `qaDir`, storing
+ * the binding out-of-workspace (tamper-resistant) and in gitignored `.aitest/t1-sticky.json`.
+ * @param {Readonly<TrustContext>} ctx
+ * @param {string | undefined} qaDir
+ */
+export function recordWorkspaceStickyKey(ctx, qaDir) {
+  if (!ctx?.keyId || !qaDir) return;
+  const wsKey = computeWorkspaceKey(qaDir);
+  if (ctx.stickyMarkerPath) {
+    try {
+      let existing = /** @type {Record<string, any>} */ ({ sticky: true, keyId: ctx.keyId, recordedAt: new Date().toISOString() });
+      if (fs.existsSync(ctx.stickyMarkerPath)) {
+        try {
+          const parsed = JSON.parse(fs.readFileSync(ctx.stickyMarkerPath, 'utf8'));
+          if (parsed && typeof parsed === 'object') existing = parsed;
+        } catch {
+          // preserve defaults
+        }
+      }
+      const workspaces =
+        existing.workspaces && typeof existing.workspaces === 'object' && !Array.isArray(existing.workspaces)
+          ? { ...existing.workspaces }
+          : {};
+      const prevList = Array.isArray(workspaces[wsKey]) ? workspaces[wsKey].map(String) : [];
+      if (!prevList.includes(ctx.keyId)) prevList.push(ctx.keyId);
+      workspaces[wsKey] = prevList;
+      existing.sticky = true;
+      existing.workspaces = workspaces;
+      fs.mkdirSync(path.dirname(ctx.stickyMarkerPath), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(ctx.stickyMarkerPath, JSON.stringify(existing, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
+    } catch {
+      // non-fatal if marker directory is read-only
+    }
+  }
+  try {
+    const localStickyPath = path.join(qaDir, '.aitest', 't1-sticky.json');
+    fs.mkdirSync(path.dirname(localStickyPath), { recursive: true });
+    let localObj = /** @type {Record<string, any>} */ ({ schemaVersion: 1, keyIds: [] });
+    if (fs.existsSync(localStickyPath)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(localStickyPath, 'utf8'));
+        if (parsed && typeof parsed === 'object') localObj = parsed;
+      } catch {
+        // overwrite malformed local sticky
+      }
+    }
+    const keyIds = Array.isArray(localObj.keyIds) ? localObj.keyIds.map(String) : [];
+    if (!keyIds.includes(ctx.keyId)) keyIds.push(ctx.keyId);
+    fs.writeFileSync(
+      localStickyPath,
+      JSON.stringify({ schemaVersion: 1, keyIds, updatedAt: new Date().toISOString() }, null, 2) + '\n',
+      'utf8'
+    );
+  } catch {
+    // non-fatal
+  }
+}
+
+/**
+ * Returns true if `qaDir` was previously signed on this host by `ctx.keyId`.
+ * @param {Readonly<TrustContext>} ctx
+ * @param {string | undefined} qaDir
+ * @returns {boolean}
+ */
+export function hasWorkspaceStickyKey(ctx, qaDir) {
+  if (!ctx?.keyId || !qaDir) return false;
+  const wsKey = computeWorkspaceKey(qaDir);
+  if (ctx.stickyMarkerPath && fs.existsSync(ctx.stickyMarkerPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(ctx.stickyMarkerPath, 'utf8'));
+      const list = parsed?.workspaces?.[wsKey];
+      if (Array.isArray(list) && list.includes(ctx.keyId)) return true;
+    } catch {
+      // fall through
+    }
+  }
+  const localStickyPath = path.join(qaDir, '.aitest', 't1-sticky.json');
+  if (fs.existsSync(localStickyPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(localStickyPath, 'utf8'));
+      if (Array.isArray(parsed?.keyIds) && parsed.keyIds.includes(ctx.keyId)) return true;
+    } catch {
+      // ignore
+    }
+  }
+  return false;
+}
+
+/**
  * @typedef {{
  *   tierCeiling: 'T0' | 'T1';
  *   key: string | null;
  *   keyId: string | null;
  *   source: string;
  *   keyPath: string | null;
+ *   stickyMarkerPath: string | null;
  *   hostT1Sticky: boolean;
  *   error: string | null;
  * }} TrustContext
@@ -134,12 +243,14 @@ export function openTrustContext(options = {}) {
       keyId: computeKeyId(key),
       source: 'env:AITEST_HMAC_KEY',
       keyPath: null,
+      stickyMarkerPath: null,
       hostT1Sticky: true,
       error: null,
     });
   }
 
   const keyPath = resolveDefaultHmacKeyFilePath(env);
+  const stickyMarkerPath = getStickyMarkerPath(keyPath, env);
   if ((qaDir && isPathInsideDir(keyPath, qaDir)) || (repoDir && isPathInsideDir(keyPath, repoDir))) {
     return Object.freeze({
       tierCeiling: 'T0',
@@ -147,6 +258,7 @@ export function openTrustContext(options = {}) {
       keyId: null,
       source: 'rejected-in-workspace',
       keyPath,
+      stickyMarkerPath: null,
       hostT1Sticky: false,
       error: `Refusing to use T1 HMAC key inside workspace directory: ${keyPath}`,
     });
@@ -164,6 +276,7 @@ export function openTrustContext(options = {}) {
           keyId,
           source: 'user-config-keyfile',
           keyPath,
+          stickyMarkerPath,
           hostT1Sticky: true,
           error: null,
         });
@@ -182,6 +295,7 @@ export function openTrustContext(options = {}) {
         keyId,
         source: 'user-config-keyfile',
         keyPath,
+        stickyMarkerPath,
         hostT1Sticky: true,
         error: null,
       });
@@ -194,6 +308,7 @@ export function openTrustContext(options = {}) {
       keyId: null,
       source: 'missing',
       keyPath,
+      stickyMarkerPath,
       hostT1Sticky: sticky,
       error: sticky ? `T1 HMAC key missing on T1-sticky host (${keyPath}).` : null,
     });
@@ -204,6 +319,7 @@ export function openTrustContext(options = {}) {
       keyId: null,
       source: 'io-error',
       keyPath,
+      stickyMarkerPath,
       hostT1Sticky: isHostT1Sticky(keyPath, env),
       error: err instanceof Error ? err.message : String(err),
     });

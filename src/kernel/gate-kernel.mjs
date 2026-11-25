@@ -18,14 +18,17 @@ export {
 export {
   computeKeyId,
   getStickyMarkerPath,
+  hasWorkspaceStickyKey,
   isHostT1Sticky,
   openTrustContext,
   recordHostT1Sticky,
+  recordWorkspaceStickyKey,
   resolveDefaultHmacKeyFilePath,
 } from './gate/trust-context.mjs';
 
 export {
   HMAC_PREFIX,
+  MACHINE_LOCAL_MAC_DOMAINS,
   canonicalizeJson,
   computeDomainHmac,
   getDefaultHmacKeyFilePath,
@@ -34,6 +37,12 @@ export {
   stripSignatureFields,
   verifyPayloadT1,
 } from './gate/trust-hmac.mjs';
+
+export {
+  resolveValidatedWorkspaceBaselineRef,
+  validateGitBaselineRef,
+  writeSignedBaselineRef,
+} from './gate/baseline-ref.mjs';
 
 export {
   execGitSync,
@@ -58,6 +67,7 @@ export {
   PROTECTED_GOVERNANCE_REL_FILES,
   compilePolicyGlob,
   computeProtectedFileHashes,
+  computeTemplateManifestDigest,
   isBotApprover,
   isCoveredByWaiver,
   isInitializedQaWorkspace,

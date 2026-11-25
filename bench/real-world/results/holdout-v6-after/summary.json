@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0.0",
-  "generatedAt": "2026-11-24T08:38:21.723Z",
-  "gateKernelVersion": "5.1.1",
+  "generatedAt": "2026-11-25T08:24:04.075Z",
+  "gateKernelVersion": "6.2.1",
   "preregistrationDoc": "bench/real-world/PREREGISTRATION.md",
   "samplingSeed": 20261125,
   "mode": "pilot",
@@ -114,7 +114,7 @@
       ],
       "violations": [
         "[Healer Diff Guard][AITEST-G102] packages/kit/test/apps/basics/test/client.test.js: net assertion reduction detected (base 436 -> head 435).",
-        "[Healer Diff Guard][AITEST-G103] packages/kit/test/apps/basics/test/client.test.js: assertion strength downgraded (max tier S5 -> S5, total strength 1918 -> 1911)."
+        "[Healer Diff Guard][AITEST-G103] packages/kit/test/apps/basics/test/client.test.js: assertion strength downgraded (max tier S5 -> S5, total strength 1867 -> 1860)."
       ],
       "adjudication": {
         "label": "FP",

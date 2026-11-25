@@ -170,14 +170,21 @@ export function renderTraceMatrixMarkdown(matrix, lang = 'zh') {
  */
 export async function runTraceMatrixCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
+  const asJson = Boolean(options.json);
+  /** @param {string} msg */
+  const failTrace = (msg) => {
+    if (!asJson) console.error(msg);
+    return emitCommandResult(
+      buildCommandResult({ tool: 'trace-matrix', outcome: 'fail', ok: false, exitCode: 1, summary: msg, data: { error: msg } }),
+      { asJson, compatSpreadData: false }
+    );
+  };
   if (!options.target) {
-    console.error(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
-    return 1;
+    return failTrace(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
   }
   const qaDir = resolveQaDirectory(path.resolve(options.target), options.qaDir);
   if (!qaDir) {
-    console.error(lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
-    return 1;
+    return failTrace(lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
   }
 
   const matrix = buildRequirementTraceMatrix(qaDir);

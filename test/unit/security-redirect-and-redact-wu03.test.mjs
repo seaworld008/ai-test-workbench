@@ -255,7 +255,7 @@ test('WU-03: Attestation enforces --expect-git-sha, --expect-tree-digest, and ma
       treeDigest: 'treehash9999999999',
       gateKernelVersion: '6.1.0',
       verdictPayload: {
-        gitSha: 'commitsha123456',
+        gitSha: 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678',
         verdict: 'pass',
         trustTier: 'T2',
         trustLevel: 'T2',
@@ -271,6 +271,7 @@ test('WU-03: Attestation enforces --expect-git-sha, --expect-tree-digest, and ma
       repo: 'seaworld008/ai-test-workbench',
       workflow: '.github/workflows/aitest-verify.yml',
       ref: 'refs/heads/main',
+      commitSha: 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678',
       bundleOutPath: bundlePath,
     });
 
@@ -279,7 +280,7 @@ test('WU-03: Attestation enforces --expect-git-sha, --expect-tree-digest, and ma
       expectRepo: 'seaworld008/ai-test-workbench',
       expectWorkflow: '.github/workflows/aitest-verify.yml',
       expectRef: 'refs/heads/main',
-      expectGitSha: 'commitsha123456',
+      expectGitSha: 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678',
       expectTreeDigest: 'treehash9999999999',
       trustedRootCertPem: ca.rootCertPem,
       trustedRootSha256: ca.rootCertSha256,
@@ -290,7 +291,7 @@ test('WU-03: Attestation enforces --expect-git-sha, --expect-tree-digest, and ma
 
     const badSha = verifyAttestationFile(attPath, {
       bundlePath,
-      expectGitSha: 'othercommit000',
+      expectGitSha: '000000000000000000000000000000000000dead',
       trustedRootCertPem: ca.rootCertPem,
       trustedRootSha256: ca.rootCertSha256,
     });

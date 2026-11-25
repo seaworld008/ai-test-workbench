@@ -4,6 +4,25 @@
 
 本日志遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 与 [语义化版本 (SemVer)](https://semver.org/spec/v2.0.0.html) 规范。
 
+## [6.2.1] - 2026-11-25
+
+### 安全加固与可信边界修复 (Security & Trust-Boundary Hardening)
+- **封堵 `.aitest/baseline-ref` 来源伪造直通 T2 漏洞**：将 `.aitest/baseline-ref` 与 `.aitest/t1-sticky.json` 纳入 `templates/playwright-qa/gitignore` 并加入 `isProtectedDiffPath` 保护；写入改为带 `TrustContext` HMAC 签名的 `workspace.baseline` JSON 格式；在 `verdict.mjs`、`engine.mjs` 与 `changeset.mjs` 中凡显式传 `--base`/`diffBase` 或处于 CI 环境一律 100% 忽略工作区 `.aitest/baseline-ref`，本地校验强制 `merge-base --is-ancestor`、非空 Git 树、`--first-parent` 血统（阻断 `-s ours --allow-unrelated-histories` 空树注入）及不早于 `merge-base(HEAD, main)`。
+- **收紧粘性 T1 外域 `keyId` Fail-Closed、`governance approve` 与环境变量白名单**：
+  - 本机独占运行态域（`ledger.manifest`、`heal.ledger`、`heal.session`、`quarantine.json`、`workspace.baseline`）在 `hostT1Sticky` 时缺失本机签名或伪造外域 `keyId` 严格 Fail-Closed 返回 `ok: false`；`governance.lock` 绑定工作区粘性记录 `.aitest/t1-sticky.json`（及用户态外置标记），外域克隆锁强制将 `trustTier` 上限锁定为 `T0`。
+  - `governance approve` 取消 `CI=1` 自动放行与 `--json` 跳过 TTY 确认，并拦截常见 Agent 会话环境变量（`ANTIGRAVITY_CONVERSATION_ID`、`CLAUDECODE`、`CODEX_CI`、`CODEX_SANDBOX`、`CURSOR_TRACE_ID`、`AIDER_MODEL`），非 TTY 场景需显式 `AITEST_APPROVE_NON_INTERACTIVE=1` + `--yes`。
+  - `verifyAttestationFile` 传入解析后的 `qaDir`/`repoDir` 阻断工作区内伪造 `AITEST_HMAC_KEY_FILE`（退出码 `2`），拒绝 `< 12` 位或非十六进制 `--expect-git-sha`；`buildSafeChildEnv` 与 `runner.mjs` 升级为严格白名单并剥离代理 URL 内嵌凭据。
+- **X.509 / Fulcio / CI 制品校验 / 适配层与 MCP HTTP 加固**：
+  - `der-x509.mjs` 与 `sigstore-verify.mjs` 强制校验 `BasicConstraints`（根/中间 CA `ca: true`、叶子 `ca: false`）、`KeyUsage`、`pathLenConstraint`、证书有效期（相对 Rekor `integratedTime` 或当前时间）与 Fulcio Commit SHA OID（`.1.3` / `.1.21`）。
+  - `.github/workflows/aitest-verify.yml` `attest` job 改读固定非符号链接路径 `aitest-ci-artifacts/{attestation.json,verdict-predicate.json,verdict.sarif.json}` 并强校验 `verdict === 'pass'`、四层门禁全通过、`git-commit === GITHUB_SHA` 与 predicate 一致性，移除不可信 `needs.verify.outputs.*-path`。
+  - `eslint.config.mjs` 与 `static-runner.mjs` 扩展至扫描 `tests/**` 全部文件（含自定义 fixture/helper）阻断裸 `fetch`/`WebSocket`/动态 `import()`/`expect.extend`；`runtime-config.mjs` 与 `playwright.config.ts` 校验 `webServer.env` 禁止 `NODE_OPTIONS`/`LD_PRELOAD` 等注入键；`base.ts` 默认回环放行收敛至 `baseURL` 精确 `host:port` 并改用 10 跳重定向追踪；`perf` 增加 `serviceWorkers: 'block'` 与 `routeWebSocket`；`explore` 修复死代码 `redirectedFrom`；`mcp-hub` 升级 `mcp-grafana==2.2.0`、`redis-mcp-server==0.5.1`、`grafana/mcp-k6:0.7.2` 并审计 `:latest` Docker 标签。
+  - MCP HTTP 未鉴权模式禁止跨端口回环 `Origin`、会话达上限返回 `429`（不再驱逐受害者会话）、配置 `headersTimeout`/`requestTimeout`/`keepAliveTimeout` 并从 `protocol.mjs` 移除绝对路径 `allowedRoots` 泄漏；`redact.mjs` 不再误脱敏布尔/数值原始字段（保留 `authRequired`）、补全 `api_key`/单行转义 PEM/`localStorage` 敏感键覆盖。
+
+### AST 门禁精度修复与真实 FPR 恢复 (AST Gate v2.1 & Real-World FPR Restoration)
+- **修复 `upgrade` / 幂等 `init` 自毁治理锁与 `acquireDiskLock` 竞态**：统一 `writeTemplateManifest` 与 `upgradeQaWorkspace` 码点排序，哈希无变动时禁止重写 `.aitest/template-manifest.json`，`computeTemplateManifestDigest` 忽略易变 `updatedAt` 字段；`acquireDiskLock` 在 `.aitest/` 尚不存在时自动创建后再原子加锁。
+- **100-Commit 真实开源 FPR 从 `10.3%` 恢复至 `5.2% (5/97)`**：`SymbolTable` 禁止将可变数组/对象字面量（如 `const pageErrors = []`、`const messages = []`）折叠为编译期常量，支持单次赋值 `let`/`var`、解构绑定、默认参数与 `{ soft }` 简写；DOM 污点自引用收紧至「同定位器 + 无中间交互动作 + 非算术/模板派生」；`parser.mjs` 支持 `.split().forEach` 与 `expect(arr.length).toBe(N)` 计数守卫且将守卫绑定至循环目标；`constant-eval.mjs` 修复懒惰量词 `*?`/`+?`（`F07`）、单字符通配正则 `/[\s\S]/`（`G2-F07`）、多语句 `expect.poll`（`F47`）与恒同三元分支（`G2-F08`）；`parser-calls.mjs` 拦截 `<alias>.extend` 恒真匹配器（`F12`）；`lattice.mjs` 与 `g116` 识别 `expectApiContract` 状态码与状态变量/世纪位切片并归并 `400/409/422`；`g117-dieselgate.mjs` 升级为局部 Def-Use 污点传播 + 字符串拼接/Base64 解码 + `sec-fetch-*` 检测（彻底封堵变量提升版 Dieselgate 逃逸），同时豁免顶层服务端启动守卫（`G2-L03`）；`changeset.mjs` 堵住空 Spec 分支底线、合法 `@scaffold` 替换与 `F44/F45/F55` 非可执行 `git mv` 规避，并池化跨文件 `@critical`（`L09`）与按 REQ 最大断言阶保底（`G2-F14`）。
+- **自治闭环、诊断与 CLI DX 收口**：修复 `playwright.config.ts` `webServer.cwd` 默认回落仓库根、`explore`/`perf` 回落 `aitest.runtime.json#baseURL` 并 fail-closed 检查配置、`diagnose` 移除 `!includes('server')` 排除并统一 Windows `testId` 正斜杠归一化、全量 CLI `--json` 零空输出与数值/枚举非法参数统一返回退出码 `64`、`aitest_map_sync` 补齐 `force` 参数、Windows 实盘代理适配器移除 `shell: true` 多行注入、修复 `bench/agentic` `--fast` 模式门禁绕过遮蔽并扩充 `AG-E1`/`AG-E2` 及 `baseline-ref`/提升变量 Dieselgate 实盘 Playwright E2E 回归验证。
+
 ## [6.2.0] - 2026-11-25
 
 ### 破坏性变更与接口收敛 (Breaking Changes & Surface Polish)

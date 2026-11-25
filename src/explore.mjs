@@ -7,6 +7,7 @@ import { syncLivingCodeMap } from './codemap.mjs';
 import { loadWorkbenchConfig } from './core/config.mjs';
 import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import { resolvePlaywrightPackage } from './core/playwright-resolve.mjs';
+import { loadRuntimeConfig } from './core/runtime-config.mjs';
 import { executeExploreCrawl } from './explore/crawler.mjs';
 import {
   buildExploreCliSummary,
@@ -16,44 +17,20 @@ import {
 } from './explore/reporter.mjs';
 import { writeInferredApiSchemas } from './explore/schema-inferrer.mjs';
 import {
-  DEFAULT_EXPLORE_PAGES,
-  MAX_EXPLORE_PAGES,
-  classifyActionSafety,
-  createStratifiedRouteQueue,
-  detectEnvelopeBusinessError,
-  detectPageArchetype,
-  detectUrlQueryAnomalies,
-  evaluateExploreRequestSafety,
-  extractVueDynamicRoutes,
-  isSafeReadonlyDialogTrigger,
-  redactEndpointUrl,
-  routeToSafeSlug,
-  sanitizeUntrustedDomText,
+  DEFAULT_EXPLORE_PAGES, MAX_EXPLORE_PAGES, classifyActionSafety, createStratifiedRouteQueue,
+  detectEnvelopeBusinessError, detectPageArchetype, detectUrlQueryAnomalies, evaluateExploreRequestSafety,
+  extractVueDynamicRoutes, isSafeReadonlyDialogTrigger, redactEndpointUrl, routeToSafeSlug, sanitizeUntrustedDomText,
 } from './explore/safety.mjs';
 import {
-  DEFAULT_BLOCKED_ENDPOINTS,
-  compileBlockedEndpointRules,
-  evaluateTargetSafety,
-  loadMergedQaEnv,
-  parseCsvList,
-  parseLowerCsvList,
+  DEFAULT_BLOCKED_ENDPOINTS, compileBlockedEndpointRules, evaluateTargetSafety,
+  loadMergedQaEnv, parseCsvList, parseLowerCsvList,
 } from './origin-guard.mjs';
 
 export {
-  DEFAULT_EXPLORE_PAGES,
-  MAX_EXPLORE_PAGES,
-  classifyActionSafety,
-  createStratifiedRouteQueue,
-  detectEnvelopeBusinessError,
-  detectPageArchetype,
-  detectUrlQueryAnomalies,
-  evaluateExploreRequestSafety,
-  extractVueDynamicRoutes,
-  generatePageAriaSpecMarkdown,
-  generateSystemOverviewMarkdown,
-  isSafeReadonlyDialogTrigger,
-  redactEndpointUrl,
-  sanitizeUntrustedDomText,
+  DEFAULT_EXPLORE_PAGES, MAX_EXPLORE_PAGES, classifyActionSafety, createStratifiedRouteQueue,
+  detectEnvelopeBusinessError, detectPageArchetype, detectUrlQueryAnomalies, evaluateExploreRequestSafety,
+  extractVueDynamicRoutes, generatePageAriaSpecMarkdown, generateSystemOverviewMarkdown, isSafeReadonlyDialogTrigger,
+  redactEndpointUrl, sanitizeUntrustedDomText,
 };
 
 /** @param {string} filePath */
@@ -68,46 +45,56 @@ function loadJsonIfValid(filePath) {
 
 /**
  * Executes a bounded, strictly read-only zero-to-one browser exploration from an entry URL.
- * Default-denies ALL non-GET/HEAD/OPTIONS requests, reuses target-guard egress & endpoint rules,
- * blocks `navigator.sendBeacon`, captures redacted ARIA snapshots per route, and syncs Living Code Map.
  * @param {Record<string, any>} [options]
  */
 export async function runExploreCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
-  if (!options.target) {
-    console.error(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
-    return 1;
-  }
+  const asJson = Boolean(options.json);
+  /** @param {number} exitCode @param {string} msg @param {string[]} [errors] */
+  const failExplore = (exitCode, msg, errors = [msg]) => {
+    if (!asJson) for (const e of errors) console.error(e);
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'explore',
+        outcome: exitCode === 2 ? 'blocked' : 'fail',
+        ok: false,
+        exitCode,
+        summary: msg,
+        blockerKind: exitCode === 2 ? 'TARGET_OR_CONFIG_BLOCKED' : null,
+        data: { error: msg, errors },
+      }),
+      { asJson, compatSpreadData: false }
+    );
+  };
+  if (!options.target) return failExplore(1, lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
 
   const qaDir = resolveQaDirectory(options.target, options.qaDir);
-  if (!qaDir) {
-    console.error(lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
-    return 1;
-  }
+  if (!qaDir) return failExplore(1, lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
 
-  loadWorkbenchConfig({ qaDir });
+  const wbCfg = loadWorkbenchConfig({ qaDir });
+  if (!wbCfg.ok) return failExplore(2, `[Config Blocked] ${wbCfg.errors.join('; ') || 'Invalid workbench config.'}`);
+  const runtimeCfgRes = loadRuntimeConfig(qaDir);
+  if (!runtimeCfgRes.ok) return failExplore(2, `[Runtime Config Blocked] ${runtimeCfgRes.errors.join('; ') || 'Invalid aitest.runtime.json.'}`);
+
   /** @type {Record<string, string>} */
   const overrides = {};
   if (options.baseUrl) overrides.TEST_BASE_URL = options.baseUrl;
   const mergedEnv = loadMergedQaEnv(qaDir, { ...process.env, ...overrides });
+  if (!mergedEnv.TEST_BASE_URL && runtimeCfgRes.config?.baseURL) {
+    mergedEnv.TEST_BASE_URL = runtimeCfgRes.config.baseURL;
+  }
   const safety = evaluateTargetSafety(mergedEnv);
-
   if (!safety.ok || !safety.baseURL) {
     const errs = safety.errors.length > 0 ? safety.errors : ['TEST_BASE_URL is required for explore.'];
-    for (const err of errs) {
-      console.error(`[Target Guard Blocked] ${err}`);
-    }
-    return 2;
+    return failExplore(2, `[Target Guard Blocked] ${errs[0]}`, errs.map((e) => `[Target Guard Blocked] ${e}`));
   }
 
   const pwPkg = resolvePlaywrightPackage(qaDir);
   if (!pwPkg) {
-    console.error(
-      lang === 'zh'
-        ? `在 ${qaDir} 中未找到 playwright 包，请先安装依赖。`
-        : `playwright package not found in ${qaDir}. Install dependencies first.`
+    return failExplore(
+      1,
+      lang === 'zh' ? `在 ${qaDir} 中未找到 playwright 包，请先安装依赖。` : `playwright package not found in ${qaDir}. Install dependencies first.`
     );
-    return 1;
   }
 
   const maxPages = Math.max(1, Math.min(MAX_EXPLORE_PAGES, Number(options.maxPages || DEFAULT_EXPLORE_PAGES)));
@@ -119,8 +106,7 @@ export async function runExploreCommand(options = {}) {
   const maxPortals = Math.max(1, Math.min(5, Number(options.maxPortals ?? 3)));
   const entryPath = resolveExploreEntryPath(safety.baseURL, options.entryPath);
   const userAuthPath = path.join(qaDir, 'playwright', '.auth', 'user.json');
-  const sessionAuthPath = path.join(qaDir, 'playwright', '.auth', 'session.json');
-  const sessionData = loadJsonIfValid(sessionAuthPath);
+  const sessionData = loadJsonIfValid(path.join(qaDir, 'playwright', '.auth', 'session.json'));
 
   const guardConfig = {
     baseURL: safety.baseURL,
@@ -141,19 +127,8 @@ export async function runExploreCommand(options = {}) {
   let topology;
   try {
     topology = await executeExploreCrawl({
-      browser,
-      safety,
-      guardConfig,
-      sessionData,
-      userAuthPath,
-      maxPages,
-      exploreTabs,
-      exploreDialogs,
-      explorePortals,
-      maxTabsPerPage,
-      maxDialogsPerPage,
-      maxPortals,
-      entryPath,
+      browser, safety, guardConfig, sessionData, userAuthPath,
+      maxPages, exploreTabs, exploreDialogs, explorePortals, maxTabsPerPage, maxDialogsPerPage, maxPortals, entryPath,
     });
   } finally {
     await browser.close();
@@ -163,14 +138,11 @@ export async function runExploreCommand(options = {}) {
     const drySummary = buildExploreCliSummary(topology, { entryPath, dryRun: true });
     return emitCommandResult(
       buildCommandResult({
-        tool: 'explore',
-        outcome: 'pass',
-        ok: true,
-        exitCode: 0,
+        tool: 'explore', outcome: 'pass', ok: true, exitCode: 0,
         summary: `Dry-run explore complete (${topology.pages.length} route(s), ${topology.endpoints.length} endpoint(s))`,
         data: drySummary,
       }),
-      { asJson: Boolean(options.json) }
+      { asJson }
     );
   }
 
@@ -188,28 +160,17 @@ export async function runExploreCommand(options = {}) {
   fs.writeFileSync(overviewPath, generateSystemOverviewMarkdown(persistedTopology, lang), 'utf8');
 
   for (const p of topology.pages) {
-    const slug = routeToSafeSlug(p.route);
-    fs.writeFileSync(path.join(pagesSpecDir, `${slug}.md`), generatePageAriaSpecMarkdown(p, lang), 'utf8');
+    fs.writeFileSync(path.join(pagesSpecDir, `${routeToSafeSlug(p.route)}.md`), generatePageAriaSpecMarkdown(p, lang), 'utf8');
   }
 
-  const codeMapSync = syncLivingCodeMap(qaDir, {
-    lang,
-    syncImpact: !options.noSyncImpact,
-  });
-
+  const codeMapSync = syncLivingCodeMap(qaDir, { lang, syncImpact: !options.noSyncImpact });
   const summary = {
-    ...buildExploreCliSummary(persistedTopology, {
-      entryPath,
-      topologyPath,
-      overviewPath,
-      pagesSpecDir,
-      codeMapSync,
-    }),
+    ...buildExploreCliSummary(persistedTopology, { entryPath, topologyPath, overviewPath, pagesSpecDir, codeMapSync }),
     apiSchemasPath: schemaOut.outPath,
     apiSchemasCount: schemaOut.count,
   };
 
-  if (!options.json) {
+  if (!asJson) {
     console.log(
       lang === 'zh'
         ? `\n[Explore] 从 0 到 1 只读探索完成 (snapshot=${topology.snapshotId})：覆盖 ${topology.portals.length} 个门户上下文、${topology.pages.length} 个路由（Tab ${summary.tabsExploredCount} 次 / 只读弹窗 ${summary.dialogsExploredCount} 次 / 断链 ${topology.brokenRoutes.length} 个）、${topology.endpoints.length} 个脱敏 API 端点（包裹异常 ${topology.envelopeErrors.length} 次，拦截写请求 ${topology.blockedWriteRequests.length} 次），同步活体知识图谱 (Revision #${codeMapSync.revision})。`
@@ -229,21 +190,15 @@ export async function runExploreCommand(options = {}) {
           : `  [Hint] Blocked cross-origin API host(s): ${topology.blockedApiHosts.join(', ')} (add to TEST_ALLOWED_HOSTS if part of your test gateway)`
       );
     }
-    console.log(`  Topology JSON : ${topologyPath}`);
-    console.log(`  System Atlas  : ${overviewPath}`);
-    console.log(`  Page ARIA Dir : ${pagesSpecDir}`);
-    console.log(`  Code Map MD   : ${codeMapSync.systemMapMdPath}`);
+    console.log(`  Topology JSON : ${topologyPath}\n  System Atlas  : ${overviewPath}\n  Page ARIA Dir : ${pagesSpecDir}\n  Code Map MD   : ${codeMapSync.systemMapMdPath}`);
   }
 
   return emitCommandResult(
     buildCommandResult({
-      tool: 'explore',
-      outcome: 'pass',
-      ok: true,
-      exitCode: 0,
+      tool: 'explore', outcome: 'pass', ok: true, exitCode: 0,
       summary: `Explore complete (${topology.pages.length} route(s), ${topology.endpoints.length} endpoint(s), map rev #${codeMapSync.revision})`,
       data: summary,
     }),
-    { asJson: Boolean(options.json) }
+    { asJson }
   );
 }

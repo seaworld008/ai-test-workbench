@@ -165,6 +165,7 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
   const failures = flattenPlaywrightResults(resultsJson)
     .filter((t) => t.status === 'unexpected' || t.status === 'flaky' || t.retryPassed)
     .map((t) => ({
+      testId: t.testId,
       title: t.title,
       file: t.file || 'unknown',
       line: t.line,
@@ -224,7 +225,7 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
     const codeCorr = loadCodeMapCorrelations(qaDir, f.file);
     const queryTraceId = injectedTraceId || (traceIds[0] ? extractQueryableTraceId(traceIds[0]) : '<trace-id>');
     const normFile = String(f.file || '').replace(/\\/g, '/');
-    const testId = `${normFile}::${f.title}`;
+    const testId = f.testId || `${normFile}::${String(f.title || '').replace(/\\/g, '/')}`;
 
     diagnosedFailures.push({
       testId,
@@ -316,15 +317,22 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
  */
 export async function runDiagnoseCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
+  const asJson = Boolean(options.json);
+  /** @param {string} msg */
+  const failDiag = (msg) => {
+    if (!asJson) console.error(msg);
+    return emitCommandResult(
+      buildCommandResult({ tool: 'diagnose', outcome: 'fail', ok: false, exitCode: 1, summary: msg, data: { error: msg } }),
+      { asJson, compatSpreadData: false }
+    );
+  };
   if (!options.target) {
-    console.error(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
-    return 1;
+    return failDiag(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
   }
 
   const qaDir = resolveQaDirectory(options.target, options.qaDir);
   if (!qaDir) {
-    console.error(lang === 'zh' ? `未在 ${options.target} 找到 QA 目录` : `QA directory not found under ${options.target}`);
-    return 1;
+    return failDiag(lang === 'zh' ? `未在 ${options.target} 找到 QA 目录` : `QA directory not found under ${options.target}`);
   }
 
   const resultsPath = options.results
@@ -335,8 +343,7 @@ export async function runDiagnoseCommand(options = {}) {
     : path.join(qaDir, 'reports', 'ai-diagnostics.md');
 
   if (!fs.existsSync(resultsPath)) {
-    console.error(lang === 'zh' ? `未找到测试结果文件: ${resultsPath}` : `Results JSON not found: ${resultsPath}`);
-    return 1;
+    return failDiag(lang === 'zh' ? `未找到测试结果文件: ${resultsPath}` : `Results JSON not found: ${resultsPath}`);
   }
 
   const { failureCount, failures, markdown } = generateDiagnosticsMarkdown(qaDir, resultsPath);

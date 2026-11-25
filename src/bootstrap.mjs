@@ -7,7 +7,7 @@ import { isLoopbackHttpUrl, loadRuntimeConfig, validateRuntimeConfig } from './c
 import { resolvePlaywrightCli } from './core/playwright-resolve.mjs';
 import { runNpm, runPlaywright } from './core/proc.mjs';
 import { detectProjectStack, runInit } from './init.mjs';
-import { resolveDefaultDiffBase, resolveGitHeadSha } from './kernel/gate-kernel.mjs';
+import { openTrustContext, resolveDefaultDiffBase, resolveGitHeadSha, writeSignedBaselineRef } from './kernel/gate-kernel.mjs';
 import { loadMergedQaEnv } from './origin-guard.mjs';
 
 /**
@@ -58,6 +58,7 @@ export function inferRuntimeConfigForRepo(repoDir, options = {}) {
       ? {
           webServer: {
             command,
+            cwd: '.',
             url: resolvedBaseUrl,
             port: defaultPort,
             timeoutMs: 45_000,
@@ -218,7 +219,7 @@ export async function bootstrapWorkspaceCore(options = {}) {
     }
   }
 
-  // Record .aitest/baseline-ref if missing in a git repository
+  // Record HMAC-signed .aitest/baseline-ref if missing in a git repository
   const baselineRefPath = path.join(qaDir, '.aitest', 'baseline-ref');
   let baselineRef = null;
   if (!fs.existsSync(baselineRefPath)) {
@@ -226,12 +227,13 @@ export async function bootstrapWorkspaceCore(options = {}) {
     const sha = baseInfo.isGitRepo ? baseInfo.sha || resolveGitHeadSha(repoDir) : null;
     if (sha && sha !== 'nogit') {
       baselineRef = sha;
-      fs.mkdirSync(path.dirname(baselineRefPath), { recursive: true });
-      fs.writeFileSync(
-        baselineRefPath,
-        JSON.stringify({ schemaVersion: 1, baselineRef: sha, strategy: baseInfo.strategy, recordedAt: new Date().toISOString() }, null, 2) + '\n',
-        'utf8'
-      );
+      const bootTrust = openTrustContext({ qaDir, repoDir, createKeyIfMissing: true });
+      writeSignedBaselineRef(qaDir, {
+        baselineRef: sha,
+        strategy: baseInfo.strategy,
+        repoDir,
+        trustContext: bootTrust,
+      });
     }
   } else {
     try {

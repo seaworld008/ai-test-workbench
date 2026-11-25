@@ -14,6 +14,7 @@ import {
   openTrustContext,
   resolveDefaultDiffBase,
   resolveGitHeadSha,
+  writeSignedBaselineRef,
 } from './kernel/gate-kernel.mjs';
 import { writeTemplateManifest } from './upgrade.mjs';
 import {
@@ -120,11 +121,12 @@ export async function runInit(options = {}) {
       (fs.existsSync(path.join(qaDir, 'package.json')) &&
         fs.readFileSync(path.join(qaDir, 'package.json'), 'utf8').includes('@playwright/test'));
 
-    if (existingEntries.length > 0 && !looksLikePlaywright) {
+    const nonLockEntries = existingEntries.filter((e) => e !== '.aitest');
+    if (nonLockEntries.length > 0 && !looksLikePlaywright) {
       return emitJsonError(
         2,
         lang === 'zh'
-          ? `冲突阻断：目标目录 ${qaDir} 已存在且包含非 Playwright 文件 (${existingEntries.slice(0, 5).join(', ')})。请先检查或改用 --qa-dir e2e-qa。`
+          ? `冲突阻断：目标目录 ${qaDir} 已存在且包含非 Playwright 文件 (${nonLockEntries.slice(0, 5).join(', ')})。请先检查或改用 --qa-dir e2e-qa。`
           : `Conflict: ${qaDir} already exists with non-Playwright files. Use --qa-dir <other-dir> instead.`
       );
     }
@@ -278,21 +280,24 @@ export async function runInit(options = {}) {
       return emitJsonError(2, initLock.error || '[Governance Tamper Blocked] Failed to seal initial governance lock.');
     }
   } else {
-    writeTemplateManifest(qaDir, plan.map((s) => s.rel));
+    const manifestPath = path.join(qaDir, '.aitest', 'template-manifest.json');
+    if (!fs.existsSync(manifestPath)) {
+      writeTemplateManifest(qaDir, plan.map((s) => s.rel));
+    }
   }
 
-  // Record `.aitest/baseline-ref` when inside a Git repository so newly added branch specs are never self-locked (`WU-04`)
+  // Record HMAC-signed `.aitest/baseline-ref` when inside a Git repository (`WU-04`, hardened v6.2.1)
   const baselineRefPath = path.join(qaDir, '.aitest', 'baseline-ref');
   if (gitInfo.isGit && !fs.existsSync(baselineRefPath)) {
     const baseInfo = resolveDefaultDiffBase(target);
     const baselineSha = baseInfo.sha || resolveGitHeadSha(target);
     if (baselineSha && baselineSha !== 'nogit') {
-      fs.mkdirSync(path.dirname(baselineRefPath), { recursive: true });
-      fs.writeFileSync(
-        baselineRefPath,
-        JSON.stringify({ schemaVersion: 1, baselineRef: baselineSha, strategy: baseInfo.strategy, recordedAt: new Date().toISOString() }, null, 2) + '\n',
-        'utf8'
-      );
+      writeSignedBaselineRef(qaDir, {
+        baselineRef: baselineSha,
+        strategy: baseInfo.strategy,
+        repoDir: target,
+        trustContext,
+      });
     }
   }
 

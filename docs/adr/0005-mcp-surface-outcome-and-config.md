@@ -2,7 +2,7 @@
 
 > [English Version](./0005-mcp-surface-outcome-and-config.en.md) · [简体中文主文档](../../README.md) · [升级指南](../upgrade.md)
 
-- **状态**：已采纳（Accepted，落地于 `v6.0.0`，并在 `v6.2.0` 进一步收敛为 `16` 个权威工具 + `CommandResult v2`）
+- **状态**：已采纳（Accepted，落地于 `v6.0.0`，并在 `v6.2.1` 进一步收敛为 `16` 个权威工具 + `CommandResult v2`）
 - **决策日期**：`2026-11-25`
 
 ---

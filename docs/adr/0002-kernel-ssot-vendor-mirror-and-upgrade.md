@@ -29,7 +29,7 @@
 
 1. **权威内核归位 `src/kernel/`**：将 `gate-kernel.mjs`、`target-guard.mjs`、`schema-validator.mjs` 及 `gate/**` 迁入 `src/kernel/`，并通过 `package.json#exports` 暴露 `.`、`./kernel`、`./target-guard`、`./schema-validator`。
 2. **确定性单向镜像（`scripts/sync-template-vendor.mjs`）**：单向镜像 `src/kernel/**` 及共享 `src/core/{config,glob,outcome,playwright-results,version}.mjs` 至 `templates/playwright-qa/support/`，每份生成文件均加注 `@generated`、`@source-sha256`、`@workbench-version` 头；`test/unit/architecture-boundaries.test.mjs` 与 CI 强制校验 `0` 反向导入且镜像字节一致。
-3. **模板清单与三方安全升级（`aitw upgrade`）**：`init` 生成 `<repo>/qa/.aitest/template-manifest.json` 记录各托管文件 SHA-256；新增 `npx ai-test-workbench@6.2.0 upgrade --target <repo>` 对比模板基线与当前文件哈希，未改动文件自动升级，人工改动文件输出 `.aitest-new` 而不静默覆盖，且**绝不自动重签 `governance.lock`**（须由人类执行 `governance approve`）。
+3. **模板清单与三方安全升级（`aitw upgrade`）**：`init` 生成 `<repo>/qa/.aitest/template-manifest.json` 记录各托管文件 SHA-256；新增 `npx ai-test-workbench@6.2.1 upgrade --target <repo>` 对比模板基线与当前文件哈希，未改动文件自动升级，人工改动文件输出 `.aitest-new` 而不静默覆盖，且**绝不自动重签 `governance.lock`**（须由人类执行 `governance approve`）。
 4. **修复 `doctor` 漂移检测**：`detectHostGateKernelVersion()` 按优先级读取 `.aitest/template-manifest.json`、`support/core/version.mjs`、`support/gate/engine.mjs` 与旧版单文件，准确汇报版本漂移。
 
 ---

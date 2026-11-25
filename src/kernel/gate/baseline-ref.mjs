@@ -1,0 +1,236 @@
+// @ts-check
+import fs from 'node:fs';
+import path from 'node:path';
+import { isCiEnvironment } from '../../core/outcome.mjs';
+import { execGitSync } from './git-utils.mjs';
+import { openTrustContext } from './trust-context.mjs';
+import { signPayloadT1, verifyPayloadT1 } from './trust-hmac.mjs';
+
+const GIT_EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
+/**
+ * Writes an HMAC-signed `.aitest/baseline-ref` JSON artifact (`domain: 'workspace.baseline'`).
+ * @param {string} qaDir
+ * @param {{
+ *   baselineRef: string;
+ *   strategy?: string | null;
+ *   repoDir?: string;
+ *   trustContext?: import('./trust-context.mjs').TrustContext;
+ *   env?: Record<string, string | undefined>;
+ * }} params
+ * @returns {{ path: string, signed: boolean, baselineRef: string }}
+ */
+export function writeSignedBaselineRef(qaDir, params) {
+  const baselineRefPath = path.join(qaDir, '.aitest', 'baseline-ref');
+  const repoDir = params.repoDir || path.dirname(qaDir);
+  const ctx =
+    params.trustContext ||
+    openTrustContext({ qaDir, repoDir, env: params.env || process.env, createKeyIfMissing: true });
+  const core = {
+    schemaVersion: 2,
+    baselineRef: String(params.baselineRef).trim(),
+    strategy: params.strategy || 'unknown',
+    recordedAt: new Date().toISOString(),
+  };
+  const sig = signPayloadT1('workspace.baseline', core, {
+    qaDir,
+    repoDir,
+    trustContext: ctx,
+    env: params.env || process.env,
+  });
+  const payload = {
+    ...core,
+    ...(sig.signed ? { mac: sig.mac, macKeyId: sig.keyId } : {}),
+  };
+  fs.mkdirSync(path.dirname(baselineRefPath), { recursive: true });
+  fs.writeFileSync(baselineRefPath, JSON.stringify(payload, null, 2) + '\n', 'utf8');
+  return { path: baselineRefPath, signed: sig.signed, baselineRef: core.baselineRef };
+}
+
+/**
+ * Validates that a candidate baseline git ref is a genuine, non-empty commit on HEAD's first-parent
+ * lineage and is not older than (or unrelated to) the branch's merge-base with main/master.
+ * Rejects forged empty-tree commits merged with `-s ours --allow-unrelated-histories`.
+ *
+ * @param {string} gitRoot
+ * @param {string} candidateRef
+ * @param {Record<string, string | undefined>} [env]
+ * @returns {{ ok: boolean, sha: string | null, reason: string | null }}
+ */
+export function validateGitBaselineRef(gitRoot, candidateRef, env = process.env) {
+  const ref = String(candidateRef || '').trim();
+  if (!ref) return { ok: false, sha: null, reason: 'Empty baselineRef.' };
+
+  const revRes = execGitSync(gitRoot, ['rev-parse', '--verify', `${ref}^{commit}`], { timeoutMs: 5000 });
+  if (revRes.status !== 0 || !revRes.stdout.trim()) {
+    return { ok: false, sha: null, reason: `baselineRef "${ref}" is not a valid commit.` };
+  }
+  const refSha = revRes.stdout.trim();
+
+  // 1. Must be a true ancestor of HEAD
+  const ancRes = execGitSync(gitRoot, ['merge-base', '--is-ancestor', refSha, 'HEAD'], { timeoutMs: 5000 });
+  if (ancRes.status !== 0) {
+    return { ok: false, sha: null, reason: `baselineRef "${refSha}" is not an ancestor of HEAD.` };
+  }
+
+  // 2. Reject empty-tree commits (`git commit-tree` empty tree poisoning)
+  const treeRes = execGitSync(gitRoot, ['rev-parse', '--verify', `${refSha}^{tree}`], { timeoutMs: 5000 });
+  const treeSha = treeRes.status === 0 ? treeRes.stdout.trim().toLowerCase() : '';
+  if (!treeSha || treeSha === GIT_EMPTY_TREE_SHA) {
+    return { ok: false, sha: null, reason: `baselineRef "${refSha}" points to an empty Git tree.` };
+  }
+  const lsTree = execGitSync(gitRoot, ['ls-tree', '--name-only', refSha], { timeoutMs: 5000 });
+  if (lsTree.status !== 0 || !lsTree.stdout.trim()) {
+    return { ok: false, sha: null, reason: `baselineRef "${refSha}" has no files in its Git tree.` };
+  }
+
+  // 3. Must lie on HEAD's first-parent lineage (defeats `-s ours --allow-unrelated-histories` side-parent poisoning)
+  const fpRes = execGitSync(gitRoot, ['rev-list', '--first-parent', 'HEAD'], { timeoutMs: 5000 });
+  if (fpRes.status === 0 && fpRes.stdout.trim()) {
+    const firstParents = new Set(fpRes.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean));
+    if (!firstParents.has(refSha)) {
+      return {
+        ok: false,
+        sha: null,
+        reason: `baselineRef "${refSha}" is not on HEAD first-parent lineage (rejecting side-parent/ours merge poison).`,
+      };
+    }
+  }
+
+  // 4. If a main/master branch exists, refSha MUST be at or after merge-base(HEAD, mainRef)
+  const envBranch = env.AITEST_DEFAULT_BRANCH || env.GITHUB_BASE_REF || '';
+  const candidates = [
+    ...(envBranch ? [`origin/${envBranch}`, envBranch] : []),
+    'origin/main',
+    'origin/master',
+    'main',
+    'master',
+  ];
+  for (const cand of [...new Set(candidates)]) {
+    const verifyCand = execGitSync(gitRoot, ['rev-parse', '--verify', `${cand}^{commit}`], { timeoutMs: 5000 });
+    if (verifyCand.status !== 0) continue;
+    const mbRes = execGitSync(gitRoot, ['merge-base', 'HEAD', cand], { timeoutMs: 5000 });
+    if (mbRes.status === 0 && mbRes.stdout.trim()) {
+      const mbSha = mbRes.stdout.trim();
+      const descCheck = execGitSync(gitRoot, ['merge-base', '--is-ancestor', mbSha, refSha], { timeoutMs: 5000 });
+      if (descCheck.status !== 0) {
+        return {
+          ok: false,
+          sha: null,
+          reason: `baselineRef "${refSha}" predates or diverges from merge-base(HEAD, ${cand})="${mbSha}".`,
+        };
+      }
+      break;
+    }
+  }
+
+  return { ok: true, sha: refSha, reason: null };
+}
+
+/**
+ * Resolves and validates workspace `.aitest/baseline-ref` with strict trust boundaries:
+ * - ALWAYS returns `null` (ignored) in CI (`isCiEnvironment(env)`) or when an explicit `--base` / `diffBase` is supplied.
+ * - Verifies `workspace.baseline` HMAC when `hostT1Sticky` (fail-closed `blocked: true` on tamper).
+ * - Validates full Git lineage (`validateGitBaselineRef`).
+ *
+ * @param {string | undefined} qaDir
+ * @param {string} gitRoot
+ * @param {{
+ *   explicitBase?: boolean;
+ *   explicitBaselineRef?: string | null;
+ *   trustContext?: import('./trust-context.mjs').TrustContext;
+ *   env?: Record<string, string | undefined>;
+ * }} [options]
+ * @returns {{ ref: string | null, blocked: boolean, error: string | null }}
+ */
+export function resolveValidatedWorkspaceBaselineRef(qaDir, gitRoot, options = {}) {
+  const env = options.env || process.env;
+
+  // Programmatic explicit baselineRef option (still verified against Git lineage!)
+  if (options.explicitBaselineRef !== undefined) {
+    if (!options.explicitBaselineRef) {
+      return { ref: null, blocked: false, error: null };
+    }
+    const gitCheck = validateGitBaselineRef(gitRoot, options.explicitBaselineRef, env);
+    if (!gitCheck.ok) {
+      return {
+        ref: null,
+        blocked: false,
+        error: gitCheck.reason,
+      };
+    }
+    return { ref: gitCheck.sha, blocked: false, error: null };
+  }
+
+  // NEVER trust workspace `.aitest/baseline-ref` in CI or when caller explicitly passed `--base` / `diffBase`
+  if (isCiEnvironment(env) || options.explicitBase) {
+    return { ref: null, blocked: false, error: null };
+  }
+
+  if (!qaDir) return { ref: null, blocked: false, error: null };
+  const refPath = path.join(qaDir, '.aitest', 'baseline-ref');
+  if (!fs.existsSync(refPath)) return { ref: null, blocked: false, error: null };
+
+  const repoDir = path.dirname(qaDir);
+  const ctx =
+    options.trustContext ||
+    openTrustContext({ qaDir, repoDir, env, createKeyIfMissing: false });
+
+  let raw = '';
+  try {
+    raw = fs.readFileSync(refPath, 'utf8').trim();
+  } catch {
+    return { ref: null, blocked: false, error: null };
+  }
+  if (!raw) return { ref: null, blocked: false, error: null };
+
+  /** @type {string | null} */
+  let candidateRef = null;
+  if (raw.startsWith('{')) {
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return {
+        ref: null,
+        blocked: ctx.hostT1Sticky,
+        error: '[Baseline Tamper Blocked] Corrupted JSON in .aitest/baseline-ref.',
+      };
+    }
+    const macCheck = verifyPayloadT1('workspace.baseline', parsed, parsed.mac, {
+      qaDir,
+      repoDir,
+      macs: parsed.macs || null,
+      trustContext: ctx,
+      env,
+    });
+    if (!macCheck.ok) {
+      return {
+        ref: null,
+        blocked: true,
+        error: `[Baseline Tamper Blocked] ${macCheck.reason}`,
+      };
+    }
+    candidateRef = typeof parsed.baselineRef === 'string' && parsed.baselineRef.trim() ? parsed.baselineRef.trim() : null;
+  } else {
+    if (ctx.hostT1Sticky) {
+      return {
+        ref: null,
+        blocked: true,
+        error: '[Baseline Tamper Blocked] Unsigned legacy raw .aitest/baseline-ref is rejected on T1-sticky host.',
+      };
+    }
+    candidateRef = raw;
+  }
+
+  if (!candidateRef) return { ref: null, blocked: false, error: null };
+  const gitCheck = validateGitBaselineRef(gitRoot, candidateRef, env);
+  if (!gitCheck.ok) {
+    return {
+      ref: null,
+      blocked: true,
+      error: `[Baseline Tamper Blocked] Invalid .aitest/baseline-ref: ${gitCheck.reason}`,
+    };
+  }
+  return { ref: gitCheck.sha, blocked: false, error: null };
+}

@@ -64,6 +64,17 @@ export async function verifyChangeCore(options = {}) {
   // Step 0: Resolve real Git root (monorepo/worktree aware) & safe diff base (`T-05`)
   const baseResolution = resolveDefaultDiffBase(repoDir, options.base || null);
 
+  if (!workbenchConfig.ok) {
+    return buildBlockedVerdict({
+      reasonCode: 'invalid-workbench-config',
+      gitSha: resolveGitHeadSha(repoDir),
+      base: baseResolution,
+      requestedMode,
+      gates: { governance: 'blocked', static: 'skipped', runtime: 'skipped', semanticDiff: 'skipped' },
+      gateErrors: workbenchConfig.errors.map((e) => `[Config Blocked] ${e}`),
+    });
+  }
+
   // Step 1: Pre-flight Layer 0 Governance Lock Integrity (Fail-Closed!)
   const preTrustContext = openTrustContext({ qaDir, repoDir, createKeyIfMissing: false });
   const govPre = verifyGovernanceLockInQaDir(qaDir, { trustContext: preTrustContext });
@@ -191,18 +202,8 @@ export async function verifyChangeCore(options = {}) {
     signal: options.signal,
   });
 
-  // Read optional branch baseline-ref for new-branch spec exemption (`WU-04`)
-  let branchBaselineRef = null;
-  const baselineRefFile = path.join(qaDir, '.aitest', 'baseline-ref');
-  if (fs.existsSync(baselineRefFile)) {
-    try {
-      branchBaselineRef = JSON.parse(fs.readFileSync(baselineRefFile, 'utf8')).baselineRef || null;
-    } catch {
-      branchBaselineRef = null;
-    }
-  }
-
   // Step 4: Full 4-Layer Fail-Closed AST Audit
+  // Security boundary (v6.2.1): explicit `--base` or CI strictly ignores `.aitest/baseline-ref`
   const auditTrustContext = openTrustContext({ qaDir, repoDir, createKeyIfMissing: false });
   const auditOut = runAuditForQaDir(qaDir, {
     checkSpecs: true,
@@ -210,7 +211,7 @@ export async function verifyChangeCore(options = {}) {
     allowMutation: options.allowMutation ?? safety.allowMutation,
     expectedRunId: runOut.runId,
     diffBase: baseResolution.resolved,
-    baselineRef: branchBaselineRef,
+    explicitDiffBase: Boolean(options.base),
     requireDiff: !allowNonGit,
     trustContext: auditTrustContext,
   });

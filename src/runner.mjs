@@ -12,6 +12,7 @@ import { redactSecrets } from './core/redact.mjs';
 import { loadRuntimeConfig } from './core/runtime-config.mjs';
 import { syncQuarantineFromLedger } from './flaky.mjs';
 import { computeImpact } from './impact.mjs';
+import { sanitizeProxyUrlEnvValue } from './jobs/workspace-lock.mjs';
 import { beginRunLedger, finalizeRunLedger } from './ledger.mjs';
 import { evaluateTargetSafety, loadMergedQaEnv } from './origin-guard.mjs';
 
@@ -45,7 +46,6 @@ const PLAYWRIGHT_ENV_ALLOWLIST_EXACT = new Set([
   'LC_MESSAGES',
   'TZ',
   'NODE_ENV',
-  'NODE_OPTIONS',
   'CI',
   'GITHUB_ACTIONS',
   'GITLAB_CI',
@@ -68,10 +68,13 @@ const PLAYWRIGHT_ENV_ALLOWLIST_EXACT = new Set([
 
 const PLAYWRIGHT_ENV_ALLOWLIST_PREFIXES = ['PLAYWRIGHT_', 'PW_', 'TEST_', 'E2E_', 'FAIL_ON_'];
 const PLAYWRIGHT_ENV_ALLOWLIST_AITEST = new Set(['AITEST_ACTIVE_SUITE', 'AITEST_RUN_ID', 'AITEST_LANG', 'AITEST_DISABLE_WEBSERVER']);
+const PW_SENSITIVE_KEY_RE =
+  /^(?:AITEST_HMAC_KEY|AITEST_MCP_|ACTIONS_ID_TOKEN_|ACTIONS_RUNTIME_TOKEN$|DATABASE_URL$)|(?:^|_)(?:SECRET|TOKEN|API_KEY|PASSWORD|PASSWD|PRIVATE_KEY)(?:$|_)/i;
+const PW_PROXY_KEYS = new Set(['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']);
 
 /**
  * Builds a strict allowlisted environment for Playwright & target app processes,
- * stripping `AITEST_HMAC_KEY*`, MCP tokens, cloud credentials, and CI OIDC tokens (`WU-01`).
+ * stripping `AITEST_HMAC_KEY*`, MCP tokens, cloud credentials, DB URLs, and CI OIDC tokens (`WU-01`, v6.2.1).
  * @param {Record<string, string | undefined>} baseEnv
  * @param {Record<string, string | undefined>} [extraEnv]
  * @returns {Record<string, string>}
@@ -82,7 +85,7 @@ export function buildPlaywrightChildEnv(baseEnv = process.env, extraEnv = {}) {
   const combined = { ...baseEnv, ...extraEnv };
   for (const [k, v] of Object.entries(combined)) {
     if (v === undefined) continue;
-    if (k.startsWith('AITEST_HMAC_KEY') || k.startsWith('AITEST_MCP_') || k.startsWith('ACTIONS_ID_TOKEN_REQUEST_')) {
+    if (!k.startsWith('E2E_') && PW_SENSITIVE_KEY_RE.test(k)) {
       continue;
     }
     const allowed =
@@ -90,7 +93,7 @@ export function buildPlaywrightChildEnv(baseEnv = process.env, extraEnv = {}) {
       PLAYWRIGHT_ENV_ALLOWLIST_AITEST.has(k) ||
       PLAYWRIGHT_ENV_ALLOWLIST_PREFIXES.some((p) => k.startsWith(p));
     if (allowed) {
-      clean[k] = String(v);
+      clean[k] = PW_PROXY_KEYS.has(k) ? sanitizeProxyUrlEnvValue(String(v)) : String(v);
     }
   }
   return clean;
@@ -185,9 +188,36 @@ export async function executeSuiteCore(options = {}) {
     };
   }
 
-  loadWorkbenchConfig({ qaDir });
+  const wbCfg = loadWorkbenchConfig({ qaDir });
+  if (!wbCfg.ok) {
+    return {
+      ok: false,
+      exitCode: 2,
+      outcome: 'blocked',
+      errors: wbCfg.errors,
+      error: wbCfg.errors.map((e) => `[Config Blocked] ${e}`).join('\n'),
+    };
+  }
   const suite = (options.suite || 'smoke').toLowerCase();
+  const VALID_SUITES = new Set(['smoke', 'e2e', 'api', 'a11y', 'critical', 'seed', 'impact', 'all']);
+  if (!VALID_SUITES.has(suite)) {
+    return {
+      ok: false,
+      exitCode: 64,
+      outcome: 'usage',
+      error: `Unknown suite "${options.suite}". Valid suites: smoke, e2e, api, a11y, critical, seed, impact, all.`,
+    };
+  }
   const runtimeCfgRes = loadRuntimeConfig(qaDir);
+  if (runtimeCfgRes.exists && !runtimeCfgRes.ok) {
+    return {
+      ok: false,
+      exitCode: 2,
+      outcome: 'blocked',
+      errors: runtimeCfgRes.errors,
+      error: runtimeCfgRes.errors.map((e) => `[Runtime Config Blocked] ${e}`).join('\n'),
+    };
+  }
   /** @type {Record<string, string>} */
   const overrides = {};
   if (options.baseUrl) {
@@ -352,8 +382,18 @@ export async function executeSuiteCore(options = {}) {
         }
       }
       const errMsg = t.errorSnippet ? redactSecrets(t.errorSnippet) : null;
+      /** @type {string[]} */
       const locatorSuggestions = [];
-      if (errMsg && /locator|strict mode|getBy/i.test(errMsg)) {
+      if (errorContextAria) {
+        for (const m of errorContextAria.matchAll(/\b(button|link|heading|textbox|checkbox|radio|combobox|tab|menuitem)\s+"([^"]{1,60})"/gi)) {
+          const role = m[1].toLowerCase();
+          const label = m[2].replace(/'/g, "\\'");
+          const suggestion = `page.getByRole('${role}', { name: '${label}' })`;
+          if (!locatorSuggestions.includes(suggestion)) locatorSuggestions.push(suggestion);
+          if (locatorSuggestions.length >= 5) break;
+        }
+      }
+      if (locatorSuggestions.length === 0 && errMsg && /locator|strict mode|getBy/i.test(errMsg)) {
         locatorSuggestions.push('Inspect errorContextAria and bind a unique semantic locator (getByRole / getByLabel / getByTestId).');
       }
       return {
@@ -434,9 +474,10 @@ export async function runSuiteCommand(options = {}) {
   return emitCommandResult(
     buildCommandResult({
       tool: 'run',
-      outcome: res.exitCode === 2 ? 'blocked' : res.ok ? 'pass' : 'fail',
+      outcome: res.exitCode === 64 ? 'usage' : res.exitCode === 2 ? 'blocked' : res.ok ? 'pass' : 'fail',
       ok: Boolean(res.ok),
       exitCode: res.exitCode,
+      blockerKind: res.exitCode === 64 ? 'USAGE_ERROR' : res.exitCode === 2 ? 'RUN_BLOCKED' : null,
       summary: res.error
         ? res.error
         : `Suite "${res.suite}" ${res.ok ? 'passed' : 'failed'} (runId=${res.runId || 'none'}, passed=${res.counts?.passed ?? 0}, failed=${res.counts?.failed ?? 0})`,

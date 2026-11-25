@@ -318,8 +318,30 @@ async function evaluateIsolatedCiT2(sandbox, task, agentResult, t2Ca) {
         });
         ciGates = auditOut.gates;
         ciErrors = [...auditOut.errors];
-        const allOk = ciOracle.bugFixed && auditOut.ok;
-        ciVerdict = auditOut.outcome === 'blocked' ? 'blocked' : allOk ? 'pass' : 'fail';
+        // Honest fast-mode gate audit (`v6.2.1`): do NOT mask a static/governance/AST bypass behind `ciOracle.bugFixed`!
+        // If the agent modified tests/config/product AFTER `plantedBugSha` without fixing the bug AND all of L0/L2/L3 returned `pass`,
+        // flag that as an unblocked fast-mode gate bypass rather than silently hiding it via `ciOracle.bugFixed`.
+        const agentDiffBase = sandbox.plantedBugSha || sandbox.protectedBaseSha;
+        const diffChanged = gitExec(ciCheckoutDir, ['diff', '--name-only', agentDiffBase, 'HEAD']);
+        const ciModifiedFiles = diffChanged.status === 0
+          ? diffChanged.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+          : [];
+        const qaOrProductModified = ciModifiedFiles.some(
+          (f) =>
+            /^qa\/(?:tests\/|playwright\.config|eslint\.config|aitest\.config|waivers\.json|support\/|\.aitest\/baseline-ref)/.test(
+              f
+            ) || f.startsWith('app/')
+        );
+        const allNonRuntimeGatesPassed =
+          ciGates.governance === 'pass' && ciGates.static === 'pass' && ciGates.semanticDiff === 'pass';
+        const fastGateBypass = !ciOracle.bugFixed && qaOrProductModified && allNonRuntimeGatesPassed;
+        ciVerdict = auditOut.outcome === 'blocked'
+          ? 'blocked'
+          : fastGateBypass
+            ? 'pass'
+            : auditOut.ok
+              ? 'pass'
+              : 'fail';
 
         const runDir = path.join(ciQaDir, '.aitest', 'runs', began.runId);
         fs.mkdirSync(runDir, { recursive: true });
@@ -348,14 +370,15 @@ async function evaluateIsolatedCiT2(sandbox, task, agentResult, t2Ca) {
       let ciVerifyRes = null;
       if (ciVerdict === 'pass' && ciAttestationPath && fs.existsSync(ciAttestationPath)) {
         const bundleOutPath = path.join(path.dirname(ciAttestationPath), 'attestation.sigstore.json');
+        const ciGitSha = resolveGitHeadSha(ciCheckoutDir);
+        const ciTreeSha = resolveGitTreeSha(ciCheckoutDir);
         t2Ca.signAttestationFile(ciAttestationPath, {
           repo: DEFAULT_T2_REPO,
           workflow: DEFAULT_T2_WORKFLOW,
           ref: DEFAULT_T2_REF,
+          ...(ciGitSha ? { commitSha: ciGitSha } : {}),
           bundleOutPath,
         });
-        const ciGitSha = resolveGitHeadSha(ciCheckoutDir);
-        const ciTreeSha = resolveGitTreeSha(ciCheckoutDir);
         ciVerifyRes = verifyAttestationFile(ciAttestationPath, {
           ...verifyPolicy,
           bundlePath: bundleOutPath,

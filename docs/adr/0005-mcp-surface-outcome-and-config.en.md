@@ -2,7 +2,7 @@
 
 > [简体中文 (默认)](./0005-mcp-surface-outcome-and-config.md) · [English README](../../README.en.md) · [Upgrade Guide](../upgrade.en.md)
 
-- **Status**: Accepted (Shipped in `v6.0.0`, further consolidated to `16` canonical tools + `CommandResult v2` in `v6.2.0`)
+- **Status**: Accepted (Shipped in `v6.0.0`, further consolidated to `16` canonical tools + `CommandResult v2` in `v6.2.1`)
 - **Date**: `2026-11-25`
 
 ---

@@ -1,0 +1,183 @@
+// @ts-check
+import { unwrapExpr } from './ts-loader.mjs';
+
+export const DOM_TAINT_READERS = new Set([
+  'textContent', 'innerText', 'innerHTML', 'inputValue', 'getAttribute',
+  'allTextContents', 'allInnerTexts', 'count', 'title', 'url', 'all',
+]);
+
+export const MUTATING_METHODS = new Set([
+  'push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse',
+  'set', 'add', 'delete', 'clear', 'fill', 'copyWithin',
+]);
+
+export const PURE_READ_OR_LOCATOR_METHODS = new Set([
+  ...DOM_TAINT_READERS,
+  'locator', 'getByRole', 'getByText', 'getByTestId', 'getByLabel', 'getByPlaceholder',
+  'getByAltText', 'getByTitle', 'frameLocator', 'first', 'last', 'nth', 'filter', 'and', 'or',
+  'trim', 'toLowerCase', 'toUpperCase', 'toString', 'slice', 'split', 'join', 'map', 'reduce',
+  'replace', 'match', 'includes', 'startsWith', 'endsWith',
+  'isVisible', 'isHidden', 'isEnabled', 'isDisabled', 'isChecked', 'isEditable',
+]);
+
+export const PURE_GLOBAL_FNS = new Set([
+  'expect', 'String', 'Number', 'Boolean', 'BigInt', 'parseInt', 'parseFloat', 'RegExp', 'Array', 'Object', 'JSON',
+]);
+
+/** @param {any} ts @param {any} expr @returns {string | null} */
+export function extractRootIdentifierName(ts, expr) {
+  let cur = unwrapExpr(ts, expr);
+  while (cur) {
+    if (ts.isIdentifier(cur)) return cur.text;
+    if (ts.isPropertyAccessExpression(cur) || ts.isElementAccessExpression(cur)) {
+      cur = unwrapExpr(ts, cur.expression);
+      continue;
+    }
+    break;
+  }
+  return null;
+}
+
+/** @param {any} ts @param {any} nameNode @param {string[]} out */
+export function collectBindingIdentifiers(ts, nameNode, out) {
+  if (!nameNode) return;
+  if (ts.isIdentifier(nameNode)) {
+    out.push(nameNode.text);
+    return;
+  }
+  if (ts.isArrayBindingPattern(nameNode) || ts.isObjectBindingPattern(nameNode)) {
+    for (const el of nameNode.elements || []) {
+      if (ts.isBindingElement(el)) collectBindingIdentifiers(ts, el.name, out);
+    }
+  }
+}
+
+/** @param {any} ts @param {any} lhs @param {string[]} out */
+export function collectAssignTargetNames(ts, lhs, out) {
+  const u = unwrapExpr(ts, lhs);
+  if (!u) return;
+  const root = extractRootIdentifierName(ts, u);
+  if (root) {
+    out.push(root);
+    return;
+  }
+  if (ts.isArrayLiteralExpression(u)) {
+    for (const el of u.elements) collectAssignTargetNames(ts, el, out);
+  } else if (ts.isObjectLiteralExpression(u)) {
+    for (const prop of u.properties) {
+      if (ts.isShorthandPropertyAssignment(prop)) out.push(prop.name.text);
+      else if (ts.isPropertyAssignment(prop)) collectAssignTargetNames(ts, prop.initializer, out);
+    }
+  }
+}
+
+/** @param {any} ts @param {number} kind */
+export function isAssignmentOperatorKind(ts, kind) {
+  return (
+    kind === ts.SyntaxKind.EqualsToken ||
+    (kind >= ts.SyntaxKind.FirstCompoundAssignment && kind <= ts.SyntaxKind.LastCompoundAssignment)
+  );
+}
+
+/**
+ * Normalizes a locator/receiver AST expression to a stable comparison key, resolving local locator aliases.
+ * @param {any} ts @param {any} sf @param {any} rawExpr @param {Map<string, string>} locatorAliases @param {string} scopeKey
+ * @returns {string}
+ */
+export function normalizeLocatorExprKey(ts, sf, rawExpr, locatorAliases, scopeKey) {
+  if (!rawExpr) return '';
+  let cur = unwrapExpr(ts, rawExpr);
+  if (ts.isAwaitExpression(cur)) cur = unwrapExpr(ts, cur.expression);
+  if (
+    ts.isCallExpression(cur) &&
+    ts.isPropertyAccessExpression(cur.expression) &&
+    DOM_TAINT_READERS.has(cur.expression.name.text)
+  ) {
+    cur = unwrapExpr(ts, cur.expression.expression);
+  }
+  if (ts.isIdentifier(cur)) {
+    const alias = locatorAliases.get(`${scopeKey}::${cur.text}`) || locatorAliases.get(`<file>::${cur.text}`);
+    if (alias) return alias;
+  }
+  if (ts.isPropertyAccessExpression(cur) && ts.isIdentifier(cur.expression)) {
+    const alias =
+      locatorAliases.get(`${scopeKey}::${cur.expression.text}`) ||
+      locatorAliases.get(`<file>::${cur.expression.text}`);
+    if (alias) return `${alias}.${cur.name.text}`;
+  }
+  try {
+    return cur.getText(sf).replace(/\s+/g, '');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Checks whether an AST subtree invokes a Playwright DOM read or references a tainted local identifier.
+ * @param {any} ts @param {any} sf @param {any} node
+ * @param {Map<string, { locatorKey: string, reader: string, readPos: number }>} taintedMap
+ * @param {Map<string, string>} locatorAliases @param {string} scopeKey
+ * @returns {{ locatorKey: string, reader: string, readPos: number } | null}
+ */
+export function extractDomTaintMeta(ts, sf, node, taintedMap, locatorAliases, scopeKey) {
+  if (!node) return null;
+  const u = unwrapExpr(ts, node);
+  if (ts.isAwaitExpression(u)) return extractDomTaintMeta(ts, sf, u.expression, taintedMap, locatorAliases, scopeKey);
+  if (ts.isIdentifier(u)) {
+    return taintedMap.get(`${scopeKey}::${u.text}`) || taintedMap.get(`<file>::${u.text}`) || null;
+  }
+  if (
+    ts.isCallExpression(u) &&
+    ts.isPropertyAccessExpression(u.expression) &&
+    DOM_TAINT_READERS.has(u.expression.name.text)
+  ) {
+    const reader = u.expression.name.text;
+    const locatorKey = normalizeLocatorExprKey(ts, sf, u.expression.expression, locatorAliases, scopeKey);
+    return { locatorKey, reader, readPos: typeof u.getStart === 'function' ? u.getStart(sf) : u.pos || 0 };
+  }
+  /** @type {{ locatorKey: string, reader: string, readPos: number } | null} */
+  let hit = null;
+  ts.forEachChild(u, (/** @type {any} */ child) => {
+    if (!hit) hit = extractDomTaintMeta(ts, sf, child, taintedMap, locatorAliases, scopeKey);
+  });
+  return hit;
+}
+
+/** @param {any} ts @param {any} sf @param {any} rawNode @returns {boolean} */
+export function isResponseStatusReadExpr(ts, sf, rawNode) {
+  if (!rawNode) return false;
+  let u = unwrapExpr(ts, rawNode);
+  if (ts.isAwaitExpression(u)) u = unwrapExpr(ts, u.expression);
+  if (ts.isCallExpression(u) && ts.isPropertyAccessExpression(u.expression) && u.expression.name.text === 'status') {
+    return true;
+  }
+  if (ts.isPropertyAccessExpression(u) && u.name.text === 'status') {
+    const recvText = u.expression.getText(sf).trim();
+    return /\b(?:res|resp|response|reply|api)\b/i.test(recvText);
+  }
+  return false;
+}
+
+/** @param {any} ts @param {any} bodyNode */
+export function bodyHasRealExpect(ts, bodyNode) {
+  if (!bodyNode) return false;
+  let found = false;
+  /** @param {any} n */
+  const scan = (n) => {
+    if (found || !n) return;
+    if (ts.isCallExpression(n)) {
+      const expr = n.expression;
+      if (ts.isIdentifier(expr) && (expr.text === 'expect' || expr.text === 'assert')) {
+        found = true;
+        return;
+      }
+      if (ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.expression) && expr.expression.text === 'expect') {
+        found = true;
+        return;
+      }
+    }
+    ts.forEachChild(n, scan);
+  };
+  scan(bodyNode);
+  return found;
+}

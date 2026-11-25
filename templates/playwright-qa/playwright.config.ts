@@ -4,6 +4,7 @@ import { defineConfig, devices } from '@playwright/test';
 import {
   applyEnvFileToProcess,
   assertTargetSafety,
+  isLoopbackHttpUrl,
   loadRuntimeConfig,
   resolveDefaultMutationPolicy,
 } from './support/target-guard.mjs';
@@ -42,15 +43,27 @@ if (isTestRun && requestedOnlineProject && !baseURL) {
   );
 }
 
+const FORBIDDEN_WS_ENV_RE =
+  /^(?:NODE_OPTIONS|NODE_EXTRA_CA_CERTS|LD_PRELOAD|LD_LIBRARY_PATH|LD_AUDIT|DYLD_.*|PATH|PATHEXT|COMSPEC|SHELL|BASH_ENV|ENV|PROMPT_COMMAND|IFS|AITEST_HMAC_.*|AITEST_MCP_.*|ACTIONS_ID_TOKEN_.*|ACTIONS_RUNTIME_TOKEN)$/i;
+
+const sanitizedWsEnv = runtimeCfg?.webServer?.env
+  ? Object.fromEntries(
+      Object.entries(runtimeCfg.webServer.env).filter(([k]) => !FORBIDDEN_WS_ENV_RE.test(k))
+    )
+  : undefined;
+
+const effectiveWsTargetUrl = runtimeCfg?.webServer?.url || baseURL || '';
 const configuredWebServer =
-  runtimeCfg?.webServer && process.env.AITEST_DISABLE_WEBSERVER !== '1'
+  runtimeCfg?.webServer &&
+  process.env.AITEST_DISABLE_WEBSERVER !== '1' &&
+  isLoopbackHttpUrl(effectiveWsTargetUrl)
     ? {
         command: runtimeCfg.webServer.command,
-        ...(runtimeCfg.webServer.cwd ? { cwd: path.resolve(__dirname, '..', runtimeCfg.webServer.cwd) } : {}),
+        cwd: path.resolve(__dirname, '..', runtimeCfg.webServer.cwd || '.'),
         ...(runtimeCfg.webServer.url ? { url: runtimeCfg.webServer.url } : {}),
         timeout: runtimeCfg.webServer.timeoutMs || 45_000,
         reuseExistingServer: process.env.CI ? false : runtimeCfg.webServer.reuseExistingServer !== false,
-        ...(runtimeCfg.webServer.env ? { env: runtimeCfg.webServer.env } : {}),
+        ...(sanitizedWsEnv && Object.keys(sanitizedWsEnv).length > 0 ? { env: sanitizedWsEnv } : {}),
       }
     : undefined;
 

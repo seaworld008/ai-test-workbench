@@ -214,18 +214,6 @@ export function suggestFailureCategory(errorText, guardSignals = null, errorObj 
   }
 
   if (ev.hasValueAssertion) {
-    if (ev.elementNotFound) {
-      return {
-        categoryCode: 'C',
-        category: 'C (Element Missing During Value Assertion — Dual Candidate C/A)',
-        confidence: 'medium',
-        candidates: ['C', 'A'],
-        evidence: [`matcher=${ev.matcher || 'value'}`, 'element-not-found'],
-        guidance:
-          'Target element was not found while asserting business value. Treat as Class C regression until ARIA snapshot & specs/*.md confirm an intentional UI refactor.',
-      };
-    }
-
     const receivedLower = String(ev.receivedValue || '').toLowerCase();
     const receivedLooksBroken = /\b(500|502|503|504|undefined|nan|null|failed|exception|crash|error)\b/i.test(receivedLower);
     if (ev.isTextCopyMatcher && !receivedLooksBroken) {

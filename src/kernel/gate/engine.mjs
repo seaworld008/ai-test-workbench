@@ -37,6 +37,7 @@ export const GATE_KERNEL_VERSION = WORKBENCH_VERSION;
  *   requireE2e?: boolean;
  *   staticOnly?: boolean;
  *   diffBase?: string | null;
+ *   explicitDiffBase?: boolean;
  *   baselineRef?: string | null;
  *   requireDiff?: boolean;
  *   allowMutation?: boolean;
@@ -216,27 +217,19 @@ export function runAuditForQaDir(qaDir, options = {}) {
   }
 
   // Layer 3: Full-File AST Semantic Diff Guard
-  const baselineRefFile = path.join(qaDir, '.aitest', 'baseline-ref');
-  let baselineRef = options.baselineRef ?? null;
-  if (!baselineRef && fs.existsSync(baselineRefFile)) {
-    try {
-      const rawRef = fs.readFileSync(baselineRefFile, 'utf8').trim();
-      if (rawRef.startsWith('{')) {
-        const parsedRef = JSON.parse(rawRef);
-        baselineRef = typeof parsedRef.baselineRef === 'string' ? parsedRef.baselineRef.trim() || null : null;
-      } else {
-        baselineRef = rawRef || null;
-      }
-    } catch {
-      baselineRef = null;
-    }
-  }
+  const explicitDiffBase =
+    options.explicitDiffBase !== undefined
+      ? Boolean(options.explicitDiffBase)
+      : Boolean(diffBase && options.baselineRef === undefined);
   /** @type {'pass' | 'fail' | 'blocked' | 'skipped'} */
   let diffStatus = diffBase ? 'pass' : requireDiff ? 'blocked' : 'skipped';
   if (diffBase) {
     const diffRes = runGitDiffGuard(qaDir, diffBase, {
       activeWaivers: waiverCheck.activeWaivers,
-      baselineRef,
+      ...(options.baselineRef !== undefined ? { baselineRef: options.baselineRef } : {}),
+      explicitBase: explicitDiffBase,
+      trustContext,
+      env: options.env || process.env,
     });
     diffStatus = /** @type {any} */ (diffRes.status || (diffRes.ok ? 'pass' : 'fail'));
     allErrors.push(...diffRes.violations);

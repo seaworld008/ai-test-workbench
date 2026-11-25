@@ -21,6 +21,7 @@ const OID_COMMON_NAME = '2.5.4.3';
 const OID_BASIC_CONSTRAINTS = '2.5.29.19';
 const OID_KEY_USAGE = '2.5.29.15';
 const OID_SUBJECT_ALT_NAME = '2.5.29.17';
+const OID_FULCIO_BUILD_SIGNER_DIGEST = '1.3.6.1.4.1.57264.1.3';
 const OID_FULCIO_ISSUER_V2 = '1.3.6.1.4.1.57264.1.8';
 
 /**
@@ -201,12 +202,14 @@ function buildSignedX509Cert(opts) {
  * Creates an in-memory ephemeral Fulcio-compatible Root CA for isolated T2 CI evaluation.
  * Its private key stays strictly inside the evaluator process and is NEVER written into agent workspaces.
  * @param {string} [rootCn]
+ * @param {{ rootCa?: boolean; rootNotBefore?: Date; rootNotAfter?: Date }} [rootOpts]
  */
-export function createEphemeralFulcioCa(rootCn = 'AI-Test-Workbench Ephemeral Fulcio T2 Root CA') {
+export function createEphemeralFulcioCa(rootCn = 'AI-Test-Workbench Ephemeral Fulcio T2 Root CA', rootOpts = {}) {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const rootIsCa = rootOpts.rootCa !== undefined ? Boolean(rootOpts.rootCa) : true;
   const rootExtensions = [
-    derExtension(OID_BASIC_CONSTRAINTS, derSeq([derBool(true)]), true),
-    derExtension(OID_KEY_USAGE, derBitString(Buffer.from([0x06]), 1), true), // keyCertSign + cRLSign
+    derExtension(OID_BASIC_CONSTRAINTS, rootIsCa ? derSeq([derBool(true)]) : derSeq([]), true),
+    derExtension(OID_KEY_USAGE, derBitString(Buffer.from([rootIsCa ? 0x06 : 0x80]), rootIsCa ? 1 : 7), true),
   ];
   const rootCert = buildSignedX509Cert({
     subjectCn: rootCn,
@@ -214,6 +217,8 @@ export function createEphemeralFulcioCa(rootCn = 'AI-Test-Workbench Ephemeral Fu
     subjectPublicKey: publicKey,
     issuerPrivateKey: privateKey,
     extensions: rootExtensions,
+    notBefore: rootOpts.rootNotBefore,
+    notAfter: rootOpts.rootNotAfter,
   });
 
   /**
@@ -222,8 +227,13 @@ export function createEphemeralFulcioCa(rootCn = 'AI-Test-Workbench Ephemeral Fu
    *   repo?: string;
    *   workflow?: string;
    *   ref?: string;
+   *   commitSha?: string;
    *   oidcIssuer?: string;
    *   subjectCn?: string;
+   *   notBefore?: Date;
+   *   notAfter?: Date;
+   *   leafKeyUsageByte?: number;
+   *   leafKeyUsageUnusedBits?: number;
    * }} [claims]
    */
   function issueLeafCert(claims = {}) {
@@ -235,10 +245,16 @@ export function createEphemeralFulcioCa(rootCn = 'AI-Test-Workbench Ephemeral Fu
     const sanUri = `https://github.com/${repo}/${workflow}@${ref}`;
 
     const leafKeys = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const kuByte = claims.leafKeyUsageByte !== undefined ? claims.leafKeyUsageByte : 0x80;
+    const kuUnused = claims.leafKeyUsageUnusedBits !== undefined ? claims.leafKeyUsageUnusedBits : 7;
     const leafExtensions = [
       derExtension(OID_BASIC_CONSTRAINTS, derSeq([]), true),
+      derExtension(OID_KEY_USAGE, derBitString(Buffer.from([kuByte]), kuUnused), true),
       derExtension(OID_SUBJECT_ALT_NAME, derSeq([derTlv(0x86, Buffer.from(sanUri, 'ascii'))]), false),
       derExtension(OID_FULCIO_ISSUER_V2, derUtf8String(oidcIssuer), false),
+      ...(claims.commitSha
+        ? [derExtension(OID_FULCIO_BUILD_SIGNER_DIGEST, derUtf8String(String(claims.commitSha).trim()), false)]
+        : []),
     ];
 
     const leafCert = buildSignedX509Cert({
@@ -247,6 +263,8 @@ export function createEphemeralFulcioCa(rootCn = 'AI-Test-Workbench Ephemeral Fu
       subjectPublicKey: leafKeys.publicKey,
       issuerPrivateKey: privateKey,
       extensions: leafExtensions,
+      notBefore: claims.notBefore,
+      notAfter: claims.notAfter,
     });
 
     return {
@@ -269,9 +287,14 @@ export function createEphemeralFulcioCa(rootCn = 'AI-Test-Workbench Ephemeral Fu
    *   repo?: string;
    *   workflow?: string;
    *   ref?: string;
+   *   commitSha?: string;
    *   oidcIssuer?: string;
    *   bundleOutPath?: string;
    *   attestedBy?: string;
+   *   notBefore?: Date;
+   *   notAfter?: Date;
+   *   leafKeyUsageByte?: number;
+   *   leafKeyUsageUnusedBits?: number;
    * }} [options]
    */
   function signAttestationFile(attestationPath, options = {}) {

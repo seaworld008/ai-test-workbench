@@ -2,6 +2,7 @@
 import crypto from 'node:crypto';
 import {
   computeKeyId,
+  hasWorkspaceStickyKey,
   openTrustContext,
   resolveDefaultHmacKeyFilePath,
 } from './trust-context.mjs';
@@ -12,11 +13,24 @@ import {
  * Security invariants:
  * - Uses immutable `TrustContext` opened once at entrypoint (no mid-audit key creation).
  * - Enforces RFC 8785 safe canonicalization (rejects undefined array slots, NaN, Infinity, Date, etc.).
- * - Tracks sticky T1 host state so stripping `mac`/`macs` never downgrades silently to `T0 ok: true`.
- * - Supports multi-key `macs: { [keyId]: hmac }` on shared locks while blocking local key mismatches.
+ * - Tracks sticky T1 host state so stripping `mac`/`macs` or forging foreign `keyId`s never downgrades silently.
+ * - Machine-local runtime domains (`ledger.manifest`, `heal.ledger`, `heal.session`, `quarantine.json`,
+ *   `workspace.baseline`) are NEVER shared across machines and fail-closed on foreign `keyId` when sticky.
+ * - Supports multi-key `macs: { [keyId]: hmac }` on shared `governance.lock` while blocking local-workspace
+ *   tamper once this host's `keyId` has previously signed that workspace.
  */
 
 export const HMAC_PREFIX = 'hmac-sha256:';
+
+export const MACHINE_LOCAL_MAC_DOMAINS = Object.freeze(
+  new Set([
+    'ledger.manifest',
+    'heal.ledger',
+    'heal.session',
+    'quarantine.json',
+    'workspace.baseline',
+  ])
+);
 
 /**
  * Resolves the default user-level config directory outside any project workspace.
@@ -240,6 +254,12 @@ export function verifyPayloadT1(domain, payload, macValue, options = {}) {
     };
   }
 
+  const isMachineLocal = MACHINE_LOCAL_MAC_DOMAINS.has(domain);
+  const workspaceSticky =
+    domain === 'governance.lock' && ctx.hostT1Sticky && hasWorkspaceStickyKey(ctx, qaDir);
+  const rejectForeignKey =
+    requireMac || (ctx.hostT1Sticky && (isMachineLocal || workspaceSticky));
+
   // Multi-key map verification (`macs: { [keyId]: hmac }`)
   if (macsMap && macsKeys.length > 0) {
     for (const k of macsKeys) {
@@ -287,13 +307,13 @@ export function verifyPayloadT1(domain, payload, macValue, options = {}) {
       };
     }
 
-    if (requireMac) {
+    if (rejectForeignKey) {
       return {
         ok: false,
         verified: false,
         foreign: true,
         trustTier: /** @type {'T0' | 'T1'} */ ('T0'),
-        reason: `T1 HMAC for local ${keyInfo} absent in ${domain} (found foreign keyIds=[${macsKeys.join(', ')}]).`,
+        reason: `[Tamper Detected] T1 HMAC for local ${keyInfo} absent in ${domain} (rejected foreign keyIds=[${macsKeys.join(', ')}]).`,
       };
     }
     return {
@@ -337,13 +357,13 @@ export function verifyPayloadT1(domain, payload, macValue, options = {}) {
   }
 
   if (payload && typeof payload.macKeyId === 'string' && ctx.keyId && payload.macKeyId !== ctx.keyId) {
-    if (requireMac) {
+    if (rejectForeignKey) {
       return {
         ok: false,
         verified: false,
         foreign: true,
         trustTier: /** @type {'T0' | 'T1'} */ ('T0'),
-        reason: `T1 HMAC key mismatch on ${domain}: artifact signed by foreign keyId=${payload.macKeyId}, local ${keyInfo}.`,
+        reason: `[Tamper Detected] Foreign macKeyId=${payload.macKeyId} rejected for ${domain} on T1-sticky host (local ${keyInfo}).`,
       };
     }
     return {

@@ -1,0 +1,135 @@
+// @ts-check
+import { normalizeLocatorExprKey } from './symbol-table.mjs';
+import { unwrapExpr } from './ts-loader.mjs';
+
+/**
+ * Extracts normalized target collection keys for a loop or count-guard assertion (`G2-L04`, `G2-F13`).
+ * @param {any} ts @param {any} sf @param {any} rawExpr @param {any} symbolTable @param {string | null} testTitle
+ * @returns {string[]}
+ */
+export function extractCollectionTargetKeys(ts, sf, rawExpr, symbolTable, testTitle) {
+  if (!rawExpr) return [];
+  const scopeKey = testTitle || '<file>';
+  const aliases = symbolTable?.locatorAliases || new Map();
+  let cur = unwrapExpr(ts, rawExpr);
+  if (ts.isAwaitExpression(cur)) cur = unwrapExpr(ts, cur.expression);
+  if (
+    ts.isCallExpression(cur) &&
+    ts.isPropertyAccessExpression(cur.expression) &&
+    ['all', 'count', 'allTextContents', 'allInnerTexts', 'entries', 'values', 'keys', 'slice', 'filter', 'map'].includes(
+      cur.expression.name.text
+    )
+  ) {
+    cur = unwrapExpr(ts, cur.expression.expression);
+  }
+  if (ts.isPropertyAccessExpression(cur) && (cur.name.text === 'length' || cur.name.text === 'size')) {
+    cur = unwrapExpr(ts, cur.expression);
+  }
+  if (
+    ts.isCallExpression(cur) &&
+    ts.isPropertyAccessExpression(cur.expression) &&
+    ts.isIdentifier(cur.expression.expression) &&
+    cur.expression.expression.text === 'Object' &&
+    ['keys', 'values', 'entries'].includes(cur.expression.name.text) &&
+    cur.arguments[0]
+  ) {
+    cur = unwrapExpr(ts, cur.arguments[0]);
+  }
+  const keys = new Set();
+  const rawText = (() => {
+    try {
+      return cur.getText(sf).replace(/\s+/g, '');
+    } catch {
+      return '';
+    }
+  })();
+  if (rawText) keys.add(rawText);
+  const norm = normalizeLocatorExprKey(ts, sf, cur, aliases, scopeKey);
+  if (norm) keys.add(norm);
+  if (ts.isIdentifier(cur) && symbolTable?.getCountVarTarget) {
+    const target = symbolTable.getCountVarTarget(testTitle, cur.text);
+    if (target) keys.add(target);
+  }
+  return [...keys];
+}
+
+/**
+ * Extracts loop target collection keys from a `for..of`, `for`, or `for..in` node.
+ * @param {any} ts @param {any} sf @param {any} node @param {any} symbolTable @param {string | null} testTitle
+ * @returns {string[]}
+ */
+export function extractLoopTargetKeys(ts, sf, node, symbolTable, testTitle) {
+  if (ts.isForOfStatement(node) || ts.isForInStatement(node)) {
+    return extractCollectionTargetKeys(ts, sf, node.expression, symbolTable, testTitle);
+  }
+  if (ts.isForStatement(node) && node.condition && ts.isBinaryExpression(node.condition)) {
+    return extractCollectionTargetKeys(ts, sf, node.condition.right, symbolTable, testTitle);
+  }
+  return [];
+}
+
+/**
+ * Checks whether an assertion is a genuine non-zero count guard matching the loop target (`G2-L04`, `G2-F13`).
+ * @param {any} a @param {string[]} loopTargetKeys @param {any} symbolTable @param {string | null} testTitle
+ */
+export function isValidLoopCountGuard(a, loopTargetKeys, symbolTable, testTitle) {
+  if (a.insideDynamicLoop) return false;
+  const act = (a.actualExpr || '').trim();
+  const isLengthOrCountExpr =
+    /(?:\.length|\.size|\.count\s*\(\s*\))$/.test(act) ||
+    Boolean(symbolTable?.getCountVarTarget && /^[A-Za-z_$][\w$]*$/.test(act) && symbolTable.getCountVarTarget(testTitle, act));
+
+  let isNonZeroCount = false;
+  if (!a.isNegated) {
+    if (a.matcher === 'toHaveCount' && (a.numericExpected === null || a.numericExpected > 0)) isNonZeroCount = true;
+    else if (a.matcher === 'toHaveLength' && (a.numericExpected === null || a.numericExpected > 0)) isNonZeroCount = true;
+    else if (a.matcher === 'toBeGreaterThan' && (a.numericExpected ?? 0) >= 0) isNonZeroCount = true;
+    else if (a.matcher === 'toBeGreaterThanOrEqual' && (a.numericExpected ?? 0) >= 1) isNonZeroCount = true;
+    else if (
+      (a.matcher === 'toBe' || a.matcher === 'toEqual' || a.matcher === 'toStrictEqual') &&
+      a.numericExpected !== null &&
+      a.numericExpected > 0 &&
+      isLengthOrCountExpr
+    ) {
+      isNonZeroCount = true;
+    }
+  } else if (
+    (a.matcher === 'toHaveCount' && a.numericExpected === 0) ||
+    (a.matcher === 'toHaveLength' && a.numericExpected === 0) ||
+    ((a.matcher === 'toBe' || a.matcher === 'toEqual' || a.matcher === 'toStrictEqual') &&
+      a.numericExpected === 0 &&
+      isLengthOrCountExpr)
+  ) {
+    isNonZeroCount = true;
+  }
+  if (!isNonZeroCount) return false;
+
+  const guardKeys = a.countGuardKeys || [];
+  if (loopTargetKeys.length > 0 && guardKeys.length > 0) {
+    return loopTargetKeys.some((k) => guardKeys.includes(k));
+  }
+  return true;
+}
+
+/**
+ * Checks whether an assertion genuinely verifies a settled `Promise.allSettled` result (`G2-F12`).
+ * @param {any} a
+ */
+export function assertionVerifiesSettledResult(a) {
+  if (a.matcher === 'toThrow') return true;
+  const act = a.actualExpr || '';
+  const exp = a.expectedArg || '';
+  if (
+    /\.(?:status|reason)\b/.test(act) &&
+    (/\b(?:fulfilled|rejected)\b/.test(exp) ||
+      /\b(?:fulfilled|rejected)\b/.test(act) ||
+      a.matcher === 'toBeUndefined' ||
+      a.matcher === 'toBeNull')
+  ) {
+    return true;
+  }
+  if (/\.(?:every|filter|map|some)\s*\(/.test(act) && /\.status\b/.test(act) && /\b(?:fulfilled|rejected)\b/.test(act)) {
+    return true;
+  }
+  return false;
+}

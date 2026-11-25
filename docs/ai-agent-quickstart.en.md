@@ -1,24 +1,24 @@
-# AI Test Workbench — AI-Agent-First Onboarding & MCP Setup Guide (v4.0)
+# AI Test Workbench — AI-Agent-First Onboarding & MCP Setup Guide (v6.2.1)
 
 > [简体中文 (默认)](./ai-agent-quickstart.md) · [AGENTS.en.md](../AGENTS.en.md) · [MCP Protocol Reference](../skills/ai-test-workbench/references/mcp-server-protocol.md)
 
-`ai-test-workbench` v4.0 ships a **zero-dependency native multi-protocol MCP Server** compatible with every major AI coding agent and all MCP transports & protocol revisions:
+`ai-test-workbench` v6.2.1 ships a **zero-dependency native multi-protocol MCP Server** compatible with every major AI coding agent and all MCP transports & protocol revisions:
 
 - **Transports**: `stdio` (default), **Streamable HTTP** (`/mcp`), and **Legacy HTTP+SSE** (`/sse` + `/messages`).
 - **Protocol Versions**: `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`.
-- **Agent-Friendly Output**: All 12 MCP tools return both text `content` and schema-validated `structuredContent` (`{ ok, exitCode, tool, summary, data, nextRecommendedActions }`) alongside `ToolAnnotations`.
+- **Agent-Friendly Output**: All **16 canonical MCP tools** return both text `content` and schema-validated `structuredContent` (`{ schemaVersion, ok, exitCode, outcome, tool, summary, recoverable, blockerKind, data, nextRecommendedActions }`) alongside `ToolAnnotations`.
 
 ---
 
 ## 1. Copy-Paste First-Time Prompts
 
-### Scenario 1: First-Time Project Onboarding
+### Scenario 1: First-Time Zero-Block Project Onboarding
 
 ```text
 Onboard AI Test Workbench onto this repository using MCP tools:
 1. Call `aitest_doctor` to verify Node >= 22.12 and Chromium readiness.
-2. Call `aitest_init` with `dryRun: true` first to preview, then initialize isolated `qa/`.
-3. Call `aitest_run` (`suite: "smoke"`, `audit: true`) to verify the 3-layer anti-fake-green gate.
+2. For local loopback apps call `aitest_bootstrap(target=".")` (or preview with `aitest_init(dryRun=true)` first) to initialize isolated `qa/` and `aitest.runtime.json`.
+3. Call `aitest_explore(target=".", maxPages=20)` to capture ARIA specs and API schemas, then call `aitest_verify_change(target=".", mode="impact")` to verify the 4-layer fail-closed anti-fake-green gate.
 4. Call `aitest_map_sync` to generate `knowledge/SYSTEM_MAP.md` and report next steps cleanly, keeping Local Workbench verification strictly separate from Business E2E verification.
 ```
 
@@ -27,7 +27,7 @@ Onboard AI Test Workbench onto this repository using MCP tools:
 ```text
 Run zero-to-one read-only exploration and create a deep test plan:
 1. If SMS OTP / SSO / CAPTCHA is required, prompt me to run:
-   `npx ai-test-workbench@6.2.0 auth-login --target . --base-url <STAGING_URL>`
+   `npx ai-test-workbench@6.2.1 auth-login --target . --base-url <STAGING_URL>`
 2. Once authenticated, call `aitest_explore(target=".", baseUrl="<STAGING_URL>", maxPages=30)` strictly read-only to map portals/switchers, routes, tables, and API errors.
 3. Call `aitest_map_sync` to fuse source code and runtime telemetry into `knowledge/SYSTEM_MAP.md`, then read the `system-overview` and `system-map` resources.
 4. Draft prioritized test plans in `qa/specs/` covering 0/1 empty states, pagination, cross-tenant isolation, and pre-existing bugs without normalizing defects.
@@ -59,7 +59,7 @@ Or `.mcp.json` (always pin an exact version when using `npx` once published):
   "mcpServers": {
     "ai-test-workbench": {
       "command": "npx",
-      "args": ["--package=ai-test-workbench@6.2.0", "ai-test-workbench", "mcp-serve"]
+      "args": ["--package=ai-test-workbench@6.2.1", "ai-test-workbench", "mcp-serve"]
     }
   }
 }
@@ -70,7 +70,7 @@ Or `.mcp.json` (always pin an exact version when using `npx` once published):
 ```toml
 [mcp_servers.ai-test-workbench]
 command = "npx"
-args = ["--package=ai-test-workbench@6.2.0", "ai-test-workbench", "mcp-serve"]
+args = ["--package=ai-test-workbench@6.2.1", "ai-test-workbench", "mcp-serve"]
 ```
 
 ### 3. Cursor / Windsurf / VS Code Copilot / Gemini CLI / Antigravity
@@ -82,7 +82,7 @@ args = ["--package=ai-test-workbench@6.2.0", "ai-test-workbench", "mcp-serve"]
   "mcpServers": {
     "ai-test-workbench": {
       "command": "npx",
-      "args": ["--package=ai-test-workbench@6.2.0", "ai-test-workbench", "mcp-serve"]
+      "args": ["--package=ai-test-workbench@6.2.1", "ai-test-workbench", "mcp-serve"]
     }
   }
 }
@@ -96,7 +96,7 @@ args = ["--package=ai-test-workbench@6.2.0", "ai-test-workbench", "mcp-serve"]
     "ai-test-workbench": {
       "type": "stdio",
       "command": "npx",
-      "args": ["--package=ai-test-workbench@6.2.0", "ai-test-workbench", "mcp-serve"]
+      "args": ["--package=ai-test-workbench@6.2.1", "ai-test-workbench", "mcp-serve"]
     }
   }
 }
@@ -106,10 +106,10 @@ args = ["--package=ai-test-workbench@6.2.0", "ai-test-workbench", "mcp-serve"]
 
 ```bash
 # Local loopback HTTP server (enforces Origin DNS-rebinding protection)
-npx ai-test-workbench@6.2.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo
+npx ai-test-workbench@6.2.1 mcp-serve --transport http --port 3847 --target /path/to/your-repo
 
 # Non-loopback binding requires Bearer token authentication:
-npx ai-test-workbench@6.2.0 mcp-serve --transport http --host 0.0.0.0 --port 3847 --auth-token "$AITEST_MCP_TOKEN"
+npx ai-test-workbench@6.2.1 mcp-serve --transport http --host 0.0.0.0 --port 3847 --auth-token "$AITEST_MCP_TOKEN"
 ```
 
 ```json

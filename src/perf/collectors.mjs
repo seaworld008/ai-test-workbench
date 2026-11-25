@@ -43,12 +43,25 @@ export async function runBrowserPerfProfile(qaDir, baseURL, routes, options = {}
 
   try {
     /** @type {Record<string, any>} */
-    const ctxOpts = { viewport: { width: 1440, height: 900 } };
+    const ctxOpts = { viewport: { width: 1440, height: 900 }, serviceWorkers: 'block' };
     if (readJsonSafe(userAuthPath)) ctxOpts.storageState = userAuthPath;
     const context = await browser.newContext(ctxOpts);
 
     const guardCfg = options.guardConfig;
     if (guardCfg) {
+      if (typeof context.routeWebSocket === 'function') {
+        await context.routeWebSocket('**/*', (/** @type {any} */ ws) => {
+          const wsCheck = checkOutgoingRequestSafety('GET', ws.url(), {
+            ...guardCfg,
+            strictReadonly: true,
+          });
+          if (wsCheck.blocked) {
+            void ws.close({ code: 1008, reason: 'Blocked by AI Test Workbench perf egress guard' });
+            return;
+          }
+          ws.connectToServer();
+        });
+      }
       await context.route('**/*', async (/** @type {any} */ route) => {
         const req = route.request();
         let curMethod = req.method().toUpperCase();

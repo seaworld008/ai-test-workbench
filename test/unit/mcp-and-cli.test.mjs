@@ -140,8 +140,24 @@ test('CLI per-command strict option tables reject unrelated cross-command flags 
     cfg.maxFlaky = 1;
     fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
 
-    const prevMcp = process.env.AITEST_MCP_SUBPROCESS;
+    const savedEnv = {
+      AITEST_MCP_SUBPROCESS: process.env.AITEST_MCP_SUBPROCESS,
+      AITEST_APPROVE_NON_INTERACTIVE: process.env.AITEST_APPROVE_NON_INTERACTIVE,
+      ANTIGRAVITY_CONVERSATION_ID: process.env.ANTIGRAVITY_CONVERSATION_ID,
+      CLAUDECODE: process.env.CLAUDECODE,
+      CODEX_CI: process.env.CODEX_CI,
+      CODEX_SANDBOX: process.env.CODEX_SANDBOX,
+      CURSOR_TRACE_ID: process.env.CURSOR_TRACE_ID,
+      AIDER_MODEL: process.env.AIDER_MODEL,
+    };
     delete process.env.AITEST_MCP_SUBPROCESS;
+    delete process.env.ANTIGRAVITY_CONVERSATION_ID;
+    delete process.env.CLAUDECODE;
+    delete process.env.CODEX_CI;
+    delete process.env.CODEX_SANDBOX;
+    delete process.env.CURSOR_TRACE_ID;
+    delete process.env.AIDER_MODEL;
+    process.env.AITEST_APPROVE_NON_INTERACTIVE = '1';
     try {
       const approveCode = await runCli([
         'governance',
@@ -161,7 +177,10 @@ test('CLI per-command strict option tables reject unrelated cross-command flags 
         `Expected deprecation warning for --approver, got: ${stderrLines.join('\n')}`
       );
     } finally {
-      if (prevMcp !== undefined) process.env.AITEST_MCP_SUBPROCESS = prevMcp;
+      for (const [k, v] of Object.entries(savedEnv)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
     }
 
     // 4. `governance status --json` exits 2 (blocked) and emits `exitCode: 2` when governance.lock is missing

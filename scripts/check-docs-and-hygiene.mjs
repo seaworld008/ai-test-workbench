@@ -51,7 +51,7 @@ function loadOptionalExternalBlocklist() {
 const ACTIVE_MCP_TOOL_DOCS = new Set(GENERATED_DOC_TARGETS);
 
 /**
- * Canonical MCP tool registry only (`v6.2.0`, 16 tools).
+ * Canonical MCP tool registry only (`v6.2.1`, 16 tools).
  * Active Agent/MCP docs MUST NOT advertise deprecated aliases (`aitest_heal_*` / `aitest_job_*` / `aitest_flaky_report` / `aitest_trace_matrix`).
  */
 const CANONICAL_MCP_TOOLS = new Set(TOOL_REGISTRY.map((t) => t.name));

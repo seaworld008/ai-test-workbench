@@ -13,7 +13,7 @@
 
 ## 2. Project Isolation (`<repo>/qa/`) & Safe Upgrades
 
-Each repository receives an isolated `<repo>/qa/` subproject with exact-pinned dependencies, `.aitest/template-manifest.json`, `.aitest/governance.lock`, `.aitest/runs/` ledgers, `.aitest/quarantine.json`, `specs/`, `tests/`, `knowledge/`, `impact-map.json`, `waivers.json`, and `reports/`. Host kernels upgrade safely via 3-way hash diffing in `npx ai-test-workbench@6.2.0 upgrade --target <repo>`.
+Each repository receives an isolated `<repo>/qa/` subproject with exact-pinned dependencies, `.aitest/template-manifest.json`, `.aitest/governance.lock`, `.aitest/runs/` ledgers, `.aitest/quarantine.json`, `specs/`, `tests/`, `knowledge/`, `impact-map.json`, `waivers.json`, and `reports/`. Host kernels upgrade safely via 3-way hash diffing in `npx ai-test-workbench@6.2.1 upgrade --target <repo>`.
 
 ## 3. Default-Deny Security Guardrails (`src/kernel/target-guard.mjs` + `base.ts`)
 

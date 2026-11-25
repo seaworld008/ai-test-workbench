@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveQaDirectory } from './agents.mjs';
+import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import { resolvePlaywrightPackage } from './core/playwright-resolve.mjs';
 import { evaluateTargetSafety, loadMergedQaEnv } from './origin-guard.mjs';
 
@@ -268,25 +269,40 @@ async function captureSessionViaHeadedBrowser({
  */
 export async function runAuthLoginCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
+  const asJson = Boolean(options.json);
+  /** @param {number} exitCode @param {string} msg */
+  const failAuth = (exitCode, msg) => {
+    if (!asJson) console.error(msg);
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'auth-login',
+        outcome: exitCode === 2 ? 'blocked' : 'fail',
+        ok: false,
+        exitCode,
+        summary: msg,
+        blockerKind: exitCode === 2 ? 'TARGET_GUARD_BLOCKED' : null,
+        data: { error: msg },
+      }),
+      { asJson, compatSpreadData: false }
+    );
+  };
   if (!options.target) {
-    console.error(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
-    return 1;
+    return failAuth(1, lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
   }
 
   const qaDir = resolveQaDirectory(options.target, options.qaDir);
   if (!qaDir) {
-    console.error(lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
-    return 1;
+    return failAuth(1, lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
   }
 
   const pwPkg = resolvePlaywrightPackage(qaDir);
   if (!pwPkg) {
-    console.error(
+    return failAuth(
+      1,
       lang === 'zh'
         ? `在 ${qaDir} 中未找到 playwright 包，请先安装依赖。`
         : `playwright package not found in ${qaDir}. Install dependencies first.`
     );
-    return 1;
   }
 
   const mergedEnv = loadMergedQaEnv(qaDir);
@@ -296,10 +312,7 @@ export async function runAuthLoginCommand(options = {}) {
   const safety = evaluateTargetSafety(mergedEnv);
   if (!safety.ok || !safety.baseURL) {
     const errs = safety.errors.length > 0 ? safety.errors : ['TEST_BASE_URL is required for auth-login.'];
-    for (const e of errs) {
-      console.error(`[Target Guard Blocked] ${e}`);
-    }
-    return 2;
+    return failAuth(2, `[Target Guard Blocked] ${errs.join('; ')}`);
   }
 
   const loginPath = options.loginPath || '/';
@@ -317,8 +330,7 @@ export async function runAuthLoginCommand(options = {}) {
   if (options.cdpUrl) {
     const cdpCheck = validateLoopbackCdpUrl(options.cdpUrl);
     if (!cdpCheck.ok || !cdpCheck.url) {
-      console.error(`[Target Guard Blocked] ${cdpCheck.error}`);
-      return 2;
+      return failAuth(2, `[Target Guard Blocked] ${cdpCheck.error}`);
     }
     const expectedOrigin = new URL(safety.baseURL).origin;
     return captureSessionViaCdp({
