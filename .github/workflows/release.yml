@@ -99,4 +99,9 @@ jobs:
       - name: Publish Pre-Built Tarball to npm via OIDC Trusted Publishing with Sigstore Provenance
         run: |
           npm --version
-          npm publish release-dist/*.tgz --provenance --access public
+          set -- ./release-dist/*.tgz
+          if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
+            echo "Expected exactly one tarball under ./release-dist, got: $*"
+            exit 1
+          fi
+          npm publish "$1" --provenance --access public
