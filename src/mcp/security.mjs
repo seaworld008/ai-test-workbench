@@ -41,10 +41,13 @@ export function parseWorkspaceRoots(rawInput) {
 /** @param {string} p @returns {string} */
 export function resolveComparableRealPath(p) {
   const resolved = path.resolve(p);
+  const realpathNative =
+    typeof fs.realpathSync.native === 'function' ? fs.realpathSync.native : fs.realpathSync;
   try {
-    if (fs.existsSync(resolved)) return fs.realpathSync(resolved);
+    if (fs.existsSync(resolved)) return realpathNative(resolved);
     // Walk up until an existing parent is found to resolve symlinks on not-yet-created output files
     let cur = resolved;
+    /** @type {string[]} */
     const tail = [];
     while (!fs.existsSync(cur)) {
       const parent = path.dirname(cur);
@@ -52,7 +55,7 @@ export function resolveComparableRealPath(p) {
       tail.unshift(path.basename(cur));
       cur = parent;
     }
-    const realBase = fs.existsSync(cur) ? fs.realpathSync(cur) : cur;
+    const realBase = fs.existsSync(cur) ? realpathNative(cur) : cur;
     return tail.length > 0 ? path.join(realBase, ...tail) : realBase;
   } catch {
     return resolved;

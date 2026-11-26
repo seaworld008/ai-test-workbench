@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { compileGlob } from '../core/glob.mjs';
 import { runProcess } from '../core/proc.mjs';
-import { resolveGitRoot } from '../kernel/gate-kernel.mjs';
+import { canonicalFsPath, resolveGitRoot } from '../kernel/gate-kernel.mjs';
 import {
   MAX_GRAPH_FILES,
   buildRepoSourceIndex,
@@ -69,21 +69,24 @@ export function listAllSpecFiles(testsDir, qaDir) {
 function loadTsConfigPathAliases(repoDir) {
   /** @type {Array<{ prefix: string, targetRelPrefix: string }>} */
   const aliases = [];
+  const realRepoDir = canonicalFsPath(repoDir);
   for (const name of ['tsconfig.json', 'jsconfig.json']) {
-    const p = path.join(repoDir, name);
+    const p = path.join(realRepoDir, name);
     if (!fs.existsSync(p)) continue;
     try {
       const stripped = stripJsCommentsPreserveStrings(fs.readFileSync(p, 'utf8'));
       const parsed = JSON.parse(stripped);
-      const baseUrl = parsed?.compilerOptions?.baseUrl ? path.resolve(repoDir, parsed.compilerOptions.baseUrl) : repoDir;
+      const baseUrl = parsed?.compilerOptions?.baseUrl
+        ? path.resolve(realRepoDir, parsed.compilerOptions.baseUrl)
+        : realRepoDir;
       const pathsObj = parsed?.compilerOptions?.paths || {};
       for (const [key, targets] of Object.entries(pathsObj)) {
         if (!Array.isArray(targets) || targets.length === 0) continue;
         const prefix = key.endsWith('*') ? key.slice(0, -1) : key;
         const t0 = String(targets[0] || '');
         const tPrefix = t0.endsWith('*') ? t0.slice(0, -1) : t0;
-        const absTarget = path.resolve(baseUrl, tPrefix);
-        const targetRelPrefix = path.relative(repoDir, absTarget).replace(/\\/g, '/').replace(/\/+$/, '');
+        const absTarget = canonicalFsPath(path.resolve(baseUrl, tPrefix));
+        const targetRelPrefix = path.relative(realRepoDir, absTarget).replace(/\\/g, '/').replace(/\/+$/, '');
         if (!targetRelPrefix.startsWith('..')) {
           aliases.push({ prefix, targetRelPrefix });
         }
@@ -277,6 +280,7 @@ export async function collectGitChangedFiles(repoDir, baseRef = 'HEAD~1') {
   if (!gitRoot) {
     return { ok: false, reason: 'Target is not a git repository.', files: /** @type {string[]} */ ([]), validBaseRef: false };
   }
+  const realRepoDir = canonicalFsPath(repoDir);
 
   /** @type {Set<string>} */
   const files = new Set();
@@ -285,7 +289,7 @@ export async function collectGitChangedFiles(repoDir, baseRef = 'HEAD~1') {
       const trimmed = raw.trim();
       if (!trimmed) continue;
       const abs = path.join(gitRoot, trimmed);
-      const rel = path.relative(repoDir, abs).replace(/\\/g, '/');
+      const rel = path.relative(realRepoDir, abs).replace(/\\/g, '/');
       if (rel && !rel.startsWith('..')) {
         files.add(rel);
       }

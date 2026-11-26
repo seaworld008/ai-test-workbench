@@ -45,6 +45,7 @@ export {
 } from './gate/baseline-ref.mjs';
 
 export {
+  canonicalFsPath,
   clearGitRootCache,
   execGitSync,
   getFileAtGitRef,

@@ -15,8 +15,10 @@ import { detectUrlQueryAnomalies, routeToSafeSlug, sanitizeUntrustedDomText } fr
 import { buildReverseImportGraph, collectGitChangedFiles, MAX_GRAPH_FILES } from '../../src/impact/graph.mjs';
 import { stripJsCommentsPreserveStrings } from '../../src/impact/scanner.mjs';
 import { analyzeSourceAst, compareSpecSourcesAst } from '../../src/kernel/gate/ast-analyzer.mjs';
+import { canonicalFsPath, computeWorkspaceInputHash } from '../../src/kernel/gate-kernel.mjs';
 import { beginRunLedger, finalizeRunLedger } from '../../src/ledger.mjs';
 import { handleMcpJsonRpcMessage } from '../../src/mcp-server.mjs';
+import { isPathWithinRoot } from '../../src/mcp/security.mjs';
 import { collectReportArtifacts, runReportCommand } from '../../src/report.mjs';
 import { buildRequirementTraceMatrix, renderTraceMatrixMarkdown } from '../../src/traceability.mjs';
 
@@ -98,6 +100,7 @@ test('v6.3.0 WU-1: impact graph strips comments, resolves O(1) indexed imports (
   assert.equal(stripped.includes('./real'), true);
 
   const tmpRepo = makeTempDir('aitest-v630-graph-');
+  const aliasRepo = `${tmpRepo}-alias`;
   try {
     fs.mkdirSync(path.join(tmpRepo, 'src', 'lib'), { recursive: true });
     fs.mkdirSync(path.join(tmpRepo, 'src', 'pages'), { recursive: true });
@@ -147,7 +150,31 @@ test('v6.3.0 WU-1: impact graph strips comments, resolves O(1) indexed imports (
     assert.equal(gitInfo.validBaseRef, true);
     assert.equal(gitInfo.files.includes('src/lib/active.ts'), true);
     assert.equal(gitInfo.files.includes('src/lib/untracked.ts'), true);
+
+    // Regression: Windows 8.3 short-path / directory junction / macOS symlink alias canonicalization
+    fs.symlinkSync(tmpRepo, aliasRepo, process.platform === 'win32' ? 'junction' : 'dir');
+    const aliasGraph = buildReverseImportGraph(aliasRepo);
+    assert.equal(aliasGraph.get('src/lib/aliased.ts')?.has('src/pages/Home.tsx'), true);
+
+    const aliasGitInfo = await collectGitChangedFiles(aliasRepo, 'HEAD');
+    assert.equal(aliasGitInfo.ok, true);
+    assert.equal(aliasGitInfo.validBaseRef, true);
+    assert.equal(aliasGitInfo.files.includes('src/lib/active.ts'), true);
+    assert.equal(aliasGitInfo.files.includes('src/lib/untracked.ts'), true);
+
+    assert.equal(
+      computeWorkspaceInputHash(aliasRepo, aliasRepo),
+      computeWorkspaceInputHash(tmpRepo, tmpRepo),
+      'computeWorkspaceInputHash must match identically between real path and alias/junction path'
+    );
+    assert.equal(isPathWithinRoot(path.join(aliasRepo, 'src', 'lib', 'active.ts'), tmpRepo), true);
+    assert.equal(isPathWithinRoot(path.join(tmpRepo, 'src', 'lib', 'active.ts'), aliasRepo), true);
+    assert.equal(
+      canonicalFsPath(path.join(aliasRepo, 'src', 'lib', 'nonexistent-future.ts')),
+      canonicalFsPath(path.join(tmpRepo, 'src', 'lib', 'nonexistent-future.ts'))
+    );
   } finally {
+    fs.rmSync(aliasRepo, { recursive: true, force: true });
     fs.rmSync(tmpRepo, { recursive: true, force: true });
   }
 });

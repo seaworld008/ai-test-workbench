@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
 import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
+import { canonicalFsPath } from './kernel/gate-kernel.mjs';
 import { readLedgerHistory } from './ledger.mjs';
 import {
   GLOBAL_INFRA_PATTERNS,
@@ -87,7 +88,7 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
     }
   }
 
-  const qaRelPrefix = path.relative(repoDir, qaDir).replace(/\\/g, '/');
+  const qaRelPrefix = path.relative(canonicalFsPath(repoDir), canonicalFsPath(qaDir)).replace(/\\/g, '/');
   const allSpecs = listAllSpecFiles(path.join(qaDir, 'tests'), qaDir);
   if (allSpecs.length === 0) {
     return makeFullImpactResult('No spec files found in QA directory — falling back to full suite.', normalized);

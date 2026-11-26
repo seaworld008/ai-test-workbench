@@ -118,15 +118,36 @@ export function parseGitDiffHeaderPath(headerLine) {
   return candidate.replace(/^[ab]\//, '').replace(/\\/g, '/') || 'unknown';
 }
 
-/** @param {string} p @returns {string} */
-function canonicalPath(p) {
+/**
+ * Canonicalizes a filesystem path via `fs.realpathSync.native` (resolving Windows 8.3 short paths
+ * such as `RUNNER~1`, directory junctions, and macOS `/var` -> `/private/var` symlinks).
+ * For not-yet-existing paths, walks up to the nearest existing ancestor and rejoins trailing segments.
+ * @param {string} p
+ * @returns {string}
+ */
+export function canonicalFsPath(p) {
   const resolved = path.resolve(p);
+  const realpathNative =
+    typeof fs.realpathSync.native === 'function' ? fs.realpathSync.native : fs.realpathSync;
   try {
-    return typeof fs.realpathSync.native === 'function' ? fs.realpathSync.native(resolved) : fs.realpathSync(resolved);
+    if (fs.existsSync(resolved)) return realpathNative(resolved);
+    let cur = resolved;
+    /** @type {string[]} */
+    const tail = [];
+    while (!fs.existsSync(cur)) {
+      const parent = path.dirname(cur);
+      if (parent === cur) break;
+      tail.unshift(path.basename(cur));
+      cur = parent;
+    }
+    const realAncestor = fs.existsSync(cur) ? realpathNative(cur) : cur;
+    return tail.length > 0 ? path.join(realAncestor, ...tail) : realAncestor;
   } catch {
     return resolved;
   }
 }
+
+const canonicalPath = canonicalFsPath;
 
 const GIT_ROOT_CACHE_MAX = 128;
 const GIT_ROOT_CACHE_TTL_MS = 5_000;
