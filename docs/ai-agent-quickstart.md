@@ -1,12 +1,12 @@
-# AI Test Workbench — AI Agent 优先接入与首次使用指南 (v6.3.0)
+# AI Test Workbench — AI Agent 优先接入与首次使用指南 (v6.4.0)
 
 > [English Version](./ai-agent-quickstart.en.md) · [中文操作规范 AGENTS.md](../AGENTS.md) · [MCP 协议参考](../skills/ai-test-workbench/references/mcp-server-protocol.md)
 
-`ai-test-workbench` v6.3.0 内置 **零依赖原生全协议 MCP 服务端**，兼容所有主流 AI 编码 Agent 与全部 MCP 传输及协议版本：
+`ai-test-workbench` v6.4.0 内置 **零依赖原生全协议 MCP 服务端**，兼容所有主流 AI 编码 Agent 与全部 MCP 传输及协议版本：
 
 - **传输模式**：`stdio`（默认）、`Streamable HTTP`（`/mcp`）、`Legacy HTTP+SSE`（`/sse` + `/messages`）。
 - **协议协商**：完整支持 `2025-11-25`、`2025-06-18`、`2025-03-26`、`2024-11-05`。
-- **结构化返参**：全部 **16 个权威工具**同时返回人类可读 `content`、机器可校验 `structuredContent`（含 `outputSchema`、`outcome`、`recoverable`、`blockerKind` 与 `nextRecommendedActions`）及 `ToolAnnotations` 安全标注。
+- **结构化返参**：全部 **17 个权威工具**（含新增双目标差分先知 `aitest_parity` 及 `aitest_report(view="lessons")` 经验与阻塞单只读查询）同时返回人类可读 `content`、机器可校验 `structuredContent`（含 `outputSchema`、`outcome`、`recoverable`、`blockerKind` 与 `nextRecommendedActions`）及 `ToolAnnotations` 安全标注。
 
 ---
 

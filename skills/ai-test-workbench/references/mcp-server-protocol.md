@@ -1,4 +1,4 @@
-# 原生全协议 MCP 服务端协议参考 (`mcp-serve` v6.3.0)
+# 原生全协议 MCP 服务端协议参考 (`mcp-serve` v6.4.0)
 
 > [English Version](./mcp-server-protocol.en.md) · [SKILL.md](../SKILL.md) · [ADR-0001](../../../docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) · [ADR-0005](../../../docs/adr/0005-mcp-surface-outcome-and-config.md)
 
@@ -15,7 +15,7 @@
   - 支持 `syncBudgetMs`：超时未完自动转后台并返回 `{ backgrounded: true, jobId }`，通过 `aitest_job(action="status"|"result", jobId=...)` 查询与获取结果。
 - **安全护栏**：HTTP 模式严格校验 `Origin`（`403`）；非回环绑定强制 `crypto.timingSafeEqual` Bearer 校验（`401`）；默认 fail-closed 绑定 `--workspace-root` 上限并与客户端 `roots` 取交集，校验全部路径参数防越界；全部 `governance` 命令仅限人类本地 CLI，永不暴露为 MCP 工具。
 
-## 2. 16 个权威内置 MCP 工具清单（自动生成）
+## 2. 17 个权威内置 MCP 工具清单（自动生成）
 
 <!-- BEGIN:GENERATED_MCP_TOOLS lang="zh" -->
 | 工具名称 | 类别 | 只读提示 | 职责摘要 |

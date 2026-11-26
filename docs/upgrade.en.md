@@ -1,21 +1,21 @@
-# v5.x to v6.3.0 Upgrade & Migration Guide (`upgrade.en.md`)
+# v5.x to v6.4.0 Upgrade & Migration Guide (`upgrade.en.md`)
 
 > [简体中文 (默认)](./upgrade.md) · [Version Compatibility Matrix](../VERSION.en.md) · [Governance Guide](./governance.en.md) · [Changelog](../CHANGELOG.en.md)
 
-This guide documents all breaking changes from **`v5.1.1` / `v6.1.0`** to **`v6.3.0`**, backward-compatibility aliases retained throughout `v6.x` (removed in `v7.0.0`), the automated `upgrade` workflow, and `@playwright/test` maintenance steps.
+This guide documents all breaking changes from **`v5.1.1` / `v6.1.0`** to **`v6.4.0`**, backward-compatibility aliases retained throughout `v6.x` (removed in `v7.0.0`), the automated `upgrade` workflow, and `@playwright/test` maintenance steps.
 
 ---
 
-## 1. Breaking Changes Summary (`v5.x / v6.1 -> v6.3.0`)
+## 1. Breaking Changes Summary (`v5.x / v6.1 -> v6.4.0`)
 
-| Area | `v5.1.1` / `v6.1.0` Behavior | `v6.3.0` Behavior | Compatibility & Removal Window |
+| Area | `v5.1.1` / `v6.1.0` Behavior | `v6.4.0` Behavior | Compatibility & Removal Window |
 |---|---|---|---|
-| **MCP Tool Surface (21 -> 16)** | Separate `aitest_heal_*`, `aitest_job_*`, `aitest_flaky_report`, `aitest_trace_matrix` | Consolidated into **`aitest_heal`** (with `discard`), **`aitest_job`**, and **`aitest_report`** (`view: "summary" \| "flaky" \| "traceability"`), plus **`aitest_bootstrap`**; `tools/list` exposes **16 canonical tools** | `tools/call` forwards all **8 legacy names** throughout `v6.x` with `structuredContent.data._deprecation` and summary warnings (removed in `v7.0.0`) |
-| **Per-Command Strict CLI Flags** | Single 89-flag global bag silently ignored unrelated options | Every subcommand (including `bootstrap` and `report --view`) declares exact flags in `src/cli/commands.mjs`; `--json` usage errors exit **`64`** | `governance approve` retains `--approver` -> `--by`; `flaky` / `trace-matrix` remain forwarded to `report --view` (`v7.0.0` removal) |
+| **MCP Tool Surface (21 -> 17)** | Separate `aitest_heal_*`, `aitest_job_*`, `aitest_flaky_report`, `aitest_trace_matrix` | Consolidated into **`aitest_heal`** (with `discard`), **`aitest_job`**, and **`aitest_report`** (`view: "summary" \| "flaky" \| "traceability" \| "lessons"`), plus **`aitest_bootstrap`** and the dual-target differential oracle **`aitest_parity`**; `tools/list` exposes **17 canonical tools** | `tools/call` forwards all **8 legacy names** throughout `v6.x` with `structuredContent.data._deprecation` and summary warnings (removed in `v7.0.0`) |
+| **Per-Command Strict CLI Flags** | Single 89-flag global bag silently ignored unrelated options | Every subcommand (including `bootstrap`, `parity`, `learn`, and `report --view`) declares exact flags in `src/cli/commands.mjs`; `--json` usage errors exit **`64`** | `governance approve` retains `--approver` -> `--by`; `flaky` / `trace-matrix` remain forwarded to `report --view` (`v7.0.0` removal) |
 | **Unified `CommandResult v2`, Framed IPC & Exit Codes** | Tail-text stdout scraping for MCP child JSON; mixed usage exit codes | Uniform `CommandResult v2` envelopes (`0=pass / 1=fail / 2=blocked / 64=usage`) over `AITEST_RESULT_FILE` framed IPC | Existing top-level JSON data keys preserved alongside `schemaVersion`, `blockerKind`, `recoverySteps` |
 | **Immutable `TrustContext`, Sticky T1 & Redirect Firewall** | Cross-machine lock fallback could relax missing `mac`; `aitest_init` re-signed missing locks | Frozen `TrustContext` opened once; multi-machine `macs` map + sticky T1 anti-strip; `aitest_init` seals clean untouched templates only; 10-hop redirect re-validation | CLI offline `--allow-unbound-results` (T0) remains CLI-only; clean CI verifies protected-file SHA-256 and downgrades unsigned T1 to T0 |
-| **Kernel SSoT, App Facade & Exports** | Scripts coupled directly to internals or `templates/playwright-qa/support/*.mjs` | Authoritative `src/kernel/*` wrapped behind `src/app/index.mjs`; exports `.`, `./kernel`, `./target-guard`, `./schema-validator` | `templates/playwright-qa/support/` stays synced by transitive closure for standalone host `<repo>/qa` runs |
-| **`aitest.config.json` Schema, SymbolTable & Dieselgate** | `AITEST-G101..G115` (15 rules) | Adds `SymbolTable`, `AITEST-G116` (HTTP status equivalence), and `AITEST-G117` (Dieselgate product-branching guard) for `17` toggleable rules plus `.aitest/baseline-ref` branch-new exemption | All valid `v5` / `v6.0` `aitest.config.json` files remain 100% compatible |
+| **Kernel SSoT, App Facade & Exports** | Scripts coupled directly to internals or `templates/playwright-qa/support/*.mjs` | Authoritative `src/kernel/*` wrapped behind `src/app/index.mjs`; exports `.`, `./kernel`, `./app`, `./target-guard`, `./schema-validator` | `templates/playwright-qa/support/` stays synced by transitive closure for standalone host `<repo>/qa` runs |
+| **`aitest.config.json` Schema, SymbolTable, Dieselgate & Lockstep** | `AITEST-G101..G115` (15 rules) | Adds `SymbolTable`, `AITEST-G116` (HTTP status equivalence), `AITEST-G117` (Dieselgate product-branching guard), and `AITEST-G118` (cross-directory `lockstepRules` sync gate) for **`18` pluggable gate rules** (`AITEST-G101..G118`); governance lock now also seals `known-blockers.json`, `corpus/**`, `fixtures/upstream-cassettes/**`, and `support/project-rules.json`, alongside `.aitest/baseline-ref` branch-new exemption | All valid `v5` / `v6.x` `aitest.config.json` files remain 100% compatible |
 
 ---
 
@@ -49,7 +49,7 @@ npx ai-test-workbench@6.4.0 upgrade --target /path/to/repo
 
 # 3. Review changes and re-seal governance.lock locally as a human reviewer
 npx ai-test-workbench@6.4.0 governance status --target /path/to/repo
-npx ai-test-workbench@6.4.0 governance approve --target /path/to/repo --by "alice@team" --reason "Upgrade to ai-test-workbench v6.0.0 kernel"
+npx ai-test-workbench@6.4.0 governance approve --target /path/to/repo --by "alice@team" --reason "Upgrade to ai-test-workbench v6.4.0 kernel"
 
 # 4. Verify zero kernel version drift
 npx ai-test-workbench@6.4.0 doctor --target /path/to/repo

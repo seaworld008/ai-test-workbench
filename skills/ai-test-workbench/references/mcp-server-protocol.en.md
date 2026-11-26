@@ -1,4 +1,4 @@
-# Native Multi-Protocol MCP Server Reference (`mcp-serve` v6.3.0)
+# Native Multi-Protocol MCP Server Reference (`mcp-serve` v6.4.0)
 
 > [简体中文 (默认)](./mcp-server-protocol.md) · [SKILL.md](../SKILL.md) · [ADR-0001](../../../docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md) · [ADR-0005](../../../docs/adr/0005-mcp-surface-outcome-and-config.en.md)
 
@@ -15,7 +15,7 @@
   - Transitions calls exceeding `syncBudgetMs` into async background jobs queried via `aitest_job(action="status"|"result", jobId=...)`.
 - **Security**: `Host` (`421`/`403`), `Origin` (`403`), and `Content-Type: application/json` (`415`) validation, `crypto.timingSafeEqual` Bearer auth (`401`), fail-closed `--workspace-root` ceiling intersected with client roots, full path-argument traversal checks, live JSON Schema validation, and strict exclusion of all `governance` CLI commands from MCP.
 
-## 2. Registered Canonical MCP Tools (16 Tools, Auto-Generated)
+## 2. Registered Canonical MCP Tools (17 Tools, Auto-Generated)
 
 <!-- BEGIN:GENERATED_MCP_TOOLS lang="en" -->
 | Tool Name | Category | Read-Only Hint | Responsibility |

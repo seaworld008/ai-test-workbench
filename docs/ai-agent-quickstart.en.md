@@ -1,12 +1,12 @@
-# AI Test Workbench — AI-Agent-First Onboarding & MCP Setup Guide (v6.3.0)
+# AI Test Workbench — AI-Agent-First Onboarding & MCP Setup Guide (v6.4.0)
 
 > [简体中文 (默认)](./ai-agent-quickstart.md) · [AGENTS.en.md](../AGENTS.en.md) · [MCP Protocol Reference](../skills/ai-test-workbench/references/mcp-server-protocol.md)
 
-`ai-test-workbench` v6.3.0 ships a **zero-dependency native multi-protocol MCP Server** compatible with every major AI coding agent and all MCP transports & protocol revisions:
+`ai-test-workbench` v6.4.0 ships a **zero-dependency native multi-protocol MCP Server** compatible with every major AI coding agent and all MCP transports & protocol revisions:
 
 - **Transports**: `stdio` (default), **Streamable HTTP** (`/mcp`), and **Legacy HTTP+SSE** (`/sse` + `/messages`).
 - **Protocol Versions**: `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`.
-- **Agent-Friendly Output**: All **16 canonical MCP tools** return both text `content` and schema-validated `structuredContent` (`{ schemaVersion, ok, exitCode, outcome, tool, summary, recoverable, blockerKind, data, nextRecommendedActions }`) alongside `ToolAnnotations`.
+- **Agent-Friendly Output**: All **17 canonical MCP tools** (including the dual-target differential parity oracle `aitest_parity` and read-only `aitest_report(view="lessons")`) return both text `content` and schema-validated `structuredContent` (`{ schemaVersion, ok, exitCode, outcome, tool, summary, recoverable, blockerKind, data, nextRecommendedActions }`) alongside `ToolAnnotations`.
 
 ---
 
