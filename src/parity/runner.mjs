@@ -1,195 +1,34 @@
 // @ts-check
 import { performance } from 'node:perf_hooks';
 import { redactSecrets } from '../core/redact.mjs';
-import { compareParityCheckpoints } from '../kernel/diff-oracle.mjs';
-import { computeNextRedirectRequest, MAX_REDIRECT_HOPS, REDIRECT_STATUSES } from '../kernel/target-redirect.mjs';
-import {
-  DEFAULT_BLOCKED_ENDPOINTS,
-  checkOutgoingRequestSafety,
-  compileBlockedEndpointRules,
-  evaluateTargetSafety,
-  loadMergedQaEnv,
-} from '../origin-guard.mjs';
+import { compareParityCheckpoints, computeShapeFingerprint } from '../kernel/diff-oracle.mjs';
 import { collectAriaSnapshotsForRoutes } from './aria.mjs';
+import {
+  detectAuthOrShellInvalidPair,
+  isApiRoutePath,
+  loadParityAuthContext,
+} from './auth-context.mjs';
+import { executeSampleRequest, validateDualTargetSafety } from './transport.mjs';
 
-/**
- * Validates BOTH `baselineUrl` and `candidateUrl` against Target Safety Guard fail-closed.
- * Enforces `strictReadonly: !s.allowMutation` so non-loopback shared targets default-deny
- * write HTTP methods (`POST`/`PUT`/`PATCH`/`DELETE`) unless explicitly opted in via `allowMutation`.
- * @param {string} qaDir
- * @param {string} baselineUrl
- * @param {string} candidateUrl
- * @param {{ allowMutation?: boolean }} [options]
- */
-export function validateDualTargetSafety(qaDir, baselineUrl, candidateUrl, options = {}) {
-  /** @type {Record<string, string>} */
-  const overrides = {};
-  if (options.allowMutation === true) overrides.TEST_ALLOW_MUTATION = '1';
-  else if (options.allowMutation === false) overrides.TEST_ALLOW_MUTATION = '0';
-
-  const baseEnv = loadMergedQaEnv(qaDir, { ...process.env, ...overrides, TEST_BASE_URL: baselineUrl });
-  const candEnv = loadMergedQaEnv(qaDir, { ...process.env, ...overrides, TEST_BASE_URL: candidateUrl });
-  const baseSafety = evaluateTargetSafety(baseEnv);
-  const candSafety = evaluateTargetSafety(candEnv);
-  /** @type {string[]} */
-  const errors = [];
-  if (!baseSafety.ok || !baseSafety.baseURL) {
-    errors.push(...(baseSafety.errors.length > 0 ? baseSafety.errors : ['baselineUrl failed target safety validation']).map((e) => `[Baseline] ${e}`));
-  }
-  if (!candSafety.ok || !candSafety.baseURL) {
-    errors.push(...(candSafety.errors.length > 0 ? candSafety.errors : ['candidateUrl failed target safety validation']).map((e) => `[Candidate] ${e}`));
-  }
-  if (errors.length > 0) {
-    return { ok: false, errors, baseGuard: null, candGuard: null };
-  }
-
-  const mkGuard = (/** @type {typeof baseSafety} */ s, /** @type {Record<string, string | undefined>} */ env) => ({
-    baseURL: s.baseURL,
-    allowedHosts: s.allowedHosts,
-    allowedOrigins: s.allowedOrigins,
-    deniedOrigins: s.deniedOrigins,
-    extraEgressHosts: s.extraEgressHosts,
-    egressMode: s.egressMode || 'allowlist',
-    blockedRules: compileBlockedEndpointRules(env.TEST_BLOCKED_ENDPOINTS ?? DEFAULT_BLOCKED_ENDPOINTS),
-    strictReadonly: !s.allowMutation,
-  });
-
-  return {
-    ok: true,
-    errors: /** @type {string[]} */ ([]),
-    baseGuard: mkGuard(baseSafety, baseEnv),
-    candGuard: mkGuard(candSafety, candEnv),
-  };
-}
-
-/**
- * Executes a single HTTP or SSE request with 10-hop manual redirect validation (`maxRedirects: 0` per hop).
- * @param {string} baseUrl
- * @param {import('./normalizer.mjs').ParityRequestItem} reqItem
- * @param {Record<string, any>} guardConfig
- * @param {number} timeoutMs
- */
-async function executeSampleRequest(baseUrl, reqItem, guardConfig, timeoutMs) {
-  let curMethod = String(reqItem.method || 'GET').toUpperCase();
-  let curUrl = new URL(reqItem.path || '/', baseUrl).toString();
-  /** @type {Record<string, string>} */
-  let curHeaders = { ...(reqItem.headers || {}) };
-  let curBody =
-    curMethod === 'GET' || curMethod === 'HEAD' || reqItem.body === null || reqItem.body === undefined
-      ? undefined
-      : typeof reqItem.body === 'string'
-        ? reqItem.body
-        : JSON.stringify(reqItem.body);
-  if (curBody !== undefined && !Object.keys(curHeaders).some((k) => k.toLowerCase() === 'content-type')) {
-    curHeaders['content-type'] = 'application/json';
-  }
-
-  const ac = new AbortController();
-  const tid = setTimeout(() => ac.abort(new Error('Parity request timed out')), timeoutMs);
-  const t0 = performance.now();
-  try {
-    /** @type {Response | null} */
-    let finalRes = null;
-    for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop += 1) {
-      const check = checkOutgoingRequestSafety(curMethod, curUrl, guardConfig);
-      if (check.blocked) {
-        return {
-          blocked: true,
-          blockedReason: check.reason || 'Blocked by outgoing request guard',
-          status: 0,
-          headers: /** @type {Record<string, string>} */ ({}),
-          bodyText: '',
-          durationMs: Number((performance.now() - t0).toFixed(2)),
-          ttftMs: null,
-          isSse: false,
-        };
-      }
-      const res = await fetch(curUrl, {
-        method: curMethod,
-        headers: curHeaders,
-        body: curBody,
-        redirect: 'manual',
-        signal: ac.signal,
-      });
-      const loc = res.headers.get('location');
-      if (REDIRECT_STATUSES.has(res.status) && loc) {
-        if (hop >= MAX_REDIRECT_HOPS) {
-          return {
-            blocked: true,
-            blockedReason: `Exceeded ${MAX_REDIRECT_HOPS} redirect hops`,
-            status: res.status,
-            headers: Object.fromEntries(res.headers.entries()),
-            bodyText: '',
-            durationMs: Number((performance.now() - t0).toFixed(2)),
-            ttftMs: null,
-            isSse: false,
-          };
-        }
-        const next = computeNextRedirectRequest(curMethod, res.status, loc, curUrl, curHeaders);
-        curMethod = next.method;
-        curUrl = next.url;
-        curHeaders = next.headers;
-        if (curMethod === 'GET' || curMethod === 'HEAD') curBody = undefined;
-        continue;
-      }
-      finalRes = res;
-      break;
-    }
-
-    if (!finalRes) {
-      throw new Error('No HTTP response received');
-    }
-
-    const headers = Object.fromEntries(finalRes.headers.entries());
-    const isSse = /text\/event-stream/i.test(headers['content-type'] || '');
-    let bodyText = '';
-    /** @type {number | null} */
-    let ttftMs = null;
-
-    if (isSse && finalRes.body) {
-      const reader = finalRes.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (!value || value.byteLength === 0) continue;
-        const piece = decoder.decode(value, { stream: true });
-        bodyText += piece;
-        if (ttftMs === null && piece.trim().length > 0) {
-          ttftMs = Number((performance.now() - t0).toFixed(2));
-        }
-      }
-      bodyText += decoder.decode();
-    } else {
-      bodyText = await finalRes.text();
-    }
-
-    return {
-      blocked: false,
-      blockedReason: null,
-      status: finalRes.status,
-      headers,
-      bodyText,
-      durationMs: Number((performance.now() - t0).toFixed(2)),
-      ttftMs,
-      isSse,
-    };
-  } finally {
-    clearTimeout(tid);
-  }
-}
+export { validateDualTargetSafety };
 
 /**
  * Concurrently executes dual-target differential verification across all samples (`CP1..CP5`),
- * returning cohort-stratified match statistics and deduplicated shape-fingerprint clusters.
+ * returning cohort-stratified match statistics, deduplicated clusters, and fail-closed `AUTH_OR_SHELL_INVALID` detection.
  * @param {{
  *   qaDir: string;
  *   baselineUrl: string;
  *   candidateUrl: string;
+ *   baselineApiUrl?: string;
+ *   candidateApiUrl?: string;
  *   requests: import('./normalizer.mjs').ParityRequestItem[];
  *   baseGuard: Record<string, any>;
  *   candGuard: Record<string, any>;
+ *   baseApiGuard?: Record<string, any> | null;
+ *   candApiGuard?: Record<string, any> | null;
  *   policy: ReturnType<import('./normalizer.mjs').resolveParityPolicy>;
+ *   authHeaders?: Record<string, string> | string[] | string;
+ *   noAuth?: boolean;
  *   concurrency?: number;
  *   timeoutMs?: number;
  *   checkAria?: boolean;
@@ -201,15 +40,30 @@ export async function executeParitySuite(params) {
   const concurrency = Math.min(32, Math.max(1, Number(params.concurrency || 8)));
   const timeoutMs = Math.max(1000, Number(params.timeoutMs || 15_000));
   const isShapeOnly = params.policy.privacyMode === 'shape-only';
+  const apiPrefixes = params.policy.apiPrefixes || [];
+
+  const authCtx = loadParityAuthContext(params.qaDir, {
+    noAuth: params.noAuth,
+    authHeaders: params.authHeaders,
+    authStorageKeys: params.policy.authStorageKeys,
+  });
 
   const ariaRoutes = params.checkAria
     ? [...new Set(requests.filter((r) => r.method === 'GET').map((r) => r.path.split('?')[0]))]
     : [];
   const ariaMap = params.checkAria
-    ? await collectAriaSnapshotsForRoutes(params.qaDir, params.baselineUrl, params.candidateUrl, ariaRoutes, params.baseGuard, params.candGuard)
+    ? await collectAriaSnapshotsForRoutes(
+        params.qaDir,
+        params.baselineUrl,
+        params.candidateUrl,
+        ariaRoutes,
+        params.baseGuard,
+        params.candGuard,
+        { noAuth: params.noAuth, authCtx }
+      )
     : new Map();
 
-  /** @type {Array<{ index: number, id: string, routePattern: string, featureCohort: string[], blocked?: boolean, blockedReason?: string, cmp?: ReturnType<typeof compareParityCheckpoints> }>} */
+  /** @type {Array<{ index: number, id: string, routePattern: string, featureCohort: string[], blocked?: boolean, blockedReason?: string, authInvalid?: boolean, authReasonCode?: string, authDetail?: string, baseByteLen?: number, candByteLen?: number, cmp?: ReturnType<typeof compareParityCheckpoints> }>} */
   const results = new Array(requests.length);
   let cursor = 0;
 
@@ -220,9 +74,15 @@ export async function executeParitySuite(params) {
       if (idx >= requests.length) break;
       const reqItem = requests[idx];
       const routePattern = `${reqItem.method} ${reqItem.path.split('?')[0]}`;
+      const isApi = isApiRoutePath(reqItem.path, apiPrefixes);
+      const effBaseUrl = isApi && params.baselineApiUrl ? params.baselineApiUrl : params.baselineUrl;
+      const effCandUrl = isApi && params.candidateApiUrl ? params.candidateApiUrl : params.candidateUrl;
+      const effBaseGuard = isApi && params.baseApiGuard ? params.baseApiGuard : params.baseGuard;
+      const effCandGuard = isApi && params.candApiGuard ? params.candApiGuard : params.candGuard;
+
       const [baseRes, candRes] = await Promise.all([
-        executeSampleRequest(params.baselineUrl, reqItem, params.baseGuard, timeoutMs),
-        executeSampleRequest(params.candidateUrl, reqItem, params.candGuard, timeoutMs),
+        executeSampleRequest(effBaseUrl, reqItem, effBaseGuard, timeoutMs, authCtx),
+        executeSampleRequest(effCandUrl, reqItem, effCandGuard, timeoutMs, authCtx),
       ]);
       if (baseRes.blocked || candRes.blocked) {
         results[idx] = {
@@ -235,33 +95,38 @@ export async function executeParitySuite(params) {
         };
         continue;
       }
+
       const ariaRec = ariaMap.get(reqItem.path.split('?')[0]);
+      if (params.policy.failOnAuthError !== false) {
+        const authCheck = detectAuthOrShellInvalidPair(reqItem, baseRes, candRes, ariaRec, apiPrefixes);
+        if (authCheck.invalid) {
+          results[idx] = {
+            index: idx,
+            id: reqItem.id,
+            routePattern,
+            featureCohort: reqItem.featureCohort,
+            authInvalid: true,
+            authReasonCode: authCheck.reasonCode || 'AUTH_OR_SHELL_INVALID',
+            authDetail: authCheck.detail || 'AUTH_OR_SHELL_INVALID',
+            baseByteLen: Buffer.byteLength(baseRes.bodyText || '', 'utf8'),
+            candByteLen: Buffer.byteLength(candRes.bodyText || '', 'utf8'),
+          };
+          continue;
+        }
+      }
+
       const cmp = compareParityCheckpoints(
         {
-          routePattern,
-          method: reqItem.method,
-          path: reqItem.path,
-          status: baseRes.status,
-          headers: baseRes.headers,
-          bodyText: baseRes.bodyText,
-          durationMs: baseRes.durationMs,
-          ttftMs: baseRes.ttftMs,
-          isSse: baseRes.isSse,
-          featureCohort: reqItem.featureCohort,
-          ...(ariaRec ? ariaRec.base : {}),
+          routePattern, method: reqItem.method, path: reqItem.path,
+          status: baseRes.status, headers: baseRes.headers, bodyText: baseRes.bodyText,
+          durationMs: baseRes.durationMs, ttftMs: baseRes.ttftMs, isSse: baseRes.isSse,
+          featureCohort: reqItem.featureCohort, ...(ariaRec ? ariaRec.base : {}),
         },
         {
-          routePattern,
-          method: reqItem.method,
-          path: reqItem.path,
-          status: candRes.status,
-          headers: candRes.headers,
-          bodyText: candRes.bodyText,
-          durationMs: candRes.durationMs,
-          ttftMs: candRes.ttftMs,
-          isSse: candRes.isSse,
-          featureCohort: reqItem.featureCohort,
-          ...(ariaRec ? ariaRec.cand : {}),
+          routePattern, method: reqItem.method, path: reqItem.path,
+          status: candRes.status, headers: candRes.headers, bodyText: candRes.bodyText,
+          durationMs: candRes.durationMs, ttftMs: candRes.ttftMs, isSse: candRes.isSse,
+          featureCohort: reqItem.featureCohort, ...(ariaRec ? ariaRec.cand : {}),
         },
         {
           normalizePaths: params.policy.normalizePaths,
@@ -285,6 +150,8 @@ export async function executeParitySuite(params) {
     return {
       ok: false,
       blocked: true,
+      authInvalid: false,
+      authInvalidCount: 0,
       errors: blockedHits.map((b) => `[Parity Guard Blocked] ${b.routePattern}: ${b.blockedReason}`),
       totalSamples: requests.length,
       matchedSamples: 0,
@@ -299,6 +166,9 @@ export async function executeParitySuite(params) {
 
   let matchedSamples = 0;
   let mismatchedSamples = 0;
+  let authInvalidCount = 0;
+  /** @type {string[]} */
+  const authErrors = [];
   /** @type {Record<string, { total: number, matched: number, mismatched: number, parityPct: number }>} */
   const cohortStats = {};
   /** @type {Map<string, any>} */
@@ -307,10 +177,15 @@ export async function executeParitySuite(params) {
   const perfWarnings = [];
 
   for (const r of results) {
-    if (!r?.cmp) continue;
-    const ok = r.cmp.matched;
+    if (!r) continue;
+    const isAuthInv = Boolean(r.authInvalid);
+    const ok = !isAuthInv && Boolean(r.cmp?.matched);
     if (ok) matchedSamples += 1;
     else mismatchedSamples += 1;
+    if (isAuthInv) {
+      authInvalidCount += 1;
+      authErrors.push(`[AUTH_OR_SHELL_INVALID] ${r.routePattern}: ${r.authDetail}`);
+    }
 
     const cohorts = r.featureCohort.length > 0 ? r.featureCohort : ['default'];
     for (const tag of cohorts) {
@@ -322,11 +197,46 @@ export async function executeParitySuite(params) {
       cohortStats[tag] = bucket;
     }
 
-    if (r.cmp.perfWarnings.length > 0) {
+    if (r.cmp?.perfWarnings?.length) {
       perfWarnings.push(...r.cmp.perfWarnings.map((w) => ({ sampleId: r.id, ...w })));
     }
 
-    if (!ok && r.cmp.primaryMismatch) {
+    if (isAuthInv) {
+      const fp = computeShapeFingerprint({
+        checkpoint: 'CP1-Status-Headers',
+        routePattern: r.routePattern,
+        pieceOrJsonPath: `auth.${r.authReasonCode || 'invalid'}`,
+        firstDiffByteOffset: 0,
+        baselineByteLen: r.baseByteLen || 0,
+        candidateByteLen: r.candByteLen || 0,
+        diffKind: 'AUTH_OR_SHELL_INVALID',
+        featureCohort: r.featureCohort,
+      });
+      const existing = clusterMap.get(fp.fingerprintId);
+      if (existing) {
+        existing.count += 1;
+        existing.sampleIds.push(r.id);
+      } else {
+        clusterMap.set(fp.fingerprintId, {
+          clusterId: `cls_${fp.fingerprintId.slice(3)}`,
+          fingerprintId: fp.fingerprintId,
+          checkpoint: 'CP1',
+          reason: 'AUTH_OR_SHELL_INVALID',
+          diffKind: 'AUTH_OR_SHELL_INVALID',
+          routePattern: r.routePattern,
+          pieceOrJsonPath: `auth.${r.authReasonCode || 'invalid'}`,
+          firstDiffByteOffset: 0,
+          baselineByteLen: r.baseByteLen || 0,
+          candidateByteLen: r.candByteLen || 0,
+          featureCohort: fp.featureCohort,
+          count: 1,
+          sampleIds: [r.id],
+          minimalSampleId: r.id,
+          baselinePreview: isShapeOnly ? null : r.authDetail || null,
+          candidatePreview: isShapeOnly ? null : r.authDetail || null,
+        });
+      }
+    } else if (!ok && r.cmp?.primaryMismatch) {
       const m = r.cmp.primaryMismatch;
       const fpId = m.fingerprint.fingerprintId;
       const existing = clusterMap.get(fpId);
@@ -360,9 +270,11 @@ export async function executeParitySuite(params) {
   const parityPct = totalSamples > 0 ? Number(((matchedSamples / totalSamples) * 100).toFixed(2)) : 100;
 
   return {
-    ok: mismatchedSamples === 0,
+    ok: mismatchedSamples === 0 && authInvalidCount === 0,
     blocked: false,
-    errors: /** @type {string[]} */ ([]),
+    authInvalid: authInvalidCount > 0,
+    authInvalidCount,
+    errors: authErrors,
     totalSamples,
     matchedSamples,
     mismatchedSamples,

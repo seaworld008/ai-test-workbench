@@ -17,12 +17,11 @@ import { fileURLToPath } from 'node:url';
 /** @param {string | string[] | null | undefined} rawInput @returns {string[]} */
 export function parseWorkspaceRoots(rawInput) {
   const roots = [];
-  const items = Array.isArray(rawInput)
-    ? rawInput
-    : String(rawInput || '')
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
+  const rawList = Array.isArray(rawInput) ? rawInput : [rawInput];
+  const items = rawList
+    .flatMap((entry) => String(entry || '').split(','))
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   for (const item of items) {
     try {
@@ -86,22 +85,24 @@ export function isTargetWithinAllowedRoots(targetPath, allowedRoots = []) {
 }
 
 /**
- * Computes effective allowed workspace roots via strict INTERSECTION (`M-02`):
+ * Computes effective allowed workspace roots (`M-02`):
  * - Server ceiling = `ctx.workspaceRoots` + `AITEST_MCP_WORKSPACE_ROOTS` (or `[ctx.defaultTarget || process.cwd()]`).
- * - Client roots (`ctx.clientRoots`) can ONLY narrow the server ceiling; any client root outside the server
- *   ceiling is discarded so a client can NEVER expand filesystem access!
+ * - Client roots (`ctx.clientRoots`) can NEVER expand beyond the server ceiling; any client root outside
+ *   the server ceiling is discarded, while explicit `--target` / `--workspace-root` / `AITEST_MCP_WORKSPACE_ROOTS`
+ *   CLI roots are preserved so a child directory root never locks out the configured parent workspace.
  * @param {Record<string, any>} [ctx]
  */
 export function getEffectiveAllowedRoots(ctx = {}) {
   const envRoots = parseWorkspaceRoots(process.env.AITEST_MCP_WORKSPACE_ROOTS || '');
-  const ctxServerRoots = Array.isArray(ctx.workspaceRoots) ? parseWorkspaceRoots(ctx.workspaceRoots) : [];
+  const ctxServerRoots = ctx.workspaceRoots ? parseWorkspaceRoots(ctx.workspaceRoots) : [];
+  const targetRoots = ctx.defaultTarget ? parseWorkspaceRoots(ctx.defaultTarget) : [];
   const serverCeiling = [...new Set([...ctxServerRoots, ...envRoots])];
 
   const effectiveCeiling =
     serverCeiling.length > 0
       ? serverCeiling
-      : ctx.defaultTarget
-        ? [path.resolve(ctx.defaultTarget)]
+      : targetRoots.length > 0
+        ? targetRoots
         : [process.cwd()];
 
   const clientRoots = Array.isArray(ctx.clientRoots) ? parseWorkspaceRoots(ctx.clientRoots) : [];
@@ -109,8 +110,15 @@ export function getEffectiveAllowedRoots(ctx = {}) {
     return effectiveCeiling;
   }
 
-  // Intersection: keep ONLY client roots that are strictly inside serverCeiling
+  // Filter client roots to those strictly inside serverCeiling; discard outside roots
   const narrowed = clientRoots.filter((cr) => effectiveCeiling.some((sr) => isPathWithinRoot(cr, sr)));
+  if (narrowed.length === 0) {
+    return [];
+  }
+  const explicitCliRoots = [...new Set([...ctxServerRoots, ...envRoots, ...targetRoots])];
+  if (explicitCliRoots.length > 0) {
+    return [...new Set([...explicitCliRoots, ...narrowed])];
+  }
   return narrowed;
 }
 
@@ -125,14 +133,15 @@ export function validateToolPathArgs(args, target, allowedRoots) {
   if (allowedRoots.length === 0) {
     return {
       ok: false,
-      error: '[Workspace Boundary Blocked] Effective allowed workspace roots are empty (client roots did not intersect server roots).',
+      error:
+        '[Workspace Boundary Blocked] Effective allowed workspace roots are empty (client roots did not intersect server roots). Configure --workspace-root or AITEST_MCP_WORKSPACE_ROOTS.',
     };
   }
 
   if (target && !isTargetWithinAllowedRoots(target, allowedRoots)) {
     return {
       ok: false,
-      error: `[Workspace Boundary Blocked] Target "${target}" is outside allowed workspace roots.`,
+      error: `[Workspace Boundary Blocked] Target "${target}" is outside allowed workspace roots. Add it via --workspace-root or AITEST_MCP_WORKSPACE_ROOTS.`,
       blockedPath: target,
     };
   }
@@ -140,9 +149,20 @@ export function validateToolPathArgs(args, target, allowedRoots) {
   if (args.repo && !isTargetWithinAllowedRoots(args.repo, allowedRoots)) {
     return {
       ok: false,
-      error: `[Workspace Boundary Blocked] Repo "${args.repo}" is outside allowed workspace roots.`,
+      error: `[Workspace Boundary Blocked] Repo "${args.repo}" is outside allowed workspace roots. Add it via --workspace-root or AITEST_MCP_WORKSPACE_ROOTS.`,
       blockedPath: args.repo,
     };
+  }
+  if (Array.isArray(args.repos)) {
+    for (const repoEntry of args.repos) {
+      if (repoEntry && !isTargetWithinAllowedRoots(String(repoEntry), allowedRoots)) {
+        return {
+          ok: false,
+          error: `[Workspace Boundary Blocked] Repo "${repoEntry}" in repos[] is outside allowed workspace roots. Add it via --workspace-root or AITEST_MCP_WORKSPACE_ROOTS.`,
+          blockedPath: String(repoEntry),
+        };
+      }
+    }
   }
 
   // Relative sub-path parameters MUST NOT be absolute paths or escape via `..` (`M-03`)

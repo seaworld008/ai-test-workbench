@@ -1,6 +1,7 @@
 // @ts-check
 import fs from 'node:fs';
 import path from 'node:path';
+import { canonicalFsPath, execGitSync } from './git-utils.mjs';
 import { analyzeSourceAst } from './parser.mjs';
 
 /**
@@ -155,4 +156,71 @@ export function hasRealNonScaffoldSpec(qaDir, parsedEntries, currentFile, astOpt
     }
   }
   return false;
+}
+
+/**
+ * Inspects whether a gitignored `qaDir` still has any tracked files in `gitRoot`
+ * or local spec baseline snapshots under `<qaDir>/.aitest/spec-snapshots`.
+ * @param {string} qaDir
+ * @param {string} gitRoot
+ * @returns {{ hasTrackedFiles: boolean, snapshotFiles: string[] }}
+ */
+export function inspectGitIgnoredQaBaseline(qaDir, gitRoot) {
+  const realRoot = canonicalFsPath(gitRoot);
+  const realQa = canonicalFsPath(qaDir);
+  const relSub = path.relative(realRoot, realQa).replace(/\\/g, '/') || '.';
+  const lsRes = execGitSync(realRoot, ['ls-files', '-z', '--', relSub], { timeoutMs: 5000 });
+  const hasTrackedFiles =
+    lsRes.status === 0 && Boolean(lsRes.stdout && lsRes.stdout.split('\0').some(Boolean));
+
+  const snapRoot = path.join(realQa, '.aitest', 'spec-snapshots');
+  /** @type {string[]} */
+  const snapshotFiles = [];
+  if (fs.existsSync(snapRoot)) {
+    const stack = [snapRoot];
+    while (stack.length > 0) {
+      const cur = /** @type {string} */ (stack.pop());
+      for (const ent of fs.readdirSync(cur, { withFileTypes: true })) {
+        const full = path.join(cur, ent.name);
+        if (ent.isDirectory()) stack.push(full);
+        else if (ent.isFile() && /\.(?:ts|tsx|js|jsx|mjs)$/i.test(ent.name)) {
+          snapshotFiles.push(path.relative(snapRoot, full).replace(/\\/g, '/'));
+        }
+      }
+    }
+  }
+
+  return { hasTrackedFiles, snapshotFiles: snapshotFiles.sort() };
+}
+
+/**
+ * Builds spec changes comparing `.aitest/spec-snapshots` baselines against live files inside `qaDir`.
+ * @param {string} qaDir
+ * @param {string[]} snapshotFiles
+ */
+export function collectSnapshotBaselineChanges(qaDir, snapshotFiles) {
+  const realQa = canonicalFsPath(qaDir);
+  const snapRoot = path.join(realQa, '.aitest', 'spec-snapshots');
+  const seen = new Set(snapshotFiles);
+  const testsDir = path.join(realQa, 'tests');
+  if (fs.existsSync(testsDir)) {
+    const stack = [testsDir];
+    while (stack.length > 0) {
+      const cur = /** @type {string} */ (stack.pop());
+      for (const ent of fs.readdirSync(cur, { withFileTypes: true })) {
+        const full = path.join(cur, ent.name);
+        if (ent.isDirectory()) stack.push(full);
+        else if (ent.isFile() && /\.(?:ts|tsx|js|jsx|mjs)$/i.test(ent.name)) {
+          seen.add(path.relative(realQa, full).replace(/\\/g, '/'));
+        }
+      }
+    }
+  }
+  return [...seen].sort().map((relPath) => {
+    const snapPath = path.join(snapRoot, ...relPath.split('/'));
+    const livePath = path.join(realQa, ...relPath.split('/'));
+    const baseSource = fs.existsSync(snapPath) ? fs.readFileSync(snapPath, 'utf8') : '';
+    const headSource = fs.existsSync(livePath) ? fs.readFileSync(livePath, 'utf8') : '';
+    return { filePath: relPath, baseSource, headSource };
+  });
 }

@@ -1,9 +1,6 @@
-import path from 'node:path';
-import {
-  isLoopbackHttpUrl,
-  loadRuntimeConfig,
-  validateRuntimeConfig,
-} from '../core/runtime-config.mjs';
+// @ts-check
+import { isLoopbackHttpUrl, loadRuntimeConfig, validateRuntimeConfig } from '../core/runtime-config.mjs';
+import { parseAndValidateAbortThirdPartyHosts, shouldAbortThirdPartyRequest } from './target-abort.mjs';
 import {
   applyEnvFileToProcess,
   loadEnvFileIfPresent,
@@ -44,12 +41,14 @@ export {
   loadMergedQaEnv,
   loadRuntimeConfig,
   normalizeGuardPathname,
+  parseAndValidateAbortThirdPartyHosts,
   parseCsvList,
   parseEnvText,
   parseLowerCsvList,
   parseSafeHttpUrl,
   readEnvFileIfPresent,
   resolveDefaultMutationPolicy,
+  shouldAbortThirdPartyRequest,
   validateAllowlistEntries,
   validateRuntimeConfig,
 };
@@ -109,6 +108,15 @@ export function evaluateTargetSafety(envInput = {}) {
   errors.push(...validateAllowlistEntries(allowedOrigins));
   errors.push(...validateAllowlistEntries(extraEgressHosts));
 
+  const abortCheck = parseAndValidateAbortThirdPartyHosts(envInput.TEST_ABORT_THIRD_PARTY_HOSTS, {
+    baseURL: baseUrl,
+    allowedHosts,
+    allowedOrigins,
+  });
+  if (!abortCheck.ok) {
+    errors.push(`[Target Safety Blocked] Invalid TEST_ABORT_THIRD_PARTY_HOSTS: ${abortCheck.errors.join('; ')}`);
+  }
+
   if (requireTarget && !baseUrl) {
     errors.push('REQUIRE_TEST_TARGET=1 is set, but TEST_BASE_URL is empty.');
   }
@@ -121,6 +129,7 @@ export function evaluateTargetSafety(envInput = {}) {
       errors.push(err instanceof Error ? err.message : String(err));
       return {
         ok: false,
+        allowed: false,
         errors,
         parsed: null,
         baseURL: undefined,
@@ -128,6 +137,7 @@ export function evaluateTargetSafety(envInput = {}) {
         allowedOrigins,
         deniedOrigins,
         extraEgressHosts,
+        abortThirdPartyHosts: abortCheck.hosts,
         egressMode,
         allowMutation: envInput.TEST_ALLOW_MUTATION === '1' || envInput.TEST_ALLOW_MUTATION === 'true',
       };
@@ -162,6 +172,7 @@ export function evaluateTargetSafety(envInput = {}) {
 
   return {
     ok: errors.length === 0,
+    allowed: errors.length === 0,
     errors,
     parsed,
     baseURL: finalBaseUrl,
@@ -169,6 +180,7 @@ export function evaluateTargetSafety(envInput = {}) {
     allowedOrigins,
     deniedOrigins,
     extraEgressHosts,
+    abortThirdPartyHosts: abortCheck.hosts,
     egressMode,
     allowMutation: mutationPolicy.allowMutation,
     strictReadonly: mutationPolicy.strictReadonly,

@@ -90,6 +90,14 @@ export function auditMcpSafety(mcpJsonObj, codexTomlText = '', options = {}) {
     if (/redis/i.test(name) && !argsStr.includes('--readonly')) {
       warnings.push(`[MCP Safety] Server "${name}" should pass "--readonly" to prevent accidental cache flush/mutation.`);
     }
+    if (/gitlab/i.test(name) && String(env.GITLAB_READ_ONLY_MODE || '').toLowerCase() === 'false') {
+      issues.push(`[MCP Safety] Server "${name}" sets GITLAB_READ_ONLY_MODE=false; mutating GitLab MCP tools are blocked.`);
+    } else if (/gitlab/i.test(name) && String(env.GITLAB_READ_ONLY_MODE || '').toLowerCase() !== 'true') {
+      warnings.push(`[MCP Safety] Server "${name}" should set GITLAB_READ_ONLY_MODE=true for read-only safety.`);
+    }
+    if (/skywalking|victorialogs/i.test(name) && /(?:^|\s)--(?:allow-)?write\b/i.test(argsStr)) {
+      issues.push(`[MCP Safety] Server "${name}" enables write flags on observability MCP.`);
+    }
 
     for (const opFlag of ['ALLOW_INSERT_OPERATION', 'ALLOW_UPDATE_OPERATION', 'ALLOW_DELETE_OPERATION']) {
       if (String(env[opFlag] || '').toLowerCase() === 'true') {

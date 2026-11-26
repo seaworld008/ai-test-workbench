@@ -23,6 +23,7 @@ import {
   TEMPLATE_DIR,
   applyRootMcpBridge,
   collectFilesRecursive,
+  detectHostTooling,
   detectPackageManager,
   detectProjectStack,
   detectStacksFromDescriptors,
@@ -37,6 +38,7 @@ import {
 
 export {
   STACK_DESCRIPTORS,
+  detectHostTooling,
   detectPackageManager,
   detectProjectStack,
   detectStacksFromDescriptors,

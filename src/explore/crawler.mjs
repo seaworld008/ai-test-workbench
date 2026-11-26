@@ -6,20 +6,26 @@ import { isLoopbackHttpUrl, loadRuntimeConfig } from '../core/runtime-config.mjs
 import { redactSecrets } from '../core/redact.mjs';
 import {
   capturePageSnapshot,
-  discoverPortalSwitcherOptions,
   expandCollapsedMenus,
   explorePageTabs,
   exploreSafeReadonlyDialogs,
-  switchPortalOption,
-  waitPageSettled,
 } from './dom-probes.mjs';
 import { attachExploreObservers } from './observers.mjs';
+import {
+  PORTAL_CIRCUIT_BREAKER_REASON,
+  detectBlockedPortalAuthExchange,
+  discoverPortalSwitcherOptions,
+  shouldTripPortalUnauthorizedBreaker,
+  switchPortalOption,
+} from './portal-switcher.mjs';
 import {
   classifyActionSafety,
   createStratifiedRouteQueue,
   detectPageArchetype,
+  isNonCrawlableSystemRoute,
   sanitizeUntrustedDomText,
 } from './safety.mjs';
+import { navigateExploreRoute, waitPageSettled } from './transition-wait.mjs';
 
 /** @param {string} filePath */
 function loadJsonIfValid(filePath) {
@@ -70,11 +76,12 @@ export async function executeExploreCrawl({
     },
     techStack: /** @type {string[]} */ ([]),
     authKeyNames: /** @type {string[]} */ ([]),
-    portals: /** @type {Array<{ name: string, mode: string, id?: string | number, notes?: string }>} */ ([]),
-    pages: /** @type {Array<{ portal: string, route: string, actualPath: string, title: string, breadcrumbs: string[], tableHeaders: string[], hasTable: boolean, tableRowCount: number, filterLabels: string[], buttons: string[], tabs: string[], tabsExplored: string[], dialogsExplored: any[], readonlyButtons: string[], mutationButtons: string[], apisObserved: string[], hasPasswordInput: boolean, hasChart: boolean, a11y: any, ariaSnapshot: string | null, archetype: string }>} */ ([]),
+    portals: /** @type {Array<{ name: string, mode: string, id?: string | number, abortedReason?: string | null, notes?: string }>} */ ([]),
+    portalCircuitBreakers: /** @type {Array<{ portal: string, abortedReason: string, detail: string }>} */ ([]),
+    pages: /** @type {Array<{ portal: string, route: string, actualPath: string, component?: string | null, title: string, breadcrumbs: string[], tableHeaders: string[], hasTable: boolean, tableRowCount: number, filterLabels: string[], buttons: string[], tabs: string[], tabsExplored: string[], dialogsExplored: any[], readonlyButtons: string[], mutationButtons: string[], apisObserved: string[], hasPasswordInput: boolean, hasChart: boolean, a11y: any, ariaSnapshot: string | null, archetype: string }>} */ ([]),
     brokenRoutes: /** @type {Array<{ portal: string, route: string, actualPath: string | null, reason: string }>} */ ([]),
     endpoints: /** @type {Array<{ method: string, endpoint: string, status: number }>} */ ([]),
-    blockedWriteRequests: /** @type {Array<{ method: string, endpoint: string, reason: string | null }>} */ ([]),
+    blockedWriteRequests: /** @type {Array<{ method: string, endpoint: string, reason: string | null, suspectedReadQueryPost?: boolean }>} */ ([]),
     blockedApiHosts: /** @type {string[]} */ ([]),
     jsonCaptures: /** @type {Array<{ method: string, pathname: string, status: number, sample: unknown }>} */ ([]),
     envelopeErrors: /** @type {Array<{ route: string, method: string, endpoint: string, httpStatus: number, code: number | null, message: string | null }>} */ ([]),
@@ -131,14 +138,18 @@ export async function executeExploreCrawl({
   const stackSet = new Set();
   /** @type {Set<string>} */
   const authKeysSet = new Set();
-  /** @type {Map<string, { name: string, mode: string, id?: string | number, notes?: string }>} */
+  /** @type {Map<string, { name: string, mode: string, id?: string | number, abortedReason?: string | null, notes?: string }>} */
   const portalMap = new Map();
 
   /** @param {string} portalLabel @param {string} initialRoute @param {number} portalPageBudget @param {boolean} isPrimaryPortal */
   const crawlPortalContext = async (portalLabel, initialRoute, portalPageBudget, isPrimaryPortal) => {
     const routeQueue = createStratifiedRouteQueue();
-    routeQueue.enqueue(initialRoute);
+    routeQueue.enqueue(initialRoute, 'primary');
     let crawledInPortal = 0;
+    let probedInPortal = 0;
+    let unauthorizedInFirstThree = 0;
+    /** @type {string | null} */
+    let abortedReason = null;
     let effectivePortalBudget = portalPageBudget;
     let consecutiveAuthRedirects = 0;
     let capturedAuthPortalOnce = false;
@@ -155,64 +166,22 @@ export async function executeExploreCrawl({
       if (visited.has(visitKey)) continue;
       visited.add(visitKey);
       observers.beginRoute(normalizedKey);
+      const navResult = await navigateExploreRoute(page, {
+        targetUrl,
+        normalizedKey,
+        portalLabel,
+        useSpa: crawledInPortal > 0,
+        shouldGoto: isPrimaryPortal,
+        topology,
+        redactSecrets,
+      });
+      if (!navResult.ok) continue;
 
-      try {
-        if (crawledInPortal > 0) {
-          const spaNav = await page
-            .evaluate(async (/** @type {string} */ dest) => {
-              const appEl = /** @type {any} */ (document.querySelector('#app'));
-              const router = appEl?.__vue__?.$router || appEl?.__vue_app__?.config?.globalProperties?.$router;
-              if (router && typeof router.push === 'function') {
-                try {
-                  await router.push(dest);
-                  return { usedSpa: true, error: null };
-                } catch (e) {
-                  const errObj = /** @type {{ name?: unknown, message?: unknown } | null} */ (typeof e === 'object' && e !== null ? e : null);
-                  if (errObj?.name === 'NavigationDuplicated') return { usedSpa: true, error: null };
-                  return { usedSpa: true, error: String(errObj?.message || e) };
-                }
-              }
-              // Generic History API SPA link click fallback for React / Next / Angular / Remix (`WU-04`)
-              const targetPathOnly = dest.split('?')[0];
-              const matchingLink = Array.from(document.querySelectorAll('a[href], [role="link"][data-href]')).find((el) => {
-                const raw = el.getAttribute('href') || el.getAttribute('data-href') || '';
-                if (!raw || raw.startsWith('#') || raw.startsWith('http')) return false;
-                return raw === dest || raw.split('?')[0] === targetPathOnly;
-              });
-              if (matchingLink && typeof (/** @type {any} */ (matchingLink)).click === 'function') {
-                (/** @type {any} */ (matchingLink)).click();
-                return { usedSpa: true, error: null };
-              }
-              return { usedSpa: false, error: null };
-            }, normalizedKey)
-            .catch(() => ({ usedSpa: false, error: null }));
-
-          if (!spaNav.usedSpa) {
-            await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20_000 });
-          } else if (spaNav.error) {
-            topology.brokenRoutes.push({
-              portal: portalLabel,
-              route: normalizedKey,
-              actualPath: new URL(page.url()).pathname,
-              reason: redactSecrets(spaNav.error).slice(0, 160),
-            });
-          }
-        } else if (isPrimaryPortal) {
-          await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20_000 });
-        }
-      } catch (navErr) {
-        const navMsg = navErr instanceof Error ? navErr.message : String(navErr);
-        topology.waitNotes.push({ route: normalizedKey, stage: 'goto', note: navMsg.slice(0, 120) });
-        topology.brokenRoutes.push({
-          portal: portalLabel,
-          route: normalizedKey,
-          actualPath: null,
-          reason: `Navigation error: ${navMsg.slice(0, 140)}`,
-        });
-        continue;
-      }
-
-      await waitPageSettled(page, normalizedKey, topology);
+      await waitPageSettled(page, normalizedKey, topology, {
+        afterSpaNav: navResult.usedSpaNavigation,
+        expectedRoute: normalizedKey,
+      });
+      await observers.awaitRouteTelemetry();
       if (crawledInPortal === 0) {
         await expandCollapsedMenus(page);
       }
@@ -292,6 +261,7 @@ export async function executeExploreCrawl({
         portal: portalLabel,
         route: normalizedKey,
         actualPath: snap.actualPath,
+        component: snap.component || null,
         title: snap.title,
         breadcrumbs: snap.breadcrumbs,
         tableHeaders: snap.tableHeaders,
@@ -345,28 +315,51 @@ export async function executeExploreCrawl({
         crawledInPortal += 1;
       }
 
+      probedInPortal += 1;
+      if (
+        !isPrimaryPortal &&
+        probedInPortal <= 3 &&
+        (observers.isRouteUnauthorized() || /\/(401|403)\b/.test(String(snap.actualPath || '')))
+      ) {
+        unauthorizedInFirstThree += 1;
+      }
+      if (shouldTripPortalUnauthorizedBreaker({ isPrimaryPortal, probedCount: probedInPortal, unauthorizedInFirstThree })) {
+        abortedReason = PORTAL_CIRCUIT_BREAKER_REASON;
+        topology.portalCircuitBreakers.push({
+          portal: portalLabel,
+          abortedReason,
+          detail: 'First 3 probed sub-portal routes all returned 401/403',
+        });
+        break;
+      }
+
       // Stop burning page budget when an unauthenticated session redirects repeatedly to the same login screen
       if (consecutiveAuthRedirects >= 4) {
         topology.authRequired = true;
         break;
       }
 
-      for (const rawHref of snap.discoveredLinks) {
-        try {
-          const resolved = new URL(rawHref, safety.baseURL);
-          if (resolved.origin !== baseOrigin) continue;
-          if (/\/(logout|signout|download|loading)\b/i.test(resolved.pathname)) continue;
-          const rel = resolved.pathname + resolved.search;
-          if (!visited.has(`${portalLabel}::${rel}`)) {
-            routeQueue.enqueue(rel);
+      const enqueueLinks = (/** @type {string[]} */ links, /** @type {'primary' | 'secondary' | 'fallback'} */ tier) => {
+        for (const rawHref of links || []) {
+          try {
+            const resolved = new URL(rawHref, safety.baseURL);
+            if (resolved.origin !== baseOrigin) continue;
+            if (isNonCrawlableSystemRoute(resolved.pathname)) continue;
+            const rel = resolved.pathname + resolved.search;
+            if (!visited.has(`${portalLabel}::${rel}`)) {
+              routeQueue.enqueue(rel, tier);
+            }
+          } catch {
+            // ignore malformed href
           }
-        } catch {
-          // ignore malformed href
         }
-      }
+      };
+      enqueueLinks(snap.primaryLinks || snap.discoveredLinks, 'primary');
+      enqueueLinks(snap.secondaryLinks || [], 'secondary');
+      enqueueLinks(snap.fallbackLinks || [], 'fallback');
     }
 
-    return { crawledInPortal, switcherInfo };
+    return { crawledInPortal, switcherInfo, abortedReason };
   };
 
   const primaryRes = await crawlPortalContext('default', entryPath, maxPages, true);
@@ -381,15 +374,35 @@ export async function executeExploreCrawl({
     const perPortalBudget = Math.max(1, Math.floor((maxPages - topology.pages.length) / Math.max(1, candidatePortals.length)));
     for (const optionLabel of candidatePortals) {
       if (topology.pages.length >= maxPages) break;
+      const beforeBlockedCount = topology.blockedWriteRequests.length;
       const switched = await switchPortalOption(page, primaryRes.switcherInfo.selector, optionLabel);
       if (switched) {
         await waitPageSettled(page, `portal:${optionLabel}`, topology);
+        await observers.awaitRouteTelemetry();
+        const blockedAuth = detectBlockedPortalAuthExchange(topology.blockedWriteRequests, beforeBlockedCount);
+        if (blockedAuth.tripped) {
+          topology.portalCircuitBreakers.push({
+            portal: optionLabel,
+            abortedReason: PORTAL_CIRCUIT_BREAKER_REASON,
+            detail: `Blocked auth/token-exchange POST ${blockedAuth.endpoint}`,
+          });
+          portalMap.set(`switcher-option:${optionLabel}`, {
+            name: sanitizeUntrustedDomText(optionLabel),
+            mode: 'portal-aborted',
+            abortedReason: PORTAL_CIRCUIT_BREAKER_REASON,
+            notes: `Circuit-breaker tripped on blocked auth exchange (${blockedAuth.endpoint}).`,
+          });
+          continue;
+        }
         const afterSwitchPath = new URL(page.url()).pathname + new URL(page.url()).search;
         const subRes = await crawlPortalContext(optionLabel, afterSwitchPath, perPortalBudget, false);
         portalMap.set(`switcher-option:${optionLabel}`, {
           name: sanitizeUntrustedDomText(optionLabel),
-          mode: 'portal-explored',
-          notes: `Switched via ${primaryRes.switcherInfo.selector}; explored ${subRes.crawledInPortal} route(s).`,
+          mode: subRes.abortedReason ? 'portal-aborted' : 'portal-explored',
+          ...(subRes.abortedReason ? { abortedReason: subRes.abortedReason } : {}),
+          notes: subRes.abortedReason
+            ? `Circuit-breaker tripped (${subRes.abortedReason}) after ${subRes.crawledInPortal} route(s).`
+            : `Switched via ${primaryRes.switcherInfo.selector}; explored ${subRes.crawledInPortal} route(s).`,
         });
       }
     }

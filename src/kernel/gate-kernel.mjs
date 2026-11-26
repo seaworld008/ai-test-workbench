@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * Authoritative 4-Layer Anti-Fake-Green Gate Kernel (v6.0.0) — Public Facade.
  *
@@ -49,6 +50,7 @@ export {
   clearGitRootCache,
   execGitSync,
   getFileAtGitRef,
+  isPathGitIgnored,
   listChangedFilesUnderDir,
   parseGitDiffHeaderPath,
   resolveDefaultDiffBase,

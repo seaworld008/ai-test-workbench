@@ -67,6 +67,18 @@ export function getMcpResourceDefinitions(defaultTarget = null) {
         name: 'Current Change Verdict Summary',
         description: `Latest aitest_verify_change verdict Markdown for bound target (${defaultTarget}).`,
         mimeType: 'text/markdown',
+      },
+      {
+        uri: 'aitest://current/parity-summary',
+        name: 'Current Differential Parity Summary',
+        description: `Latest aitest_parity differential oracle summary Markdown for bound target (${defaultTarget}).`,
+        mimeType: 'text/markdown',
+      },
+      {
+        uri: 'aitest://current/parity-report',
+        name: 'Current Differential Parity Report (JSON)',
+        description: `Latest aitest_parity structured JSON report for bound target (${defaultTarget}).`,
+        mimeType: 'application/json',
       }
     );
   }
@@ -111,6 +123,18 @@ export function getMcpResourceTemplates() {
       name: 'Project Change Verdict Summary',
       description: 'Reads <repo>/qa/reports/verdict-summary.md for URL-encoded {target}.',
       mimeType: 'text/markdown',
+    },
+    {
+      uriTemplate: 'aitest://project/{target}/parity-summary',
+      name: 'Project Differential Parity Summary',
+      description: 'Reads <repo>/qa/reports/parity-summary.md for URL-encoded {target}.',
+      mimeType: 'text/markdown',
+    },
+    {
+      uriTemplate: 'aitest://project/{target}/parity-report',
+      name: 'Project Differential Parity Report (JSON)',
+      description: 'Reads <repo>/qa/reports/parity-report.json for URL-encoded {target}.',
+      mimeType: 'application/json',
     },
   ];
 }
@@ -299,6 +323,7 @@ export function readMcpResource(uri, ctx = {}) {
     'perf-summary': { rel: path.join('reports', 'perf-summary.md'), mime: 'text/markdown' },
     'verdict-summary': { rel: path.join('reports', 'verdict-summary.md'), mime: 'text/markdown' },
     'parity-summary': { rel: path.join('reports', 'parity-summary.md'), mime: 'text/markdown' },
+    'parity-report': { rel: path.join('reports', 'parity-report.json'), mime: 'application/json' },
   };
 
   let targetRoot = null;

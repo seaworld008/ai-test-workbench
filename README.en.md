@@ -1,6 +1,6 @@
 <div align="center">
 
-# AI Test Workbench (`v6.4.0`)
+# AI Test Workbench (`v6.5.0`)
 
 **Trustworthy Verification Kernel & Native Multi-Protocol MCP Server for AI Coding Agents**
 
@@ -49,7 +49,7 @@ Adopt T2 verification via [examples/workflows/use-aitest-verify.yml](./examples/
 ```yaml
 jobs:
   aitest-t2-verdict:
-    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.4.0
+    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.5.0
     permissions:
       id-token: write
       attestations: write
@@ -65,7 +65,7 @@ jobs:
 Verify a T2 attestation bundle offline (fail-closed by default: missing signature, T1-only MAC, digest tampering, or workflow identity mismatch exits non-zero with `trustLevel <= T1`):
 
 ```bash
-npx ai-test-workbench@6.4.0 attest verify \
+npx ai-test-workbench@6.5.0 attest verify \
   --file attestation.json \
   --bundle attestation.sigstore.json \
   --expect-repo owner/repo \
@@ -101,19 +101,19 @@ flowchart TB
 ### Requirements & Supply-Chain Security
 
 - **Node.js**: `>= 22.12.0` (`24 LTS` or `26 LTS` recommended) on Windows PowerShell (`pwsh`), macOS, or Linux.
-- **Zero Runtime Dependencies**: Root `package.json` carries zero runtime `dependencies`. Always invoke pinned `npx ai-test-workbench@6.4.0 <cmd>`, global short alias `aitw <cmd>` (`npm i -g ai-test-workbench@6.4.0`), or local source `node tools/aitest.mjs <cmd>`.
+- **Zero Runtime Dependencies**: Root `package.json` carries zero runtime `dependencies`. Always invoke pinned `npx ai-test-workbench@6.5.0 <cmd>`, global short alias `aitw <cmd>` (`npm i -g ai-test-workbench@6.5.0`), or local source `node tools/aitest.mjs <cmd>`.
 
 ### Register Native MCP Server (`stdio` / `/mcp` / `/sse`)
 
 - **Claude Code**:
   ```bash
-  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.4.0 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
+  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.5.0 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
   ```
 - **Codex CLI** (`.codex/config.toml`):
   ```toml
   [mcp_servers.ai-test-workbench]
   command = "npx"
-  args = ["--package=ai-test-workbench@6.4.0", "ai-test-workbench", "mcp-serve"]
+  args = ["--package=ai-test-workbench@6.5.0", "ai-test-workbench", "mcp-serve"]
   ```
 - **Cursor / Windsurf / Antigravity / Gemini CLI** (`.mcp.json`):
   ```json
@@ -121,14 +121,14 @@ flowchart TB
     "mcpServers": {
       "ai-test-workbench": {
         "command": "npx",
-        "args": ["--package=ai-test-workbench@6.4.0", "ai-test-workbench", "mcp-serve"]
+        "args": ["--package=ai-test-workbench@6.5.0", "ai-test-workbench", "mcp-serve"]
       }
     }
   }
   ```
 - **Streamable HTTP (`/mcp`) & Legacy SSE (`/sse`)**:
   ```bash
-  npx ai-test-workbench@6.4.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
+  npx ai-test-workbench@6.5.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
   ```
 
 ### Official MCP Conformance & 3-Transport Interoperability
@@ -142,21 +142,21 @@ flowchart TB
 
 ```bash
 # 1. Readiness check, initialization, and hash-safe template upgrades
-npx ai-test-workbench@6.4.0 doctor
-npx ai-test-workbench@6.4.0 init --name my-app --target "/path/to/your-repo" --loop codex
-npx ai-test-workbench@6.4.0 upgrade --target "/path/to/your-repo" --dry-run
+npx ai-test-workbench@6.5.0 doctor
+npx ai-test-workbench@6.5.0 init --name my-app --target "/path/to/your-repo" --loop codex
+npx ai-test-workbench@6.5.0 upgrade --target "/path/to/your-repo" --dry-run
 
 # 2. Session capture -> read-only exploration -> living code map -> pinned external MCPs
-npx ai-test-workbench@6.4.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
-npx ai-test-workbench@6.4.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
-npx ai-test-workbench@6.4.0 map --target "/path/to/your-repo"
-npx ai-test-workbench@6.4.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.4.0 mcp doctor --target "/path/to/your-repo" --lock
+npx ai-test-workbench@6.5.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
+npx ai-test-workbench@6.5.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
+npx ai-test-workbench@6.5.0 map --target "/path/to/your-repo"
+npx ai-test-workbench@6.5.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.5.0 mcp doctor --target "/path/to/your-repo" --lock
 
 # 3. Performance SLOs, dual-target parity, memory distiller/sweeper, and one-call pre-merge verdict
-npx ai-test-workbench@6.4.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
-npx ai-test-workbench@6.4.0 parity --target "/path/to/your-repo" --baseline-url http://127.0.0.1:4100 --candidate-url http://127.0.0.1:4200 --privacy-mode shape-only
-npx ai-test-workbench@6.4.0 learn --target "/path/to/your-repo" --action distill --json
-npx ai-test-workbench@6.4.0 verify-change --target "/path/to/your-repo" --base origin/main
+npx ai-test-workbench@6.5.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
+npx ai-test-workbench@6.5.0 parity --target "/path/to/your-repo" --baseline-url http://127.0.0.1:4100 --candidate-url http://127.0.0.1:4200 --privacy-mode shape-only
+npx ai-test-workbench@6.5.0 learn --target "/path/to/your-repo" --action distill --json
+npx ai-test-workbench@6.5.0 verify-change --target "/path/to/your-repo" --base origin/main
 ```
 
 Reproduce the full repository gate locally (zero external servers):

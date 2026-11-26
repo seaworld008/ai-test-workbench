@@ -11,7 +11,7 @@ import { runMcpServeCommand } from '../mcp-server.mjs';
 import { runSkillInstallCommand } from '../skill-install.mjs';
 import { runUpgradeCommand } from '../upgrade.mjs';
 
-import { BOOL, STR, TARGET_OPTS, WORKSPACE_MUTATION_OPTS, makeCommon, resolvePairedBooleanFlag } from './opts.mjs';
+import { BOOL, STR, STR_MULTI, TARGET_OPTS, WORKSPACE_MUTATION_OPTS, makeCommon, resolvePairedBooleanFlag } from './opts.mjs';
 
 /**
  * Workspace initialization, discovery, exploration, and setup CLI commands (`WU-04`).
@@ -139,13 +139,16 @@ export const WORKSPACE_CLI_COMMANDS = {
     options: {
       ...TARGET_OPTS,
       force: BOOL,
-      repo: STR,
+      repo: STR_MULTI,
+      'max-scan-files': STR,
       'no-sync-impact': BOOL,
     },
     run: (/** @type {Record<string, any>} */ v, /** @type {string[]} */ _pos, /** @type {'zh' | 'en'} */ lang) =>
       runMapCommand({
         ...makeCommon(v, lang),
-        repo: v.repo,
+        repo: Array.isArray(v.repo) ? v.repo[0] : v.repo,
+        repos: Array.isArray(v.repo) ? v.repo : v.repo ? [v.repo] : undefined,
+        maxScanFiles: v['max-scan-files'] !== undefined ? Number(v['max-scan-files']) : undefined,
         noSyncImpact: Boolean(v['no-sync-impact']),
       }),
   },
@@ -161,7 +164,7 @@ export const WORKSPACE_CLI_COMMANDS = {
       port: STR,
       host: STR,
       'auth-token': STR,
-      'workspace-root': STR,
+      'workspace-root': STR_MULTI,
     },
     run: (/** @type {Record<string, any>} */ v, /** @type {string[]} */ pos, /** @type {'zh' | 'en'} */ lang) => {
       const action = String(v.action || pos[0] || 'presets').toLowerCase();
@@ -191,7 +194,7 @@ export const WORKSPACE_CLI_COMMANDS = {
       port: STR,
       host: STR,
       'auth-token': STR,
-      'workspace-root': STR,
+      'workspace-root': STR_MULTI,
     },
     run: (/** @type {Record<string, any>} */ v, /** @type {string[]} */ _pos, /** @type {'zh' | 'en'} */ lang) =>
       runMcpServeCommand({

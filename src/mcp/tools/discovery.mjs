@@ -256,6 +256,8 @@ export const DISCOVERY_TOOLS = [
       properties: {
         target: { type: 'string', description: 'Target repository or QA directory' },
         repo: { type: 'string', description: 'Optional host source directory path' },
+        repos: { type: 'array', items: { type: 'string' }, description: 'Optional list of frontend/backend source repository paths' },
+        maxScanFiles: { type: 'integer', minimum: 100, maximum: 200000, description: 'Per-repository source scan file budget (default: 16000)' },
         qaDir: { type: 'string', description: 'Optional QA subdirectory name or path' },
         force: { type: 'boolean', description: 'Force rewrite of code-map.json and SYSTEM_MAP.md even if unchanged' },
         noSyncImpact: { type: 'boolean', description: 'Skip auto-updating impact-map.auto.json suggestions' },
@@ -275,6 +277,10 @@ export const DISCOVERY_TOOLS = [
       const a = ['map', '--json', `--lang=${lang}`];
       pushOpt(a, '--target', target);
       pushOpt(a, '--repo', args.repo);
+      if (Array.isArray(args.repos)) {
+        for (const r of args.repos) pushOpt(a, '--repo', r);
+      }
+      pushOpt(a, '--max-scan-files', args.maxScanFiles);
       pushOpt(a, '--qa-dir', args.qaDir);
       pushBool(a, '--force', args.force);
       pushBool(a, '--no-sync-impact', args.noSyncImpact);
@@ -302,7 +308,7 @@ export const DISCOVERY_TOOLS = [
         target: { type: 'string', description: 'Target repository path (required for add and doctor)' },
         profile: {
           type: 'string',
-          enum: ['minimal', 'observability', 'data-verify', 'perf', 'full-link'],
+          enum: ['minimal', 'observability', 'data-verify', 'perf', 'enterprise-selfhosted', 'full-link'],
           description: 'Preset MCP bundle profile to configure',
         },
         servers: { type: 'string', description: 'Comma-separated preset server names' },

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { redactSecrets } from '../core/redact.mjs';
 import { WORKBENCH_VERSION } from '../core/version.mjs';
 import { loadKnownBlockers } from './blockers.mjs';
+import { buildRegressionSpecSkeleton } from './regression-skeleton.mjs';
 
 /**
  * Theme catalog used to cluster recurring lessons from heals, defects, governance audit logs, and PR reviews.
@@ -121,31 +122,6 @@ function classifySignalTheme(text) {
 }
 
 /**
- * Generates a `@regression` Playwright spec skeleton for a Class C defect ticket.
- * @param {{ defectId: string, title: string, specFile: string | null, errorSnippet: string }} defect
- */
-function buildRegressionSpecSkeleton(defect) {
-  const slug = defect.defectId.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'defect';
-  const safeTitle = defect.title.replace(/['`\\]/g, '').slice(0, 80);
-  return {
-    defectId: defect.defectId,
-    suggestedFile: `tests/regression/${slug}.spec.ts`,
-    testTitle: `[${defect.defectId}] ${safeTitle} @regression`,
-    sourceSpec: defect.specFile,
-    code: [
-      `import { test, expect } from '../fixtures/base';`,
-      '',
-      `test('[${defect.defectId}] ${safeTitle} @regression', async ({ request }) => {`,
-      `  // Reproduce defect (${defect.defectId}) so it FAILS on broken baseline and PASSES after real product fix.`,
-      `  const res = await request.get('/api/health');`,
-      `  expect(res.status()).toBe(200);`,
-      `});`,
-      '',
-    ].join('\n'),
-  };
-}
-
-/**
  * Renders staging proposal artifacts to human-readable Markdown (`learn-proposals.md`).
  * @param {Record<string, any>} proposal
  * @param {'zh' | 'en'} [lang]
@@ -224,12 +200,21 @@ export function distillMemoryProposals(qaDir, options = {}) {
 
   // 1. Scan `.aitest/heals/*.json`
   const healsDir = path.join(qaDir, '.aitest', 'heals');
+  /** @type {Map<string, Record<string, any>>} */
+  const sessionsById = new Map();
   if (fs.existsSync(healsDir)) {
     for (const name of fs.readdirSync(healsDir).filter((n) => n.endsWith('.json') && n !== 'ledger.json').sort()) {
       try {
         const s = JSON.parse(fs.readFileSync(path.join(healsDir, name), 'utf8'));
+        if (s?.sessionId) sessionsById.set(s.sessionId, s);
         counts.heals += 1;
-        const isEscalated = s.state === 'escalated' || Number(s.attemptsUsed || 0) >= 3;
+        const outcome = String(s.conclusion?.outcome || s.outcome || '').toLowerCase();
+        const isVerifiedConcluded =
+          s.state === 'verified' || (s.state === 'concluded' && (outcome === 'verified' || outcome === 'healed'));
+        const isEscalated =
+          s.state === 'escalated' ||
+          (s.state === 'concluded' && outcome === 'escalated') ||
+          (!isVerifiedConcluded && s.state !== 'discarded' && Number(s.attemptsUsed || 0) >= 3);
         const hasMisHeal =
           Array.isArray(s.attempts) && s.attempts.some((/** @type {any} */ a) => Boolean(a?.blockedReason));
         if (isEscalated) {
@@ -254,8 +239,8 @@ export function distillMemoryProposals(qaDir, options = {}) {
     }
   }
 
-  // 2. Scan `reports/defects/*.md`
-  /** @type {Array<{ defectId: string, title: string, specFile: string | null, errorSnippet: string }>} */
+  // 2. Scan `reports/defects/*.md` (enriched with sidecar `<id>.json` and heal session context)
+  /** @type {Array<{ defectId: string, title: string, specFile: string | null, errorSnippet: string, codeCorrelation?: Record<string, any> | null }>} */
   const defectRecords = [];
   const defectsDir = path.join(qaDir, 'reports', 'defects');
   if (fs.existsSync(defectsDir)) {
@@ -263,11 +248,23 @@ export function distillMemoryProposals(qaDir, options = {}) {
       const content = fs.readFileSync(path.join(defectsDir, name), 'utf8');
       counts.defects += 1;
       const defectId = name.replace(/\.md$/i, '');
+      let sidecar = null;
+      const sidecarPath = path.join(defectsDir, `${defectId}.json`);
+      if (fs.existsSync(sidecarPath)) {
+        try {
+          sidecar = JSON.parse(fs.readFileSync(sidecarPath, 'utf8'));
+        } catch {
+          sidecar = null;
+        }
+      }
+      const linkedSession = sessionsById.get(defectId) || null;
       const titleMatch = /^#\s+(.+)$/m.exec(content);
       const specMatch = /Spec(?:\s+File)?\*?\*?:\s*`?([^\n`]+)`?/i.exec(content);
       const title = redactSecrets(titleMatch ? titleMatch[1].trim() : defectId);
-      const specFile = specMatch ? specMatch[1].trim() : null;
-      defectRecords.push({ defectId, title, specFile, errorSnippet: redactSecrets(content.slice(0, 400)) });
+      const specFile = specMatch ? specMatch[1].trim() : sidecar?.specFile || linkedSession?.specFile || null;
+      const codeCorrelation = sidecar?.codeCorrelation || linkedSession?.codeCorrelation || null;
+      const errorSnippet = redactSecrets(String(sidecar?.errorSnippet || linkedSession?.errorSnippet || content).slice(0, 800));
+      defectRecords.push({ defectId, title, specFile, errorSnippet, codeCorrelation });
       signals.push({
         source: 'defect',
         text: `${title} ${content.slice(0, 600)}`,

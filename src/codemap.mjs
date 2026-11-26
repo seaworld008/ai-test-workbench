@@ -2,10 +2,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
+import { loadAndValidateAitestConfigFile } from './core/config.mjs';
 import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import {
+  DEFAULT_PER_REPO_SCAN_FILES,
   createRoutePatternMatcher,
   indexQaSpecs,
+  indexRepositoriesSource,
   indexRepositorySource,
   listCodeMapAdapters,
   matchRuntimeRouteToPattern,
@@ -13,16 +16,14 @@ import {
   registerCodeMapAdapter,
   unregisterCodeMapAdapter,
 } from './codemap/adapters.mjs';
-import {
-  mergeLivingCodeMap,
-  migrateCodeMapSchema,
-} from './codemap/merger.mjs';
+import { mergeLivingCodeMap, migrateCodeMapSchema } from './codemap/merger.mjs';
 import { generateLivingSystemMapMarkdown, syncImpactMapFromCodeMap } from './codemap/reporter.mjs';
 
 export {
   createRoutePatternMatcher,
   generateLivingSystemMapMarkdown,
   indexQaSpecs,
+  indexRepositoriesSource,
   indexRepositorySource,
   listCodeMapAdapters,
   matchRuntimeRouteToPattern,
@@ -44,21 +45,82 @@ function readJsonOptional(filePath) {
   }
 }
 
+/** @param {string | string[] | undefined} raw @param {string} baseDir @returns {string[]} */
+function parseRepoEntries(raw, baseDir) {
+  if (!raw) return [];
+  const items = Array.isArray(raw) ? raw : [raw];
+  /** @type {string[]} */
+  const out = [];
+  for (const item of items) {
+    const s = String(item || '').trim();
+    if (!s) continue;
+    const direct = path.isAbsolute(s) ? s : path.resolve(baseDir, s);
+    if (fs.existsSync(direct)) {
+      out.push(direct);
+    } else if (s.includes(',')) {
+      for (const part of s.split(',').map((p) => p.trim()).filter(Boolean)) {
+        out.push(path.isAbsolute(part) ? part : path.resolve(baseDir, part));
+      }
+    } else {
+      out.push(direct);
+    }
+  }
+  return [...new Set(out)];
+}
+
+/**
+ * Resolves `sourceRepos`, `maxScanFiles`, and `apiPrefixes` without mutating locked `aitest.config.json`.
+ * Priority: explicit `options.repos` / `options.repo` / `options.repoDir` -> `aitestConfig.sourceRepos` -> `existingMap.meta.sourceRepos` -> `[path.dirname(qaDir)]`.
+ * @param {string} qaDir
+ * @param {any} existingMap
+ * @param {{ repoDir?: string, repo?: string | string[], repos?: string[], maxScanFiles?: number, apiPrefixes?: string[] }} options
+ */
+function resolveCodeMapInputs(qaDir, existingMap, options) {
+  const defaultRoot = path.dirname(qaDir);
+  const cfgRes = loadAndValidateAitestConfigFile(qaDir);
+  const cfg = cfgRes.config;
+
+  const explicitRepos = [
+    ...parseRepoEntries(options.repos, process.cwd()),
+    ...parseRepoEntries(options.repo, process.cwd()),
+    ...parseRepoEntries(options.repoDir, process.cwd()),
+  ];
+  const cfgRepos = (cfg.sourceRepos || []).map((/** @type {string} */ entry) => {
+    if (path.isAbsolute(entry)) return entry;
+    const fromParent = path.resolve(defaultRoot, entry);
+    return fs.existsSync(fromParent) ? fromParent : path.resolve(qaDir, entry);
+  });
+  const metaRepos = Array.isArray(existingMap?.meta?.sourceRepos)
+    ? existingMap.meta.sourceRepos.filter((/** @type {string} */ p) => typeof p === 'string' && fs.existsSync(p))
+    : [];
+
+  const sourceRepos = explicitRepos.length > 0
+    ? [...new Set(explicitRepos)]
+    : cfgRepos.length > 0
+      ? [...new Set(cfgRepos)]
+      : metaRepos.length > 0
+        ? [...new Set(metaRepos)]
+        : [defaultRoot];
+
+  const maxScanFiles = options.maxScanFiles || cfg.maxScanFiles || existingMap?.meta?.maxScanFiles || DEFAULT_PER_REPO_SCAN_FILES;
+  const apiPrefixes = [...new Set([...(options.apiPrefixes || []), ...(cfg.apiPrefixes || [])])];
+  return { sourceRepos, maxScanFiles, apiPrefixes };
+}
+
 /**
  * Synchronizes `<qaDir>/knowledge/code-map.json`, `<qaDir>/knowledge/SYSTEM_MAP.md`, and `impact-map.json`.
- * Supports content-hash idempotency (`skipWriteIfUnchanged: true`, `K-06`).
  * @param {string} qaDir
- * @param {{ lang?: string, repoDir?: string, maxScanFiles?: number, skipWriteIfUnchanged?: boolean, syncImpact?: boolean | 'force' }} [options]
+ * @param {{ lang?: string, repoDir?: string, repo?: string | string[], repos?: string[], maxScanFiles?: number, apiPrefixes?: string[], skipWriteIfUnchanged?: boolean, syncImpact?: boolean | 'force' }} [options]
  */
 export function syncLivingCodeMap(qaDir, options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
-  const repoDir = options.repoDir || path.dirname(qaDir);
   const knowledgeDir = path.join(qaDir, 'knowledge');
   const codeMapPath = path.join(knowledgeDir, 'code-map.json');
   const systemMapMdPath = path.join(knowledgeDir, 'SYSTEM_MAP.md');
 
   const existingMap = readJsonOptional(codeMapPath);
-  const sourceIndex = indexRepositorySource(repoDir, { maxScanFiles: options.maxScanFiles });
+  const { sourceRepos, maxScanFiles, apiPrefixes } = resolveCodeMapInputs(qaDir, existingMap, options);
+  const sourceIndex = indexRepositoriesSource(sourceRepos, { maxScanFiles, apiPrefixes });
   const specIndex = indexQaSpecs(qaDir);
   const topology = readJsonOptional(path.join(qaDir, 'reports', 'system-topology.json'));
   const resultsJson = readJsonOptional(path.join(qaDir, 'reports', 'results.json'));
@@ -70,6 +132,9 @@ export function syncLivingCodeMap(qaDir, options = {}) {
     topology,
     resultsJson,
     perfReport,
+    sourceRepos,
+    maxScanFiles,
+    apiPrefixes,
   });
 
   if (options.skipWriteIfUnchanged && existingMap?.contentFingerprint === nextMap.contentFingerprint) {
@@ -108,7 +173,6 @@ export function syncLivingCodeMap(qaDir, options = {}) {
       }
     }
 
-    // Never silently mutate a governance-locked `impact-map.json`; write auto-union map to `knowledge/impact-map.auto.json` (`WU-04`)!
     if (impactLocked && options.syncImpact !== 'force') {
       const existing = readJsonOptional(impactPath);
       const manualCount = Array.isArray(existing?.rules) ? existing.rules.filter((/** @type {any} */ r) => !r.autoGenerated).length : 0;
@@ -122,10 +186,7 @@ export function syncLivingCodeMap(qaDir, options = {}) {
         autoImpactPath,
       };
     } else {
-      impactSync = {
-        ...syncImpactMapFromCodeMap(impactPath, nextMap),
-        autoImpactPath,
-      };
+      impactSync = { ...syncImpactMapFromCodeMap(impactPath, nextMap), autoImpactPath };
     }
   }
 
@@ -143,7 +204,7 @@ export function syncLivingCodeMap(qaDir, options = {}) {
 }
 
 /**
- * @param {{ lang?: string, target?: string, qaDir?: string, repo?: string, noSyncImpact?: boolean, force?: boolean, dryRun?: boolean, json?: boolean }} [options]
+ * @param {{ lang?: string, target?: string, qaDir?: string, repo?: string | string[], repos?: string[], maxScanFiles?: number, noSyncImpact?: boolean, force?: boolean, dryRun?: boolean, json?: boolean }} [options]
  * @returns {Promise<number>}
  */
 export async function runMapCommand(options = {}) {
@@ -157,19 +218,16 @@ export async function runMapCommand(options = {}) {
       { asJson, compatSpreadData: false }
     );
   };
-  if (!options.target) {
-    return failMap(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
-  }
+  if (!options.target) return failMap(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
 
   const qaDir = resolveQaDirectory(options.target, options.qaDir);
-  if (!qaDir) {
-    return failMap(lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
-  }
+  if (!qaDir) return failMap(lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
 
-  const repoDir = options.repo ? path.resolve(options.repo) : path.dirname(qaDir);
   const out = syncLivingCodeMap(qaDir, {
     lang,
-    repoDir,
+    repo: options.repo,
+    repos: options.repos,
+    maxScanFiles: options.maxScanFiles,
     syncImpact: !options.noSyncImpact,
     skipWriteIfUnchanged: options.force ? false : true,
   });

@@ -25,6 +25,14 @@ export const PARITY_TOOL = {
       target: { type: 'string', description: 'Target repository or QA directory' },
       baselineUrl: { type: 'string', description: 'Allowlisted non-production Baseline service base URL' },
       candidateUrl: { type: 'string', description: 'Allowlisted non-production Candidate service base URL (defaults to TEST_BASE_URL)' },
+      baselineApiUrl: { type: 'string', description: 'Optional Baseline API gateway URL when SPA and API use separate hosts' },
+      candidateApiUrl: { type: 'string', description: 'Optional Candidate API gateway URL when SPA and API use separate hosts' },
+      authHeaders: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional custom "Header: Value" strings for authenticated read-only parity requests',
+      },
+      noAuth: { type: 'boolean', description: 'Disable automatic playwright/.auth/user.json token & storageState injection' },
       corpus: { type: 'string', description: 'Optional relative path to sanitized JSONL/JSON traffic corpus inside QA workspace' },
       routes: { type: 'string', description: 'Optional comma-separated GET routes when no corpus file is provided' },
       privacyMode: {
@@ -73,6 +81,11 @@ export const PARITY_TOOL = {
     pushOpt(a, '--qa-dir', args.qaDir);
     pushOpt(a, '--baseline-url', args.baselineUrl);
     pushOpt(a, '--candidate-url', args.candidateUrl);
+    pushOpt(a, '--baseline-api-url', args.baselineApiUrl);
+    pushOpt(a, '--candidate-api-url', args.candidateApiUrl);
+    if (Array.isArray(args.authHeaders)) {
+      for (const h of args.authHeaders) pushOpt(a, '--auth-header', h);
+    }
     pushOpt(a, '--corpus', args.corpus);
     pushOpt(a, '--routes', args.routes);
     pushOpt(a, '--privacy-mode', args.privacyMode);
@@ -82,6 +95,7 @@ export const PARITY_TOOL = {
     pushBool(a, '--strict-byte-escape', args.strictByteEscape);
     pushBool(a, '--check-aria', args.checkAria);
     pushBool(a, '--allow-mutation', args.allowMutation);
+    pushBool(a, '--no-auth', args.noAuth);
     pushBool(a, '--dry-run', args.dryRun);
     return a;
   },

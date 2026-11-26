@@ -195,6 +195,7 @@ export function loadWorkbenchConfig(params) {
       allowMutation,
       egressMode,
       extraAllowedHosts: splitCsv(mergedEnv.TEST_EGRESS_EXTRA_HOSTS || mergedEnv.TEST_EGRESS_ALLOW_HOSTS),
+      abortThirdPartyHosts: splitCsv(mergedEnv.TEST_ABORT_THIRD_PARTY_HOSTS),
     }),
     env: Object.freeze({ ...mergedEnv }),
   });

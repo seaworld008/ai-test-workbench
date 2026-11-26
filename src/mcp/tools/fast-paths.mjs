@@ -177,6 +177,7 @@ export async function executeImpactReadOnlyFastPath(args, ctx) {
       qaDir: args.qaDir,
       base: args.base,
       files: explicitFiles,
+      repos: Array.isArray(args.repos) ? args.repos : undefined,
     });
     const safeData = redactStructuredValue(impact);
     ctx.onProgress?.({ progress: 100, message: `Impact mode=${safeData.mode}` });

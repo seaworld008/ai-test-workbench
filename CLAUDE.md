@@ -1,4 +1,4 @@
-# CLAUDE.md — Claude Code 工作区指引 / Workspace Guidance (v6.4.0)
+# CLAUDE.md — Claude Code 工作区指引 / Workspace Guidance (v6.5.0)
 
 > 默认中文说明见 [AGENTS.md](./AGENTS.md)、[docs/governance.md](./docs/governance.md) 与 [README.md](./README.md) · English guide: [AGENTS.en.md](./AGENTS.en.md) · [docs/governance.en.md](./docs/governance.en.md) · [README.en.md](./README.en.md)
 

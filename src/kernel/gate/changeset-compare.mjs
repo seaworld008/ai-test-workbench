@@ -1,0 +1,226 @@
+// @ts-check
+import {
+  hasRealNonScaffoldSpec,
+  isExecutablePlaywrightSpecPath,
+  isScaffoldOnlySpec,
+  parsePlaywrightProjectScopes,
+} from './changeset-helpers.mjs';
+import { analyzeSourceAst } from './parser.mjs';
+import { isCoveredByWaiver } from './policy.mjs';
+import { evaluateDiffRules } from './rules/index.mjs';
+
+/**
+ * Full-file AST semantic comparison between base source (e.g. `git show base:file`) and head source.
+ * Fail-closed (`outcome: 'blocked'`) if the TypeScript compiler is unavailable.
+ *
+ * @param {string} filePath
+ * @param {string} baseSource
+ * @param {string} headSource
+ * @param {{ assertFunctionNames?: string[], customMatchers?: Record<string, number>, activeWaivers?: any[], qaDir?: string, tsCompiler?: any, rulesConfig?: Record<string, any>, protectedGlobs?: string[], replayAllowedUpstreamHosts?: string[], lockstepRules?: any[], repoChangedFiles?: string[], extraRules?: any[], changesetContext?: any }} [options]
+ */
+export function compareSpecSourcesAst(filePath, baseSource, headSource, options = {}) {
+  const {
+    assertFunctionNames = ['expect*', 'assert*', 'verify*'],
+    customMatchers,
+    activeWaivers = [],
+    qaDir,
+    rulesConfig = {},
+    protectedGlobs,
+    replayAllowedUpstreamHosts,
+    lockstepRules,
+    repoChangedFiles,
+    extraRules,
+    changesetContext = null,
+  } = options;
+
+  /** @param {string} key */
+  const canWaive = (key) => Boolean(isCoveredByWaiver({ file: filePath, title: key }, activeWaivers, 'diff'));
+  const astOpts = {
+    assertFunctionNames,
+    customMatchers,
+    qaDir,
+    wrapInAsyncFn: false,
+    ...('tsCompiler' in options ? { tsCompiler: options.tsCompiler } : {}),
+  };
+
+  const baseSum = analyzeSourceAst(filePath, baseSource || '', astOpts);
+  const headSum = analyzeSourceAst(filePath, headSource || '', astOpts);
+
+  if (baseSum.compilerUnavailable || headSum.compilerUnavailable) {
+    const blockedMsg = `[Healer Diff Guard Blocked] ${filePath}: TypeScript compiler unavailable; fail-closed instead of skipping AST semantic diff guard.`;
+    return {
+      ok: false,
+      blocked: true,
+      outcome: 'blocked',
+      findings: [{ code: 'AITEST-BLOCKED', severity: 'error', file: filePath, message: blockedMsg }],
+      violations: [blockedMsg],
+    };
+  }
+
+  const evalRes = evaluateDiffRules({
+    file: filePath,
+    baseSum,
+    headSum,
+    baseSource: baseSource || '',
+    headSource: headSource || '',
+    canWaive,
+    activeWaivers,
+    assertFunctionNames,
+    rulesConfig,
+    protectedGlobs,
+    replayAllowedUpstreamHosts,
+    lockstepRules,
+    repoChangedFiles,
+    extraRules,
+    changesetContext,
+    isDiffTextMode: false,
+  });
+
+  return {
+    ok: evalRes.ok,
+    blocked: false,
+    outcome: evalRes.ok ? 'pass' : 'fail',
+    findings: evalRes.findings,
+    violations: evalRes.violations,
+  };
+}
+
+/**
+ * Checks whether branch-new specs/tests preserve at least one non-tautological `>= S2` assertion per test block (`WU-04`).
+ * Empty specs (`blocks.length === 0`) NEVER satisfy the floor (`v6.2.1`).
+ * @param {import('./parser.mjs').AstSummary | null | undefined} headSum
+ * @param {Set<string> | null} baselineTestTitles
+ * @param {boolean} isBaselineNewSpec
+ * @returns {boolean}
+ */
+function meetsBranchNewAssertionFloor(headSum, baselineTestTitles, isBaselineNewSpec) {
+  if (!headSum) return false;
+  const blocks = headSum.testBlocks || [];
+  if (isBaselineNewSpec) {
+    if (blocks.length === 0) return false;
+    return blocks.every((tb) => (tb.assertions || []).some((a) => !a.isTautology && a.tier >= 2));
+  }
+  if (!baselineTestTitles) return false;
+  const branchNewBlocks = blocks.filter((tb) => !baselineTestTitles.has(tb.title));
+  if (branchNewBlocks.length === 0) return true;
+  return branchNewBlocks.every((tb) => (tb.assertions || []).some((a) => !a.isTautology && a.tier >= 2));
+}
+
+/**
+ * Commit-level multi-file AST changeset comparison (`compareChangesetAst`).
+ * Parses every changed spec file in the commit together so rules can inspect cross-file context
+ * (e.g., tests split or moved across spec files in the same commit).
+ *
+ * @param {Array<{ filePath: string, baseSource: string, headSource: string, isBaselineNewSpec?: boolean, baselineTestTitles?: Set<string> | null }>} fileChanges
+ * @param {{ assertFunctionNames?: string[], customMatchers?: Record<string, number>, activeWaivers?: any[], qaDir?: string, tsCompiler?: any, rulesConfig?: Record<string, any>, protectedGlobs?: string[], replayAllowedUpstreamHosts?: string[], lockstepRules?: any[], repoChangedFiles?: string[], extraRules?: any[], enforceProjectScopes?: boolean }} [options]
+ */
+export function compareChangesetAst(fileChanges, options = {}) {
+  const {
+    assertFunctionNames = ['expect*', 'assert*', 'verify*'],
+    customMatchers,
+    activeWaivers = [],
+    qaDir,
+    rulesConfig = {},
+    protectedGlobs,
+    replayAllowedUpstreamHosts,
+    lockstepRules,
+    repoChangedFiles,
+    extraRules,
+    enforceProjectScopes = false,
+  } = options;
+
+  const astOpts = {
+    assertFunctionNames,
+    customMatchers,
+    qaDir,
+    wrapInAsyncFn: false,
+    ...('tsCompiler' in options ? { tsCompiler: options.tsCompiler } : {}),
+  };
+
+  const projectScopes = enforceProjectScopes && qaDir ? parsePlaywrightProjectScopes(qaDir) : null;
+  const parsedEntries = (fileChanges || []).map((entry) => {
+    const baseSum = analyzeSourceAst(entry.filePath, entry.baseSource || '', astOpts);
+    const headSum = analyzeSourceAst(entry.filePath, entry.headSource || '', astOpts);
+    const isBaselineNewSpec = Boolean(entry.isBaselineNewSpec);
+    const baselineTestTitles = entry.baselineTestTitles || null;
+    const exemptBranchNewRegression =
+      (isBaselineNewSpec || baselineTestTitles !== null) &&
+      meetsBranchNewAssertionFloor(headSum, baselineTestTitles, isBaselineNewSpec);
+    const isExecutableSpec =
+      !enforceProjectScopes || !qaDir
+        ? /\.(?:spec|test)\.[jt]sx?$/i.test(entry.filePath)
+        : isExecutablePlaywrightSpecPath(qaDir, entry.filePath, projectScopes);
+    return {
+      filePath: entry.filePath,
+      baseSource: entry.baseSource || '',
+      headSource: entry.headSource || '',
+      baseSum,
+      headSum,
+      isBaselineNewSpec,
+      baselineTestTitles,
+      exemptBranchNewRegression,
+      isExecutableSpec,
+    };
+  });
+
+  const changesetContext = {
+    entries: parsedEntries,
+  };
+
+  /** @type {Array<Record<string, any>>} */
+  const allFindings = [];
+  /** @type {string[]} */
+  const allViolations = [];
+  let blocked = false;
+
+  for (const entry of parsedEntries) {
+    if (entry.baseSum.compilerUnavailable || entry.headSum.compilerUnavailable) {
+      blocked = true;
+      const blockedMsg = `[Healer Diff Guard Blocked] ${entry.filePath}: TypeScript compiler unavailable; fail-closed instead of skipping AST semantic diff guard.`;
+      allFindings.push({ code: 'AITEST-BLOCKED', severity: 'error', file: entry.filePath, message: blockedMsg });
+      allViolations.push(blockedMsg);
+      continue;
+    }
+
+    const exemptScaffoldRemoval =
+      isScaffoldOnlySpec(entry.baseSum) &&
+      (entry.headSum.testBlocks || []).length === 0 &&
+      hasRealNonScaffoldSpec(qaDir, parsedEntries, entry.filePath, astOpts);
+
+    /** @param {string} key */
+    const canWaive = (key) => Boolean(isCoveredByWaiver({ file: entry.filePath, title: key }, activeWaivers, 'diff'));
+    const evalRes = evaluateDiffRules({
+      file: entry.filePath,
+      baseSum: entry.baseSum,
+      headSum: entry.headSum,
+      baseSource: entry.baseSource,
+      headSource: entry.headSource,
+      canWaive,
+      activeWaivers,
+      assertFunctionNames,
+      rulesConfig,
+      protectedGlobs,
+      replayAllowedUpstreamHosts,
+      lockstepRules,
+      repoChangedFiles,
+      extraRules,
+      changesetContext,
+      isBaselineNewSpec: entry.isBaselineNewSpec,
+      baselineTestTitles: entry.baselineTestTitles,
+      exemptBranchNewRegression: entry.exemptBranchNewRegression,
+      exemptScaffoldRemoval,
+      isDiffTextMode: false,
+    });
+    allFindings.push(...evalRes.findings);
+    allViolations.push(...evalRes.violations);
+  }
+
+  const uniqueViolations = [...new Set(allViolations)];
+  return {
+    ok: !blocked && uniqueViolations.length === 0,
+    blocked,
+    outcome: blocked ? 'blocked' : uniqueViolations.length === 0 ? 'pass' : 'fail',
+    findings: allFindings,
+    violations: uniqueViolations,
+  };
+}

@@ -34,7 +34,7 @@ export function generatePageAriaSpecMarkdown(pageInfo, lang = 'zh') {
 
 /**
  * @typedef {{ route: string, title?: string, breadcrumbs?: string[], tableHeaders?: string[], filterLabels?: string[], readonlyButtons?: string[], mutationButtons?: string[], tableRowCount?: number | null, archetype?: string, tabsExplored?: any[], dialogsExplored?: any[], a11y?: { hasMainLandmark?: boolean, hasH1?: boolean, inputsMissingLabel?: number } | null }} OverviewPage
- * @typedef {{ baseURL?: string, snapshotId?: string, exploredAt?: string, readOnly?: boolean, maxPages?: number, techStack?: string[], authKeyNames?: string[], authRequired?: boolean, loginRoute?: string | null, authRedirectCount?: number, authRedirectRoutes?: string[], firewallAbortedConsoleCount?: number, portals?: Array<{ name: string, mode?: string, id?: string | number, notes?: string }>, pages?: OverviewPage[], endpoints?: Array<{ method: string, endpoint: string, status: number }>, consoleErrors?: Array<{ route?: string, message?: string } | string>, serverErrors?: string[], envelopeErrors?: Array<{ route?: string, method?: string, endpoint?: string, httpStatus?: number, code?: number | null, message?: string | null }>, brokenRoutes?: Array<{ route: string, actualPath?: string | null, reason?: string }>, blockedWriteRequests?: Array<{ method?: string, endpoint?: string, reason?: string | null }>, blockedApiHosts?: string[] }} ExploreTopology
+ * @typedef {{ baseURL?: string, snapshotId?: string, exploredAt?: string, readOnly?: boolean, maxPages?: number, techStack?: string[], authKeyNames?: string[], authRequired?: boolean, loginRoute?: string | null, authRedirectCount?: number, authRedirectRoutes?: string[], firewallAbortedConsoleCount?: number, portals?: Array<{ name: string, mode?: string, id?: string | number, abortedReason?: string | null, notes?: string }>, pages?: OverviewPage[], endpoints?: Array<{ method: string, endpoint: string, status: number }>, consoleErrors?: Array<{ route?: string, message?: string } | string>, serverErrors?: string[], envelopeErrors?: Array<{ route?: string, method?: string, endpoint?: string, httpStatus?: number, code?: number | null, message?: string | null }>, brokenRoutes?: Array<{ route: string, actualPath?: string | null, reason?: string }>, blockedWriteRequests?: Array<{ method?: string, endpoint?: string, reason?: string | null, suspectedReadQueryPost?: boolean }>, blockedApiHosts?: string[] }} ExploreTopology
  * @param {ExploreTopology} topology
  * @param {string} [lang]
  */
@@ -48,6 +48,13 @@ export function generateSystemOverviewMarkdown(topology, lang = 'zh') {
   const envelopeErrors = Array.isArray(topology?.envelopeErrors) ? topology.envelopeErrors : [];
   const brokenRoutes = Array.isArray(topology?.brokenRoutes) ? topology.brokenRoutes : [];
   const blockedWrites = Array.isArray(topology?.blockedWriteRequests) ? topology.blockedWriteRequests : [];
+  const suspectedReadQueryPosts = [
+    ...new Set(
+      blockedWrites
+        .filter((b) => b?.suspectedReadQueryPost && b?.endpoint)
+        .map((b) => String(b.endpoint))
+    ),
+  ];
   const blockedApiHosts = Array.isArray(topology?.blockedApiHosts) ? topology.blockedApiHosts : [];
   const authRedirectRoutes = Array.isArray(topology?.authRedirectRoutes) ? topology.authRedirectRoutes : [];
   const authRedirectCount = Number(topology?.authRedirectCount || authRedirectRoutes.length || 0);
@@ -78,6 +85,11 @@ export function generateSystemOverviewMarkdown(topology, lang = 'zh') {
               `- **独立 API 网关提示**：拦截了跨源 XHR/Fetch 主机 ${blockedApiHosts.map((h) => `\`${h}\``).join(', ')}；若属于当前测试环境后端网关，请将其加入 \`TEST_ALLOWED_HOSTS\`。`,
             ]
           : []),
+        ...(suspectedReadQueryPosts.length > 0
+          ? [
+              `- **疑似只读查询型 POST 提示**：拦截了命名类似查询的 POST 端点 ${suspectedReadQueryPosts.slice(0, 6).map((ep) => `\`${ep}\``).join(', ')}；经人工确认无副作用后，可加入 \`EXPLORE_SAFE_POST_PATHS\` 放行深度探索。`,
+            ]
+          : []),
       ]
     : [
         `- **Target URL**: \`${topology.baseURL || 'unknown'}\``,
@@ -94,6 +106,11 @@ export function generateSystemOverviewMarkdown(topology, lang = 'zh') {
         ...(blockedApiHosts.length > 0
           ? [
               `- **Separated API Gateway Hint**: Blocked cross-origin XHR/fetch host(s) ${blockedApiHosts.map((h) => `\`${h}\``).join(', ')}; if these belong to your test API gateway, add them to \`TEST_ALLOWED_HOSTS\`.`,
+            ]
+          : []),
+        ...(suspectedReadQueryPosts.length > 0
+          ? [
+              `- **Suspected Read-Only Query POST Hint**: Blocked POST endpoint(s) matching read-query naming (${suspectedReadQueryPosts.slice(0, 6).map((ep) => `\`${ep}\``).join(', ')}); after human verification of zero side-effects, allow via \`EXPLORE_SAFE_POST_PATHS\`.`,
             ]
           : []),
       ];
@@ -227,6 +244,13 @@ export function resolveExploreEntryPath(baseURL, explicitEntryPath) {
 export function buildExploreCliSummary(topology, meta) {
   const tabsExploredCount = topology.pages.reduce((/** @type {number} */ s, /** @type {any} */ p) => s + (p.tabsExplored?.length || 0), 0);
   const dialogsExploredCount = topology.pages.reduce((/** @type {number} */ s, /** @type {any} */ p) => s + (p.dialogsExplored?.length || 0), 0);
+  const suspectedReadQueryPosts = [
+    ...new Set(
+      (topology.blockedWriteRequests || [])
+        .filter((/** @type {any} */ b) => b?.suspectedReadQueryPost && b?.endpoint)
+        .map((/** @type {any} */ b) => String(b.endpoint))
+    ),
+  ];
   const base = {
     ok: true,
     exitCode: 0,
@@ -240,6 +264,7 @@ export function buildExploreCliSummary(topology, meta) {
     dialogsExploredCount,
     endpointsCount: topology.endpoints.length,
     blockedWritesCount: topology.blockedWriteRequests.length,
+    suspectedReadQueryPosts,
     firewallAbortedConsoleCount: Number(topology.firewallAbortedConsoleCount || 0),
   };
   if (meta.dryRun) return { ...base, dryRun: true };

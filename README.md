@@ -1,6 +1,6 @@
 <div align="center">
 
-# AI Test Workbench (`v6.4.0`)
+# AI Test Workbench (`v6.5.0`)
 
 **面向 AI 编码 Agent 的独立可信验证内核与原生多协议 MCP 服务端**
 
@@ -49,7 +49,7 @@
 ```yaml
 jobs:
   aitest-t2-verdict:
-    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.4.0
+    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.5.0
     permissions:
       id-token: write
       attestations: write
@@ -65,7 +65,7 @@ jobs:
 离线校验 T2 证书（默认 fail-closed，缺签名 / 仅 T1 / 身份不符 / 改动 1 字节均非 0 退出且 `trustLevel <= T1`）：
 
 ```bash
-npx ai-test-workbench@6.4.0 attest verify \
+npx ai-test-workbench@6.5.0 attest verify \
   --file attestation.json \
   --bundle attestation.sigstore.json \
   --expect-repo owner/repo \
@@ -101,19 +101,19 @@ flowchart TB
 ### 环境要求与供应链安全
 
 - **Node.js**：`>= 22.12.0`（推荐 `24 LTS` 或 `26 LTS`）；支持 Windows PowerShell (`pwsh`)、macOS、Linux。
-- **零运行时依赖**：根包 `package.json` 不含运行时 `dependencies`；请始终锁定精确版本 `npx ai-test-workbench@6.4.0 <cmd>`、全局安装后的短命令 `aitw <cmd>`（`npm i -g ai-test-workbench@6.4.0`），或源码直连 `node tools/aitest.mjs <cmd>`。
+- **零运行时依赖**：根包 `package.json` 不含运行时 `dependencies`；请始终锁定精确版本 `npx ai-test-workbench@6.5.0 <cmd>`、全局安装后的短命令 `aitw <cmd>`（`npm i -g ai-test-workbench@6.5.0`），或源码直连 `node tools/aitest.mjs <cmd>`。
 
 ### 注册原生 MCP 服务端（`stdio` / `/mcp` / `/sse`）
 
 - **Claude Code**：
   ```bash
-  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.4.0 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
+  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.5.0 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
   ```
 - **Codex CLI**（`.codex/config.toml`）：
   ```toml
   [mcp_servers.ai-test-workbench]
   command = "npx"
-  args = ["--package=ai-test-workbench@6.4.0", "ai-test-workbench", "mcp-serve"]
+  args = ["--package=ai-test-workbench@6.5.0", "ai-test-workbench", "mcp-serve"]
   ```
 - **Cursor / Windsurf / Antigravity / Gemini CLI**（`.mcp.json`）：
   ```json
@@ -121,14 +121,14 @@ flowchart TB
     "mcpServers": {
       "ai-test-workbench": {
         "command": "npx",
-        "args": ["--package=ai-test-workbench@6.4.0", "ai-test-workbench", "mcp-serve"]
+        "args": ["--package=ai-test-workbench@6.5.0", "ai-test-workbench", "mcp-serve"]
       }
     }
   }
   ```
 - **Streamable HTTP (`/mcp`) + Legacy SSE (`/sse`)**：
   ```bash
-  npx ai-test-workbench@6.4.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
+  npx ai-test-workbench@6.5.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
   ```
 
 ### 官方 MCP 协议合规性与三传输验证
@@ -142,21 +142,21 @@ flowchart TB
 
 ```bash
 # 1. 体检、初始化与模板安全升级
-npx ai-test-workbench@6.4.0 doctor
-npx ai-test-workbench@6.4.0 init --name my-app --target "/path/to/your-repo" --loop codex
-npx ai-test-workbench@6.4.0 upgrade --target "/path/to/your-repo" --dry-run
+npx ai-test-workbench@6.5.0 doctor
+npx ai-test-workbench@6.5.0 init --name my-app --target "/path/to/your-repo" --loop codex
+npx ai-test-workbench@6.5.0 upgrade --target "/path/to/your-repo" --dry-run
 
 # 2. 登录态捕获 -> 只读探索 -> 代码地图 -> 锁版本外部 MCP
-npx ai-test-workbench@6.4.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
-npx ai-test-workbench@6.4.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
-npx ai-test-workbench@6.4.0 map --target "/path/to/your-repo"
-npx ai-test-workbench@6.4.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.4.0 mcp doctor --target "/path/to/your-repo" --lock
+npx ai-test-workbench@6.5.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
+npx ai-test-workbench@6.5.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
+npx ai-test-workbench@6.5.0 map --target "/path/to/your-repo"
+npx ai-test-workbench@6.5.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.5.0 mcp doctor --target "/path/to/your-repo" --lock
 
 # 3. 性能 SLO、双目标差分回归、记忆蒸馏清扫与提交前一键变更判决
-npx ai-test-workbench@6.4.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
-npx ai-test-workbench@6.4.0 parity --target "/path/to/your-repo" --baseline-url http://127.0.0.1:4100 --candidate-url http://127.0.0.1:4200 --privacy-mode shape-only
-npx ai-test-workbench@6.4.0 learn --target "/path/to/your-repo" --action distill --json
-npx ai-test-workbench@6.4.0 verify-change --target "/path/to/your-repo" --base origin/main
+npx ai-test-workbench@6.5.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
+npx ai-test-workbench@6.5.0 parity --target "/path/to/your-repo" --baseline-url http://127.0.0.1:4100 --candidate-url http://127.0.0.1:4200 --privacy-mode shape-only
+npx ai-test-workbench@6.5.0 learn --target "/path/to/your-repo" --action distill --json
+npx ai-test-workbench@6.5.0 verify-change --target "/path/to/your-repo" --base origin/main
 ```
 
 本机克隆全量自检（零外部服务器）：

@@ -132,7 +132,7 @@ export const STATEFUL_TOOLS = [
     },
     inMemory: true,
     isReadOnly: (args) => args.action !== 'cancel',
-    execute: async (args, { jobManager, sessionId }) => {
+    execute: async (args, { jobManager, sessionId, onProgress }) => {
       const action = String(args.action);
       if (action === 'status') {
         const status = jobManager.getPublicStatus(args.jobId, sessionId);
@@ -152,20 +152,28 @@ export const STATEFUL_TOOLS = [
       }
 
       if (action === 'result') {
-        const waited = await jobManager.waitForResult(args.jobId, Number(args.waitMs || 0), sessionId);
+        const waited = await jobManager.waitForResult(args.jobId, Number(args.waitMs || 0), sessionId, { onProgress });
         if (!waited) {
           return { ok: false, exitCode: 1, summary: `Unknown jobId "${args.jobId}"`, data: { jobId: args.jobId }, nextActions: [] };
         }
         const stillRunning = waited.status === 'running';
+        const isCancelled = waited.status === 'cancelled';
         const jobOk = stillRunning || waited.status === 'succeeded';
         return {
           ok: jobOk,
+          ...(isCancelled ? { outcome: 'cancelled', recoverable: true } : {}),
           exitCode: stillRunning ? 0 : waited.exitCode ?? 1,
           summary: stillRunning
             ? `Job ${waited.jobId} is still running (${waited.lastMessage})`
-            : `Job ${waited.jobId} finished with status=${waited.status} (exitCode=${waited.exitCode})`,
+            : isCancelled
+              ? `Job ${waited.jobId} was cancelled (exitCode=${waited.exitCode})`
+              : `Job ${waited.jobId} finished with status=${waited.status} (exitCode=${waited.exitCode})`,
           data: waited,
-          nextActions: stillRunning ? [`Poll aitest_job(action="result", jobId="${waited.jobId}", waitMs=5000) again.`] : [],
+          nextActions: stillRunning
+            ? [`Poll aitest_job(action="result", jobId="${waited.jobId}", waitMs=5000) again.`]
+            : isCancelled
+              ? ['Job was cancelled by caller; start a new job when ready.']
+              : [],
         };
       }
 

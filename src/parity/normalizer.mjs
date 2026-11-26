@@ -11,6 +11,7 @@ import { loadAitestConfig } from '../kernel/gate-kernel.mjs';
  *   path: string;
  *   headers: Record<string, string>;
  *   body: unknown;
+ *   expectJson?: boolean;
  *   featureCohort: string[];
  * }} ParityRequestItem
  */
@@ -60,6 +61,9 @@ export function resolveParityPolicy(qaDir, overrides = {}) {
     maxLatencyRatio: Number.isFinite(maxLatencyRatio) ? maxLatencyRatio : null,
     maxTtftRatio: Number.isFinite(maxTtftRatio) ? maxTtftRatio : null,
     privacyMode,
+    authStorageKeys: Array.isArray(cfgParity.authStorageKeys) ? cfgParity.authStorageKeys : [],
+    failOnAuthError: cfgParity.failOnAuthError !== false,
+    apiPrefixes: Array.isArray(cfg.apiPrefixes) ? cfg.apiPrefixes : [],
   };
 }
 
@@ -84,6 +88,7 @@ function parseCorpusFile(filePath) {
       path: String(item.path || item.url || '/'),
       headers: item.headers && typeof item.headers === 'object' ? item.headers : {},
       body: item.body ?? null,
+      ...(item.expectJson ? { expectJson: true } : {}),
       featureCohort: Array.isArray(item.featureCohort) ? item.featureCohort.map(String) : ['corpus'],
     }));
 }
@@ -190,6 +195,7 @@ export function buildParityMarkdown(report, lang = 'zh') {
     `- **Baseline**: \`${report.baselineUrl}\` · **Candidate**: \`${report.candidateUrl}\``,
     `- **Privacy Mode**: \`${report.privacyMode}\` · **Strict Byte Escape**: \`${Boolean(report.strictByteEscape)}\` · **Elapsed**: \`${report.elapsedMs}ms\``,
     `- **Parity Match Rate**: **${report.parityPct}%** (\`${report.matchedSamples}/${report.totalSamples}\`, mismatched=\`${report.mismatchedSamples}\`, clusters=\`${report.clusters.length}\`)`,
+    ...(report.blockerKind ? [`- **Blocked**: \`${report.blockerKind}\` — ${report.error || ''}`] : []),
     '',
   ];
 

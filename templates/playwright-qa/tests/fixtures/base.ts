@@ -10,6 +10,7 @@ import {
   type APIResponse,
   type BrowserContext,
   type Page,
+  type TestInfo,
 } from '@playwright/test';
 import {
   MAX_REDIRECT_HOPS,
@@ -19,9 +20,11 @@ import {
   computeNextRedirectRequest,
   DEFAULT_BLOCKED_ENDPOINTS,
   DEFAULT_SAFE_WRITE_PATHS,
+  loadMergedQaEnv,
   parseCsvList,
   parseLowerCsvList,
   resolveDefaultMutationPolicy,
+  shouldAbortThirdPartyRequest,
 } from '../../support/target-guard.mjs';
 import {
   extractOpenApiResponseSchema,
@@ -29,12 +32,28 @@ import {
 } from '../../support/schema-validator.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const sessionAuthFile = path.resolve(__dirname, '..', '..', 'playwright', '.auth', 'session.json');
+const qaRootDir = path.resolve(__dirname, '..', '..');
+const sessionAuthFile = path.resolve(qaRootDir, 'playwright', '.auth', 'session.json');
+const aitestConfigFile = path.resolve(qaRootDir, 'aitest.config.json');
 
 /**
  * Locked WCAG 2.0 / 2.1 / 2.2 Level A & AA axe-core tag set (`P-03`).
  */
 export const WCAG_AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] as const;
+
+const TRACE_HEADER_NAMES = [
+  'traceparent',
+  'x-trace-id',
+  'trace-id',
+  'x-correlation-id',
+  'x-request-id',
+  'tid',
+  'sw8',
+  'eagleeye-traceid',
+  'x-b3-traceid',
+] as const;
+
+const MAX_TRACE_IDS = 24;
 
 export type WorkbenchOptions = {
   failOnPageError: boolean;
@@ -45,6 +64,21 @@ type InternalFixtures = {
   workbenchGuard: void;
 };
 
+type TraceProtocol = 'w3c' | 'sw8' | 'all';
+
+type TestTraceState = {
+  traceId: string;
+  spanId: string;
+  traceparent: string;
+  traceProtocol: TraceProtocol;
+  observedTraceIds: string[];
+  seenTraceIds: Set<string>;
+  recordResponseHeaders: (headers: Record<string, string | undefined>) => void;
+  buildTraceIds: (sw8Used: string | null) => string[];
+};
+
+const testTraceStateMap = new WeakMap<TestInfo, TestTraceState>();
+
 function compileOptionalRegexList(raw: string | undefined): RegExp[] {
   if (!raw || !raw.trim()) return [];
   return raw
@@ -54,9 +88,103 @@ function compileOptionalRegexList(raw: string | undefined): RegExp[] {
     .map((pattern) => new RegExp(pattern, 'i'));
 }
 
-function buildRequestGuardConfig(baseURL: string | undefined) {
+function resolveTraceProtocol(mergedEnv: Record<string, string | undefined>): TraceProtocol {
+  const fromEnv = String(mergedEnv.TEST_TRACE_PROTOCOL || '').trim().toLowerCase();
+  if (fromEnv === 'w3c' || fromEnv === 'sw8' || fromEnv === 'all') {
+    return fromEnv;
+  }
+  if (fs.existsSync(aitestConfigFile)) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(aitestConfigFile, 'utf8')) as {
+        observability?: { traceProtocol?: string };
+      };
+      const fromCfg = String(cfg?.observability?.traceProtocol || '').trim().toLowerCase();
+      if (fromCfg === 'w3c' || fromCfg === 'sw8' || fromCfg === 'all') {
+        return fromCfg;
+      }
+    } catch {
+      // ignore malformed config here; gate checks it separately
+    }
+  }
+  return 'w3c';
+}
+
+function buildSkyWalkingSw8Header(traceId: string, spanId: string, targetHost: string): string {
+  const b64 = (v: string) => Buffer.from(v, 'utf8').toString('base64');
+  return [
+    '1',
+    b64(traceId),
+    b64(`${traceId}.${spanId}`),
+    '0',
+    b64('ai-test-workbench'),
+    b64('playwright-qa'),
+    b64('/'),
+    b64(targetHost || 'localhost'),
+  ].join('-');
+}
+
+function getOrCreateTraceState(testInfo: TestInfo, mergedEnv: Record<string, string | undefined>): TestTraceState {
+  const existing = testTraceStateMap.get(testInfo);
+  if (existing) return existing;
+
+  const traceId = crypto.randomBytes(16).toString('hex');
+  const spanId = crypto.randomBytes(8).toString('hex');
+  const traceparent = `00-${traceId}-${spanId}-01`;
+  const traceProtocol = resolveTraceProtocol(mergedEnv);
+  const observedTraceIds: string[] = [];
+  const seenTraceIds = new Set<string>();
+
+  const state: TestTraceState = {
+    traceId,
+    spanId,
+    traceparent,
+    traceProtocol,
+    observedTraceIds,
+    seenTraceIds,
+    recordResponseHeaders(headers) {
+      if (!headers || typeof headers !== 'object') return;
+      const lowerHeaders: Record<string, string> = {};
+      for (const [k, v] of Object.entries(headers)) {
+        if (typeof v === 'string' && v.trim()) {
+          lowerHeaders[k.toLowerCase()] = v.trim();
+        }
+      }
+      for (const hName of TRACE_HEADER_NAMES) {
+        const hVal = lowerHeaders[hName];
+        if (!hVal) continue;
+        const entry = `${hName}:${hVal.slice(0, 128)}`;
+        if (!seenTraceIds.has(entry) && observedTraceIds.length < MAX_TRACE_IDS) {
+          seenTraceIds.add(entry);
+          observedTraceIds.push(entry);
+        }
+      }
+    },
+    buildTraceIds(sw8Used) {
+      const combined = [...observedTraceIds];
+      const fallbackTp = `traceparent:${traceparent}`;
+      if (combined.length < MAX_TRACE_IDS && !seenTraceIds.has(fallbackTp)) {
+        combined.push(fallbackTp);
+      }
+      if (sw8Used && combined.length < MAX_TRACE_IDS) {
+        const fallbackSw8 = `sw8:${sw8Used}`;
+        if (!seenTraceIds.has(fallbackSw8)) {
+          combined.push(fallbackSw8);
+        }
+      }
+      return combined.slice(0, MAX_TRACE_IDS);
+    },
+  };
+
+  testTraceStateMap.set(testInfo, state);
+  return state;
+}
+
+function buildRequestGuardConfig(
+  baseURL: string | undefined,
+  envMap: Record<string, string | undefined>
+) {
   let defaultAllowedHosts = ['127.0.0.1', 'localhost'];
-  if (baseURL && process.env.TEST_ALLOWED_HOSTS === undefined) {
+  if (baseURL && envMap.TEST_ALLOWED_HOSTS === undefined) {
     try {
       const bp = new URL(baseURL);
       const h = bp.hostname.toLowerCase();
@@ -68,22 +196,22 @@ function buildRequestGuardConfig(baseURL: string | undefined) {
     }
   }
   const allowedHosts =
-    process.env.TEST_ALLOWED_HOSTS !== undefined
-      ? parseLowerCsvList(process.env.TEST_ALLOWED_HOSTS)
+    envMap.TEST_ALLOWED_HOSTS !== undefined
+      ? parseLowerCsvList(envMap.TEST_ALLOWED_HOSTS)
       : defaultAllowedHosts;
-  const allowedOrigins = parseLowerCsvList(process.env.TEST_ALLOWED_ORIGINS ?? '');
-  const deniedOrigins = parseLowerCsvList(process.env.TEST_DENIED_ORIGINS ?? '');
-  const extraEgressHosts = parseLowerCsvList(process.env.TEST_EGRESS_EXTRA_HOSTS ?? '');
-  const egressMode = (process.env.TEST_EGRESS_MODE ?? 'allowlist').trim().toLowerCase();
+  const allowedOrigins = parseLowerCsvList(envMap.TEST_ALLOWED_ORIGINS ?? '');
+  const deniedOrigins = parseLowerCsvList(envMap.TEST_DENIED_ORIGINS ?? '');
+  const extraEgressHosts = parseLowerCsvList(envMap.TEST_EGRESS_EXTRA_HOSTS ?? envMap.TEST_EGRESS_ALLOW_HOSTS ?? '');
+  const egressMode = (envMap.TEST_EGRESS_MODE ?? 'allowlist').trim().toLowerCase();
   const blockedRules = compileBlockedEndpointRules(
-    process.env.TEST_BLOCKED_ENDPOINTS ?? DEFAULT_BLOCKED_ENDPOINTS
+    envMap.TEST_BLOCKED_ENDPOINTS ?? DEFAULT_BLOCKED_ENDPOINTS
   );
-  const mutationPolicy = resolveDefaultMutationPolicy(process.env as Record<string, string | undefined>, baseURL);
+  const mutationPolicy = resolveDefaultMutationPolicy(envMap, baseURL);
   const strictReadonly = mutationPolicy.strictReadonly;
   const safeWritePaths = parseCsvList(
-    process.env.TEST_SAFE_WRITE_PATHS ?? DEFAULT_SAFE_WRITE_PATHS
+    envMap.TEST_SAFE_WRITE_PATHS ?? DEFAULT_SAFE_WRITE_PATHS
   );
-  const allowGraphqlQuery = process.env.TEST_ALLOW_GRAPHQL_QUERY === '1';
+  const allowGraphqlQuery = envMap.TEST_ALLOW_GRAPHQL_QUERY === '1';
 
   return {
     baseURL,
@@ -99,6 +227,51 @@ function buildRequestGuardConfig(baseURL: string | undefined) {
   };
 }
 
+function isAllowedTraceTarget(
+  rawUrl: string,
+  guardConfig: ReturnType<typeof buildRequestGuardConfig>
+): { allowed: boolean; targetHost: string } {
+  try {
+    const parsed = new URL(rawUrl, guardConfig.baseURL || 'http://localhost');
+    const origin = parsed.origin.toLowerCase();
+    const host = parsed.hostname.toLowerCase();
+    const hostPort = parsed.host.toLowerCase();
+    const baseOrigin = guardConfig.baseURL ? new URL(guardConfig.baseURL).origin.toLowerCase() : null;
+    const allowed =
+      Boolean(baseOrigin && origin === baseOrigin) ||
+      guardConfig.allowedOrigins.includes(origin) ||
+      guardConfig.allowedHosts.includes(host) ||
+      guardConfig.allowedHosts.includes(hostPort) ||
+      guardConfig.extraEgressHosts.includes(host) ||
+      guardConfig.extraEgressHosts.includes(hostPort);
+    return { allowed, targetHost: hostPort || 'localhost' };
+  } catch {
+    return { allowed: false, targetHost: 'localhost' };
+  }
+}
+
+function injectTraceHeaders(
+  headers: Record<string, string>,
+  rawUrl: string,
+  guardConfig: ReturnType<typeof buildRequestGuardConfig>,
+  traceState: TestTraceState
+): string | null {
+  const hasKey = (name: string) =>
+    Object.keys(headers).some((k) => k.toLowerCase() === name.toLowerCase());
+  const target = isAllowedTraceTarget(rawUrl, guardConfig);
+  if (!target.allowed) return null;
+
+  if (!hasKey('traceparent')) {
+    headers.traceparent = traceState.traceparent;
+  }
+  if ((traceState.traceProtocol === 'sw8' || traceState.traceProtocol === 'all') && !hasKey('sw8')) {
+    const sw8 = buildSkyWalkingSw8Header(traceState.traceId, traceState.spanId, target.targetHost);
+    headers.sw8 = sw8;
+    return sw8;
+  }
+  return null;
+}
+
 function serializeBodyOption(dataOpt: unknown): string | null {
   if (dataOpt === undefined || dataOpt === null) return null;
   if (typeof dataOpt === 'string') return dataOpt;
@@ -112,7 +285,7 @@ function serializeBodyOption(dataOpt: unknown): string | null {
 function wrapApiRequestContext(
   rawRequest: APIRequestContext,
   guardConfig: ReturnType<typeof buildRequestGuardConfig>,
-  traceparentValue?: string
+  traceState: TestTraceState
 ): APIRequestContext {
   const interceptedMethods = new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'fetch']);
 
@@ -132,9 +305,7 @@ function wrapApiRequestContext(
         const initialHeaders: Record<string, string> = {
           ...((options?.headers as Record<string, string> | undefined) || {}),
         };
-        if (traceparentValue && !initialHeaders.traceparent && !initialHeaders.Traceparent) {
-          initialHeaders.traceparent = traceparentValue;
-        }
+        injectTraceHeaders(initialHeaders, rawUrl, guardConfig, traceState);
 
         let curMethod = initialMethod;
         let curUrl = rawUrl;
@@ -158,6 +329,7 @@ function wrapApiRequestContext(
           const status = response.status();
           const location = response.headers()?.location;
           if (!REDIRECT_STATUSES.has(status) || !location) {
+            traceState.recordResponseHeaders(response.headers());
             return response;
           }
           const resolvedBase = new URL(curUrl, guardConfig.baseURL || 'http://localhost').toString();
@@ -188,6 +360,7 @@ function wrapApiRequestContext(
         if (REDIRECT_STATUSES.has(finalStatus) && response.headers()?.location) {
           throw new Error(`[AI Test Workbench Request Guard] Redirect chain exceeded ${MAX_REDIRECT_HOPS} hops`);
         }
+        traceState.recordResponseHeaders(response.headers());
         return response;
       };
     },
@@ -201,12 +374,12 @@ function wrapApiRequestContext(
 function guardRequestPropertyOnObject(
   owner: BrowserContext | Page,
   guardConfig: ReturnType<typeof buildRequestGuardConfig>,
-  traceparentValue: string
+  traceState: TestTraceState
 ): void {
   try {
     const rawReq = owner.request;
     if (!rawReq) return;
-    const wrapped = wrapApiRequestContext(rawReq, guardConfig, traceparentValue);
+    const wrapped = wrapApiRequestContext(rawReq, guardConfig, traceState);
     Object.defineProperty(owner, 'request', {
       configurable: true,
       enumerable: true,
@@ -233,24 +406,15 @@ function loadSavedSessionStorage(): { origin: string; entries: Array<[string, st
   }
 }
 
-function generateW3cTraceContext(): { traceId: string; spanId: string; traceparent: string } {
-  const traceId = crypto.randomBytes(16).toString('hex');
-  const spanId = crypto.randomBytes(8).toString('hex');
-  return {
-    traceId,
-    spanId,
-    traceparent: `00-${traceId}-${spanId}-01`,
-  };
-}
-
 export const test = base.extend<WorkbenchOptions & InternalFixtures>({
   failOnPageError: [process.env.FAIL_ON_PAGEERROR !== '0', { option: true }],
   failOnServerError: [process.env.FAIL_ON_SERVER_5XX !== '0', { option: true }],
 
-  request: async ({ request, baseURL }, use) => {
-    const guardConfig = buildRequestGuardConfig(baseURL);
-    const trace = generateW3cTraceContext();
-    const wrapped = wrapApiRequestContext(request, guardConfig, trace.traceparent);
+  request: async ({ request, baseURL }, use, testInfo) => {
+    const mergedEnv = loadMergedQaEnv(qaRootDir, process.env as Record<string, string | undefined>);
+    const guardConfig = buildRequestGuardConfig(baseURL, mergedEnv);
+    const traceState = getOrCreateTraceState(testInfo, mergedEnv);
+    const wrapped = wrapApiRequestContext(request, guardConfig, traceState);
     await use(wrapped);
   },
 
@@ -263,11 +427,32 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
         );
       }
 
-      const trace = generateW3cTraceContext();
-      const guardConfig = buildRequestGuardConfig(baseURL);
+      const mergedEnv = loadMergedQaEnv(qaRootDir, process.env as Record<string, string | undefined>);
+      const abortEnv = {
+        ...mergedEnv,
+        ...(baseURL ? { TEST_BASE_URL: mergedEnv.TEST_BASE_URL || baseURL } : {}),
+      };
+      const traceState = getOrCreateTraceState(testInfo, mergedEnv);
+      const guardConfig = buildRequestGuardConfig(baseURL, mergedEnv);
+      const preserveIdleTimestamps = mergedEnv.TEST_PRESERVE_IDLE_TIMESTAMPS === '1';
 
       // Pre-install buffered PerformanceObserver for real LCP / CLS / INP collection (`P-01`)
-      await context.addInitScript(() => {
+      // and refresh client-side numeric idle timestamps unless TEST_PRESERVE_IDLE_TIMESTAMPS=1
+      await context.addInitScript(({ preserveIdle }) => {
+        if (!preserveIdle) {
+          try {
+            const nowStr = String(Date.now());
+            for (const key of ['lastRecordTime', 'lastActiveTime', 'lastActivityTime']) {
+              const cur = window.localStorage.getItem(key);
+              if (cur !== null && /^\d{10,13}$/.test(cur.trim())) {
+                window.localStorage.setItem(key, nowStr);
+              }
+            }
+          } catch {
+            // ignore opaque storage origins
+          }
+        }
+
         const w = window as unknown as {
           __aitestVitals?: { lcpMs: number | null; cls: number; inpMs: number | null };
         };
@@ -304,7 +489,7 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
         } catch {
           // unsupported entry type
         }
-      });
+      }, { preserveIdle: preserveIdleTimestamps });
 
       // Restore captured sessionStorage for interactive SMS/SSO logins when running e2e/seed
       if (testInfo.project.name === 'e2e' || testInfo.project.name === 'seed') {
@@ -323,42 +508,19 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
         }
       }
 
-      const ignorePageErrorPatterns = compileOptionalRegexList(process.env.TEST_IGNORE_PAGEERROR_PATTERNS);
-      const ignore5xxPatterns = compileOptionalRegexList(process.env.TEST_IGNORE_5XX_PATTERNS);
+      const ignorePageErrorPatterns = compileOptionalRegexList(mergedEnv.TEST_IGNORE_PAGEERROR_PATTERNS);
+      const ignore5xxPatterns = compileOptionalRegexList(mergedEnv.TEST_IGNORE_5XX_PATTERNS);
 
       const blockedRequests: string[] = [];
       const pageErrors: string[] = [];
       const serverErrors: string[] = [];
-      const traceIdsSet = new Set<string>([`traceparent:${trace.traceparent}`]);
+      let sw8Used: string | null = null;
       const startedAtIso = new Date().toISOString();
 
-      const TRACE_HEADER_NAMES = [
-        'traceparent',
-        'x-trace-id',
-        'x-request-id',
-        'sw8',
-        'eagleeye-traceid',
-        'x-b3-traceid',
-      ];
-
-      const baseOrigin = baseURL ? new URL(baseURL).origin.toLowerCase() : null;
-      const isWatched5xxOrigin = (url: string): boolean => {
-        try {
-          const parsed = new URL(url);
-          const origin = parsed.origin.toLowerCase();
-          const host = parsed.hostname.toLowerCase();
-          const hostPort = parsed.host.toLowerCase();
-          if (baseOrigin && origin === baseOrigin) return true;
-          if (guardConfig.allowedOrigins.includes(origin)) return true;
-          if (guardConfig.allowedHosts.includes(host) || guardConfig.allowedHosts.includes(hostPort)) return true;
-          return false;
-        } catch {
-          return false;
-        }
-      };
+      const isWatched5xxOrigin = (url: string): boolean => isAllowedTraceTarget(url, guardConfig).allowed;
 
       const attachPageRuntimeGuards = (targetPage: Page) => {
-        guardRequestPropertyOnObject(targetPage, guardConfig, trace.traceparent);
+        guardRequestPropertyOnObject(targetPage, guardConfig, traceState);
         targetPage.on('pageerror', (err) => {
           const msg = err?.stack || err?.message || String(err);
           if (!ignorePageErrorPatterns.some((re) => re.test(msg))) {
@@ -366,13 +528,7 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
           }
         });
         targetPage.on('response', (res) => {
-          const headers = res.headers();
-          for (const hName of TRACE_HEADER_NAMES) {
-            const hVal = headers[hName];
-            if (hVal && traceIdsSet.size < 20) {
-              traceIdsSet.add(`${hName}:${hVal.slice(0, 128)}`);
-            }
-          }
+          traceState.recordResponseHeaders(res.headers());
 
           const status = res.status();
           if (status < 500) return;
@@ -386,7 +542,7 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
       };
 
       // Guard ALL pages/frames/popups in BrowserContext (`E-03`)
-      guardRequestPropertyOnObject(context, guardConfig, trace.traceparent);
+      guardRequestPropertyOnObject(context, guardConfig, traceState);
       attachPageRuntimeGuards(page);
       context.on('page', (popupPage) => {
         attachPageRuntimeGuards(popupPage);
@@ -405,7 +561,7 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
         });
       }
 
-      // Guard ALL HTTP(S) requests & redirect hops in BrowserContext + inject W3C `traceparent` (`D-02`, `S-03`, `WU-03`, v6.2.1)
+      // Guard ALL HTTP(S) requests & redirect hops in BrowserContext + inject W3C/sw8 trace headers (`D-02`, `S-03`, `WU-03`)
       const redirectHopTracker = new Map<string, { depth: number; ts: number }>();
       await context.route('**/*', async (route) => {
         const req = route.request();
@@ -413,10 +569,15 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
         const curUrl = req.url();
         const curBodyText = req.postData() || null;
         const resourceType = req.resourceType();
-        const curHeaders: Record<string, string> = { ...req.headers() };
-        if (!curHeaders.traceparent) {
-          curHeaders.traceparent = trace.traceparent;
+
+        if (shouldAbortThirdPartyRequest(curUrl, abortEnv)) {
+          await route.abort('blockedbyclient');
+          return;
         }
+
+        const curHeaders: Record<string, string> = { ...req.headers() };
+        const injectedSw8 = injectTraceHeaders(curHeaders, curUrl, guardConfig, traceState);
+        if (injectedSw8 && !sw8Used) sw8Used = injectedSw8;
 
         const initCheck = checkOutgoingRequestSafety(curMethod, curUrl, {
           ...guardConfig,
@@ -483,10 +644,12 @@ export const test = base.extend<WorkbenchOptions & InternalFixtures>({
 
       const finishedAtIso = new Date().toISOString();
       const traceContext = {
-        injectedTraceId: trace.traceId,
-        traceparent: trace.traceparent,
+        injectedTraceId: traceState.traceId,
+        traceparent: traceState.traceparent,
+        ...(sw8Used ? { sw8: sw8Used } : {}),
         timeWindow: { startedAt: startedAtIso, finishedAt: finishedAtIso },
-        traceIds: [...traceIdsSet],
+        observedTraceIds: [...traceState.observedTraceIds],
+        traceIds: traceState.buildTraceIds(sw8Used),
       };
 
       if (blockedRequests.length > 0 || pageErrors.length > 0 || serverErrors.length > 0) {
@@ -545,7 +708,7 @@ export async function expectPerformanceBudget(
       __aitestVitals?: { lcpMs: number | null; cls: number; inpMs: number | null };
     };
     let lcpMs = w.__aitestVitals?.lcpMs ?? null;
-    let cls = w.__aitestVitals?.cls ?? 0;
+    const cls = w.__aitestVitals?.cls ?? 0;
 
     if (lcpMs === null) {
       await new Promise<void>((resolve) => {
@@ -610,6 +773,12 @@ export async function expectAccessible(
   expect(summary, `Automated WCAG 2.0/2.1/2.2 A/AA axe violations:\n${summary.join('\n')}`).toEqual([]);
 }
 
+export interface ContractVerifiableResponse {
+  status(): number;
+  url(): string;
+  json(): Promise<unknown>;
+}
+
 export type ContractSchemaSpec<T> =
   | ((body: T) => void)
   | { schema: Record<string, unknown>; validator?: (body: T) => void }
@@ -619,7 +788,7 @@ export type ContractSchemaSpec<T> =
  * Validates HTTP status and JSON contract shape via callback, JSON Schema, or OpenAPI 3.x document (`P-04`).
  */
 export async function expectApiContract<T = unknown>(
-  response: APIResponse,
+  response: ContractVerifiableResponse,
   expectedStatus: number,
   validatorOrSpec?: ContractSchemaSpec<T>
 ): Promise<T> {

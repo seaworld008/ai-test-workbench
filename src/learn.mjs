@@ -92,6 +92,9 @@ export function collectLessonsReport(qaDir) {
  *   action?: string;
  *   sweep?: boolean;
  *   fromReviews?: string;
+ *   repos?: string | string[];
+ *   repo?: string;
+ *   maxFiles?: number | string;
  *   dryRun?: boolean;
  *   json?: boolean;
  * }} [options]
@@ -133,7 +136,24 @@ export async function runLearnCommand(options = {}) {
 
   if (action === 'sweep') {
     const repoDir = targetAbs === qaDir ? path.dirname(qaDir) : targetAbs;
-    const res = runRetroactiveSweep(qaDir, { repoDir, dryRun: Boolean(options.dryRun), lang });
+    const rawRepos = [
+      ...(Array.isArray(options.repos)
+        ? options.repos
+        : typeof options.repos === 'string'
+          ? options.repos.split(',')
+          : []),
+      ...(typeof options.repo === 'string' ? [options.repo] : []),
+    ]
+      .map((s) => String(s).trim())
+      .filter(Boolean);
+    const maxFiles = options.maxFiles !== undefined ? Number(options.maxFiles) : undefined;
+    const res = runRetroactiveSweep(qaDir, {
+      repoDir,
+      ...(rawRepos.length > 0 ? { repos: rawRepos } : {}),
+      ...(maxFiles !== undefined && Number.isFinite(maxFiles) && maxFiles > 0 ? { maxFiles } : {}),
+      dryRun: Boolean(options.dryRun),
+      lang,
+    });
     if (!res.ok) {
       return failLearn(
         res.exitCode,

@@ -186,6 +186,13 @@
       "corpusType": "governance-and-memory",
       "testFile": "test/unit/memory-lockstep-and-seam.test.mjs",
       "testTitleSubstring": "v6.4.0 WU-D Known Blockers"
+    },
+    {
+      "id": "CLAIM-29-v650-fullstack-multi-repo-and-gate-hardening",
+      "claim": "v6.5.0 Enterprise Full-Stack Hardening closes gitignored QA worktreeHash/semanticDiff bypasses, isolates partial heal attempt runs, injects storageState auth & blocks {code:401}/HTML-shell fake-greens in parity, upgrades Living Code Map v4.1 & Diff-Impact v2.1 across multi-repo Vue/Spring Cloud/MyBatis 4-tier chains, stabilizes SPA transitions, adds TEST_ABORT_THIRD_PARTY_HOSTS, bounded workspace write locks, and SkyWalking sw8 + VictoriaLogs LogsQL correlation",
+      "corpusType": "enterprise-fullstack-hardening",
+      "testFile": "test/unit/v640-fullstack-hardening.test.mjs",
+      "testTitleSubstring": "WB-P0-01 & partialScope"
     }
   ]
 }

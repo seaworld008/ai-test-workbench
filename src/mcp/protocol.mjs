@@ -88,7 +88,7 @@ async function executeMcpTool(name, rawArgs = {}, ctx = {}, meta = {}) {
         2,
         pathCheck.error || '[Workspace Boundary Blocked]',
         { blockedTarget: pathCheck.blockedPath || target, allowedRootsCount: allowedRoots.length },
-        ['Pass target/repo/output paths strictly inside an authorized workspace root.'],
+        ['Pass target/repo/output paths inside an authorized workspace root, or authorize via --workspace-root / AITEST_MCP_WORKSPACE_ROOTS.'],
         { protocolVersion, deprecation }
       );
     }
@@ -172,6 +172,27 @@ async function executeMcpTool(name, rawArgs = {}, ctx = {}, meta = {}) {
   }
 
   const completed = execRes.job;
+  if (completed.status === 'cancelled' || completed.cancelled === true) {
+    const cancelExitCode = typeof completed.exitCode === 'number' ? completed.exitCode : 130;
+    return wrapEnvelope(
+      name,
+      false,
+      cancelExitCode,
+      `${name} was cancelled before completion`,
+      { cancelled: true, jobId: completed.jobId || null },
+      ['Operation was cancelled by caller; re-run when ready.'],
+      {
+        target,
+        resourceSuffix: toolEntry.resourceSuffix,
+        protocolVersion,
+        outcome: 'cancelled',
+        recoverable: true,
+        blockerKind: null,
+        deprecation,
+      }
+    );
+  }
+
   const rawEnvelope = completed.parsedData;
   const isV2Envelope =
     rawEnvelope &&

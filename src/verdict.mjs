@@ -213,7 +213,7 @@ export async function verifyChangeCore(options = {}) {
     checkSpecs: true,
     requireE2e: Boolean(effectiveBaseUrl && requestedMode === 'full'),
     allowMutation: options.allowMutation ?? safety.allowMutation,
-    expectedRunId: runOut.runId,
+    expectedRunId: runOut.runId || undefined,
     diffBase: baseResolution.resolved,
     explicitDiffBase: Boolean(options.base),
     requireDiff: !allowNonGit,

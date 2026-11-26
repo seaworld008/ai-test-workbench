@@ -18,12 +18,13 @@ export const MCP_PILLARS = [
 export const MCP_PRESETS = {
   'ai-test-workbench': {
     pillar: 'orchestrator',
-    description: 'AI Test Workbench native MCP Server (stdio/Streamable HTTP/SSE tools, Living Code Map & QA gates)',
+    description:
+      'AI Test Workbench native MCP Server (4 read-only query tools + 13 tools writing local QA state; remote SUT stays default-deny read-only)',
     command: 'npx',
     args: [`--package=ai-test-workbench@${WORKBENCH_VERSION}`, 'ai-test-workbench', 'mcp-serve'],
     pinnedVersion: WORKBENCH_VERSION,
     riskLevel: 'local-write',
-    readonly: true,
+    readonly: false,
     envTemplate: {},
   },
   'playwright-test': {
@@ -191,13 +192,93 @@ export const MCP_PRESETS = {
       OPENAPI_SPEC_URL: 'https://staging-api.internal/v3/api-docs',
     },
   },
+  gitlab: {
+    pillar: 'orchestrator',
+    description: 'Self-hosted GitLab read-only repository, MR diff & CI pipeline inspector (GITLAB_READ_ONLY_MODE=true)',
+    command: 'npx',
+    args: ['-y', '@zereight/mcp-gitlab@2.0.14'],
+    pinnedVersion: '2.0.14',
+    riskLevel: 'read',
+    readonly: true,
+    env: {
+      GITLAB_API_URL: '${GITLAB_API_URL}',
+      GITLAB_PERSONAL_ACCESS_TOKEN: '${GITLAB_TOKEN}',
+      GITLAB_READ_ONLY_MODE: 'true',
+    },
+    envTemplate: {
+      GITLAB_API_URL: 'https://gitlab.staging.internal/api/v4',
+      GITLAB_TOKEN: 'glpat_replace_with_read_api_token',
+    },
+  },
+  mysql: {
+    pillar: 'database',
+    description:
+      'Self-hosted MySQL read-only inspection (INSERT/UPDATE/DELETE disabled; MUST also enforce SELECT-only DB user)',
+    command: 'npx',
+    args: ['-y', '@benborla29/mcp-server-mysql@2.0.9'],
+    pinnedVersion: '2.0.9',
+    riskLevel: 'read',
+    readonly: true,
+    env: {
+      MYSQL_HOST: '${MYSQL_HOST}',
+      MYSQL_PORT: '${MYSQL_PORT}',
+      MYSQL_USER: '${MYSQL_READONLY_USER}',
+      MYSQL_PASS: '${MYSQL_READONLY_PASS}',
+      MYSQL_DB: '${MYSQL_DB}',
+      ALLOW_INSERT_OPERATION: 'false',
+      ALLOW_UPDATE_OPERATION: 'false',
+      ALLOW_DELETE_OPERATION: 'false',
+    },
+    envTemplate: {
+      MYSQL_HOST: 'staging-mysql.internal',
+      MYSQL_PORT: '3306',
+      MYSQL_READONLY_USER: 'qa_readonly',
+      MYSQL_READONLY_PASS: 'change_me',
+      MYSQL_DB: 'app_staging',
+    },
+  },
+  victorialogs: {
+    pillar: 'observability',
+    description: 'Self-hosted VictoriaLogs read-only LogsQL search correlated by traceId',
+    command: 'uvx',
+    args: ['mcp-victorialogs==1.3.0'],
+    pinnedVersion: '1.3.0',
+    riskLevel: 'read',
+    readonly: true,
+    env: {
+      VL_INSTANCE_ENTRYPOINT: '${VICTORIALOGS_URL}',
+      VL_INSTANCE_BEARER_TOKEN: '${VICTORIALOGS_TOKEN}',
+    },
+    envTemplate: {
+      VICTORIALOGS_URL: 'https://victorialogs.staging.internal',
+      VICTORIALOGS_TOKEN: 'vl_replace_with_readonly_token',
+    },
+  },
+  skywalking: {
+    pillar: 'observability',
+    description: 'Apache SkyWalking read-only distributed sw8 trace, topology & slow endpoint inspector',
+    command: 'uvx',
+    args: ['apache-skywalking-mcp==0.2.0', '--readonly'],
+    pinnedVersion: '0.2.0',
+    riskLevel: 'read',
+    readonly: true,
+    env: {
+      SW_OAP_URL: '${SKYWALKING_OAP_URL}',
+      SW_AUTH_TOKEN: '${SKYWALKING_TOKEN}',
+    },
+    envTemplate: {
+      SKYWALKING_OAP_URL: 'https://skywalking.staging.internal/graphql',
+      SKYWALKING_TOKEN: 'sw_replace_with_readonly_token',
+    },
+  },
 };
 
 export const MCP_PROFILES = {
   minimal: ['ai-test-workbench', 'playwright-test', 'chrome-devtools'],
-  observability: ['ai-test-workbench', 'playwright-test', 'grafana', 'prometheus', 'loki', 'sentry'],
-  'data-verify': ['ai-test-workbench', 'playwright-test', 'postgres-readonly', 'mysql-readonly', 'redis-readonly'],
+  observability: ['ai-test-workbench', 'playwright-test', 'grafana', 'prometheus', 'loki', 'sentry', 'victorialogs', 'skywalking'],
+  'data-verify': ['ai-test-workbench', 'playwright-test', 'postgres-readonly', 'mysql-readonly', 'mysql', 'redis-readonly'],
   perf: ['ai-test-workbench', 'playwright-test', 'chrome-devtools', 'prometheus', 'k6'],
+  'enterprise-selfhosted': ['ai-test-workbench', 'playwright-test', 'gitlab', 'mysql', 'victorialogs', 'skywalking'],
   'full-link': Object.keys(MCP_PRESETS),
 };
 

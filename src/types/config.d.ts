@@ -15,6 +15,13 @@ export interface AitestParityConfig {
   maxLatencyRatio?: number;
   maxTtftRatio?: number;
   privacyMode?: 'redacted' | 'shape-only';
+  authStorageKeys?: string[];
+  failOnAuthError?: boolean;
+}
+
+export interface AitestObservabilityConfig {
+  logsBackend?: 'loki' | 'victorialogs' | 'elk';
+  traceProtocol?: 'w3c' | 'sw8' | 'all';
 }
 
 export interface LockstepRuleConfig {
@@ -45,6 +52,10 @@ export interface AitestConfig {
   maxFlaky?: number;
   maxWaivers?: number;
   maxWaiverDays?: number;
+  sourceRepos?: string[];
+  maxScanFiles?: number;
+  apiPrefixes?: string[];
+  observability?: AitestObservabilityConfig;
   protectedGlobs?: string[];
   governance?: { protected?: string[] };
   waiversFile?: string;
@@ -65,6 +76,7 @@ export interface TargetSafetyConfig {
   allowMutation: boolean;
   egressMode: EgressMode;
   extraAllowedHosts: string[];
+  abortThirdPartyHosts: string[];
 }
 
 export interface WorkbenchConfig {

@@ -15,4 +15,6 @@ blob-report/
 .aitest/jobs/
 .aitest/baseline-ref
 .aitest/t1-sticky.json
+.aitest/.write.lock
+.aitest/.write.lock*
 *.log

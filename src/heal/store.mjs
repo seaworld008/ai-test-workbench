@@ -12,27 +12,87 @@ import {
   verifyPayloadT1,
 } from '../kernel/gate-kernel.mjs';
 
+import { writeDefectTicketFiles } from './defect-ticket.mjs';
+
 export const MAX_HEAL_ATTEMPTS = 3;
+export { writeDefectTicketFiles };
 
 /**
- * Computes a deterministic hash of non-`qa/` product application code in `repoDir` so
- * product-code fixes reset the per-(testId, appCodeTreeHash) heal attempt quota (`WU-04`).
+ * Resolves configured `sourceRepos` from `<qaDir>/aitest.config.json` or `<qaDir>/knowledge/code-map.json#meta.sourceRepos`.
  * @param {string} repoDir
- * @returns {string}
+ * @param {string | null} [qaDir]
+ * @returns {string[]}
  */
-export function computeAppCodeTreeHash(repoDir) {
-  if (!repoDir || !fs.existsSync(repoDir)) return 'noapp';
+function resolveConfiguredSourceRepos(repoDir, qaDir = null) {
+  const effectiveQa =
+    qaDir ||
+    (repoDir && fs.existsSync(path.join(repoDir, 'playwright.config.ts'))
+      ? repoDir
+      : repoDir && fs.existsSync(path.join(repoDir, 'qa', 'playwright.config.ts'))
+        ? path.join(repoDir, 'qa')
+        : null);
+  if (!effectiveQa || !fs.existsSync(effectiveQa)) return [];
+  /** @type {unknown[]} */
+  const rawList = [];
+  /** @type {Array<[string, (o: any) => unknown]>} */
+  const sources = [
+    ['aitest.config.json', (o) => o?.sourceRepos],
+    [path.join('knowledge', 'code-map.json'), (o) => o?.meta?.sourceRepos],
+  ];
+  for (const [rel, pick] of sources) {
+    const p = path.join(effectiveQa, rel);
+    if (!fs.existsSync(p)) continue;
+    try {
+      const val = pick(JSON.parse(fs.readFileSync(p, 'utf8')));
+      if (Array.isArray(val)) rawList.push(...val);
+    } catch {
+      // ignore malformed JSON
+    }
+  }
+  const absQa = path.resolve(effectiveQa);
+  const absRepo = repoDir ? path.resolve(repoDir) : path.dirname(absQa);
+  /** @type {string[]} */
+  const resolved = [];
+  const seen = new Set();
+  for (const item of rawList) {
+    const rawPath =
+      typeof item === 'string'
+        ? item
+        : item && typeof item === 'object'
+          ? /** @type {any} */ (item).path || /** @type {any} */ (item).dir
+          : '';
+    if (!rawPath || typeof rawPath !== 'string') continue;
+    const candidates = path.isAbsolute(rawPath)
+      ? [path.resolve(rawPath)]
+      : [path.resolve(absRepo, rawPath), path.resolve(absQa, rawPath)];
+    const found = candidates.find((c) => fs.existsSync(c) && fs.statSync(c).isDirectory() && c !== absQa);
+    if (found && !seen.has(found)) {
+      seen.add(found);
+      resolved.push(found);
+    }
+  }
+  return resolved;
+}
+
+/**
+ * @param {string} repoDir
+ * @returns {{ hash: string, hasFiles: boolean }}
+ */
+function hashSingleRepoTree(repoDir) {
+  if (!repoDir || !fs.existsSync(repoDir)) return { hash: 'noapp', hasFiles: false };
   const baseRes = resolveDefaultDiffBase(repoDir);
   if (baseRes.isGitRepo && baseRes.gitRoot) {
     const ls = execGitSync(baseRes.gitRoot, ['ls-files', '--stage', '-z']);
     const wt = execGitSync(baseRes.gitRoot, ['status', '--porcelain', '-z']);
     const h = crypto.createHash('sha256');
+    let fileCount = 0;
     for (const row of String(ls.stdout || '').split('\0')) {
       if (!row) continue;
       const tabIdx = row.indexOf('\t');
       const fileRel = tabIdx >= 0 ? row.slice(tabIdx + 1) : row;
       if (fileRel === 'qa' || fileRel.startsWith('qa/') || fileRel.includes('/qa/')) continue;
       h.update(row).update('\0');
+      fileCount += 1;
     }
     const wtRows = String(wt.stdout || '').split('\0');
     for (let i = 0; i < wtRows.length; i += 1) {
@@ -51,13 +111,13 @@ export function computeAppCodeTreeHash(repoDir) {
       h.update(wrow).update('\0');
       if (fs.existsSync(abs) && fs.statSync(abs).isFile()) {
         h.update(fs.readFileSync(abs));
+        fileCount += 1;
       }
       h.update('\0');
     }
-    return `sha256:${h.digest('hex').slice(0, 24)}`;
+    return { hash: `sha256:${h.digest('hex').slice(0, 24)}`, hasFiles: fileCount > 0 };
   }
 
-  // Fallback for non-git workspaces: hash regular files outside `qa/` and `node_modules`
   /** @type {string[]} */
   const entries = [];
   const walk = (/** @type {string} */ dir, /** @type {number} */ depth = 0) => {
@@ -73,7 +133,24 @@ export function computeAppCodeTreeHash(repoDir) {
     }
   };
   walk(repoDir);
-  return `sha256:${sha256Hex(entries.join('\n')).slice(0, 24)}`;
+  return { hash: `sha256:${sha256Hex(entries.join('\n')).slice(0, 24)}`, hasFiles: entries.length > 0 };
+}
+
+/**
+ * Computes a deterministic hash of non-`qa/` product application code in `repoDir` (or configured `sourceRepos`
+ * when `repoDir` is an empty/gitignored sandbox wrapper) so product-code fixes reset heal attempt quota (`WU-04`).
+ * @param {string} repoDir
+ * @param {string | null} [qaDir]
+ * @returns {string}
+ */
+export function computeAppCodeTreeHash(repoDir, qaDir = null) {
+  const sourceRepos = resolveConfiguredSourceRepos(repoDir, qaDir);
+  if ((!repoDir || !fs.existsSync(repoDir)) && sourceRepos.length === 0) return 'noapp';
+  const primary = hashSingleRepoTree(repoDir);
+  if (sourceRepos.length === 0) return primary.hash;
+  const externalHashes = sourceRepos.map((sr) => `${path.basename(sr)}:${hashSingleRepoTree(sr).hash}`);
+  const parts = primary.hasFiles ? [primary.hash, ...externalHashes] : externalHashes;
+  return `sha256:${sha256Hex(parts.join('\n')).slice(0, 24)}`;
 }
 
 /**
@@ -94,6 +171,8 @@ export function computeAppCodeTreeHash(repoDir) {
  *   confidence: string,
  *   candidates: string[],
  *   traceId: string | null,
+ *   traceIds?: string[],
+ *   timeWindow?: { startedAt?: string, finishedAt?: string } | null,
  *   errorSnippet: string,
  *   codeCorrelation: Record<string, any> | null,
  *   repairPermitted: boolean,
@@ -335,50 +414,4 @@ export function resolveSpecBaseline(qaDir, absSpec) {
     source: 'disk-snapshot',
     baseSha: null,
   };
-}
-
-/**
- * Writes redacted JSON + Markdown defect ticket artifacts for Class C or reported heal sessions.
- * @param {string} qaDir
- * @param {HealSession} session
- * @param {string} summaryNote
- * @returns {string}
- */
-export function writeDefectTicketFiles(qaDir, session, summaryNote) {
-  const defectsDir = path.join(qaDir, 'reports', 'defects');
-  fs.mkdirSync(defectsDir, { recursive: true });
-  const defectTicketPath = path.join(defectsDir, `${session.sessionId}.md`);
-  const ticketJsonPath = path.join(defectsDir, `${session.sessionId}.json`);
-  const ticketObj = {
-    sessionId: session.sessionId,
-    createdAt: new Date().toISOString(),
-    category: session.category,
-    testId: session.testId,
-    specFile: session.specFile,
-    line: session.line,
-    traceId: session.traceId,
-    codeCorrelation: session.codeCorrelation,
-    summary: summaryNote,
-    errorSnippet: session.errorSnippet,
-  };
-  fs.writeFileSync(ticketJsonPath, JSON.stringify(ticketObj, null, 2) + '\n', 'utf8');
-  fs.writeFileSync(
-    defectTicketPath,
-    [
-      `# Defect Ticket (${session.sessionId}) — ${session.title}`,
-      '',
-      `- **Classification**: **${session.category}**`,
-      `- **Failing Spec**: \`${session.specFile}:${session.line}\` *(Kept RED per Anti-Fake-Green Iron Rule)*`,
-      `- **32-char Distributed Trace ID**: \`${session.traceId || 'n/a'}\``,
-      `- **Summary**: ${summaryNote}`,
-      '',
-      '## Error Evidence (Redacted)',
-      '```text',
-      session.errorSnippet || '',
-      '```',
-      '',
-    ].join('\n'),
-    'utf8'
-  );
-  return defectTicketPath;
 }

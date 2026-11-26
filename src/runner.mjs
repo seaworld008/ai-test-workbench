@@ -7,9 +7,10 @@ import { syncLivingCodeMap } from './codemap.mjs';
 import { loadWorkbenchConfig } from './core/config.mjs';
 import { buildCommandResult, emitCommandResult, outcomeToExitCode } from './core/outcome.mjs';
 import { resolvePlaywrightCli } from './core/playwright-resolve.mjs';
+import { flattenPlaywrightResults } from './core/playwright-results.mjs';
 import { runPlaywright } from './core/proc.mjs';
 import { redactSecrets } from './core/redact.mjs';
-import { loadRuntimeConfig } from './core/runtime-config.mjs';
+import { isLoopbackHttpUrl, loadRuntimeConfig } from './core/runtime-config.mjs';
 import { syncQuarantineFromLedger } from './flaky.mjs';
 import { computeImpact } from './impact.mjs';
 import { beginRunLedger, finalizeRunLedger } from './ledger.mjs';
@@ -19,6 +20,7 @@ import {
   buildSuitePlaywrightArgs,
   extractRunnerFailedSpecs,
   resolveExplicitFileTargets,
+  summarizePlaywrightResultsFile,
 } from './runner/env-and-failures.mjs';
 
 export { buildPlaywrightChildEnv, buildSuitePlaywrightArgs, resolveExplicitFileTargets };
@@ -155,17 +157,46 @@ export async function executeSuiteCore(options = {}) {
   }
 
   const repoDir = path.resolve(target) === path.resolve(qaDir) ? path.dirname(qaDir) : path.resolve(target);
-  const ledgerBegin = beginRunLedger(qaDir, {
-    suite,
-    command: `playwright ${pwArgs.join(' ')}`,
-    env: mergedEnv,
-    repoDir,
-  });
+  const safePartialId = options.partialHealSessionId
+    ? String(options.partialHealSessionId).replace(/[^a-zA-Z0-9_-]/g, '')
+    : '';
+  const isolatedResultsAbs = options.isolatedResultsPath
+    ? path.resolve(qaDir, options.isolatedResultsPath)
+    : safePartialId
+      ? path.join(qaDir, '.aitest', 'heals', safePartialId, `attempt-${Date.now()}-results.json`)
+      : null;
+  const skipGlobalLedgerLatest =
+    options.skipGlobalLedgerLatest !== undefined
+      ? Boolean(options.skipGlobalLedgerLatest)
+      : Boolean(options.partialHealSessionId || options.isolatedResultsPath);
+
+  const defaultResultsPath = path.join(qaDir, 'reports', 'results.json');
+  const latestLedgerPath = path.join(qaDir, '.aitest', 'runs', 'latest.json');
+  const prevResultsExisted = fs.existsSync(defaultResultsPath);
+  const prevResultsRaw = prevResultsExisted ? fs.readFileSync(defaultResultsPath, 'utf8') : null;
+  const prevLatestExisted = fs.existsSync(latestLedgerPath);
+  const prevLatestRaw = prevLatestExisted ? fs.readFileSync(latestLedgerPath, 'utf8') : null;
+
+  const ledgerBegin = skipGlobalLedgerLatest
+    ? { runId: safePartialId ? `heal_${safePartialId}` : `partial_${Date.now()}` }
+    : beginRunLedger(qaDir, {
+        suite,
+        command: `playwright ${pwArgs.join(' ')}`,
+        env: mergedEnv,
+        repoDir,
+      });
+
+  if (isolatedResultsAbs) {
+    fs.mkdirSync(path.dirname(isolatedResultsAbs), { recursive: true });
+  }
 
   const runEnv = buildPlaywrightChildEnv(process.env, {
     ...overrides,
     ...(safety.allowMutation ? { TEST_ALLOW_MUTATION: '1' } : {}),
     ...(mergedEnv.TEST_STRICT_READONLY === undefined ? { TEST_STRICT_READONLY: safety.strictReadonly ? '1' : '0' } : {}),
+    ...(isolatedResultsAbs
+      ? { PLAYWRIGHT_JSON_OUTPUT_FILE: isolatedResultsAbs, PLAYWRIGHT_JSON_OUTPUT_NAME: isolatedResultsAbs }
+      : {}),
     AITEST_ACTIVE_SUITE: suite,
     AITEST_RUN_ID: ledgerBegin.runId,
   });
@@ -176,26 +207,71 @@ export async function executeSuiteCore(options = {}) {
 
   const inheritStdio = Boolean(options.inheritStdio) && !options.json;
   const timeoutMs = options.timeoutMs !== undefined ? Number(options.timeoutMs) : 45 * 60_000;
-  const pwRes = await runPlaywright(qaDir, pwArgs, {
-    env: runEnv,
-    inheritStdio,
-    capture: !inheritStdio,
-    timeoutMs,
-    signal: options.signal,
-  });
-
-  const ledgerFinal = finalizeRunLedger(qaDir, ledgerBegin.runId, {
-    exitCode: pwRes.code,
-  });
-
+  let pwRes;
   try {
-    syncQuarantineFromLedger(qaDir);
-  } catch {
-    // non-fatal quarantine telemetry update
+    pwRes = await runPlaywright(qaDir, pwArgs, {
+      env: runEnv,
+      inheritStdio,
+      capture: !inheritStdio,
+      timeoutMs,
+      signal: options.signal,
+    });
+  } finally {
+    if (isolatedResultsAbs) {
+      if (!fs.existsSync(isolatedResultsAbs) && fs.existsSync(defaultResultsPath)) {
+        try {
+          const curDefaultRaw = fs.readFileSync(defaultResultsPath, 'utf8');
+          if (!prevResultsExisted || curDefaultRaw !== prevResultsRaw) {
+            fs.writeFileSync(isolatedResultsAbs, curDefaultRaw, 'utf8');
+          }
+        } catch {
+          // best-effort isolated results extraction
+        }
+      }
+      if (skipGlobalLedgerLatest) {
+        try {
+          if (prevResultsExisted && prevResultsRaw !== null) {
+            fs.writeFileSync(defaultResultsPath, prevResultsRaw, 'utf8');
+          } else if (!prevResultsExisted && fs.existsSync(defaultResultsPath)) {
+            fs.unlinkSync(defaultResultsPath);
+          }
+        } catch {
+          // ignore restore failure
+        }
+      }
+    }
+    if (skipGlobalLedgerLatest) {
+      try {
+        if (prevLatestExisted && prevLatestRaw !== null) {
+          fs.writeFileSync(latestLedgerPath, prevLatestRaw, 'utf8');
+        } else if (!prevLatestExisted && fs.existsSync(latestLedgerPath)) {
+          fs.unlinkSync(latestLedgerPath);
+        }
+      } catch {
+        // ignore restore failure
+      }
+    }
+  }
+
+  const ledgerFinal = skipGlobalLedgerLatest
+    ? null
+    : finalizeRunLedger(qaDir, ledgerBegin.runId, {
+        exitCode: pwRes.code,
+      });
+  const partialSummary = skipGlobalLedgerLatest
+    ? summarizePlaywrightResultsFile(isolatedResultsAbs || defaultResultsPath)
+    : null;
+
+  if (!skipGlobalLedgerLatest) {
+    try {
+      syncQuarantineFromLedger(qaDir);
+    } catch {
+      // non-fatal quarantine telemetry update
+    }
   }
 
   let codeMapSummary = null;
-  if (fs.existsSync(path.join(qaDir, 'knowledge', 'code-map.json'))) {
+  if (!skipGlobalLedgerLatest && fs.existsSync(path.join(qaDir, 'knowledge', 'code-map.json'))) {
     try {
       codeMapSummary = syncLivingCodeMap(qaDir, { lang, syncImpact: false, skipWriteIfUnchanged: true });
     } catch {
@@ -208,7 +284,7 @@ export async function executeSuiteCore(options = {}) {
   }
 
   let auditOut = null;
-  if (options.audit) {
+  if (options.audit && !skipGlobalLedgerLatest) {
     auditOut = runAuditForQaDir(qaDir, {
       checkSpecs: true,
       requireE2e: suite === 'e2e' || suite === 'all',
@@ -228,18 +304,36 @@ export async function executeSuiteCore(options = {}) {
         ? outcomeToExitCode(auditOut.outcome)
         : 0;
   const outcome = auditOut?.outcome || (finalCode === 0 ? 'pass' : finalCode === 2 ? 'blocked' : 'fail');
-  const failedSpecs = extractRunnerFailedSpecs(ledgerFinal?.tests || []);
+  const failedSpecs = extractRunnerFailedSpecs(ledgerFinal?.tests || partialSummary?.tests || []);
+  const resolvedCounts = ledgerFinal?.manifest?.counts || partialSummary?.counts || auditOut?.stats || null;
+  const executedCount = Number(
+    resolvedCounts?.executed ??
+      Number(resolvedCounts?.passed ?? 0) + Number(resolvedCounts?.failed ?? 0) + Number(resolvedCounts?.flaky ?? 0)
+  );
+  const hasNonSmokeFiles =
+    fileTargets.length > 0 && fileTargets.some((f) => !f.replace(/\\/g, '/').includes('tests/smoke'));
+  const ranNonSeedTests =
+    suite !== 'seed' &&
+    (suite !== 'smoke' || hasNonSmokeFiles) &&
+    (executedCount > 0 || (resolvedCounts === null && pwRes.code === 0));
+  const isRemoteBusiness = Boolean(safety.baseURL && !isLoopbackHttpUrl(safety.baseURL) && ranNonSeedTests);
+  const acceptanceScope =
+    isRemoteBusiness || (safety.baseURL && ['e2e', 'api', 'all'].includes(suite))
+      ? 'business-e2e'
+      : 'local-workbench';
 
   return {
     ok: finalCode === 0,
     exitCode: finalCode,
     outcome,
-    runId: ledgerBegin.runId,
+    runId: skipGlobalLedgerLatest ? null : ledgerBegin.runId,
+    resultsPath: isolatedResultsAbs || defaultResultsPath,
+    partialScope: skipGlobalLedgerLatest,
     qaDir,
     suite,
-    acceptanceScope: safety.baseURL && ['e2e', 'api', 'all'].includes(suite) ? 'business-e2e' : 'local-workbench',
+    acceptanceScope,
     impact: impactResult,
-    counts: ledgerFinal?.manifest?.counts || auditOut?.stats || null,
+    counts: resolvedCounts,
     failures: failedSpecs,
     audit: auditOut
       ? {

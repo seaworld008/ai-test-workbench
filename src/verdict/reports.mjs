@@ -45,6 +45,58 @@ export function buildSarifReport(verdictObj) {
       ],
     });
   }
+  const seam = verdictObj.seamReview || null;
+  for (const s of seam?.s5LiteralShifts || []) {
+    results.push({
+      ruleId: 'AITEST-SEAM-S5-LITERAL-SHIFT',
+      level: 'warning',
+      message: {
+        text: `[S4/S5 Literal Shift] ${s.testTitle || ''}: ${s.matcher || ''} "${s.baseExpected}" -> "${s.headExpected}"`.slice(0, 500),
+      },
+      ...(s.file
+        ? {
+            locations: [
+              {
+                physicalLocation: {
+                  artifactLocation: { uri: s.file },
+                  region: { startLine: Math.max(1, Number(s.line || 1)) },
+                },
+              },
+            ],
+          }
+        : {}),
+    });
+  }
+  for (const sc of seam?.suspectedShortcuts || []) {
+    results.push({
+      ruleId: 'AITEST-SEAM-SUSPECTED-SHORTCUT',
+      level: 'warning',
+      message: {
+        text: `[Suspected Static Shortcut] (${sc.charLength} chars, ${sc.kind}): ${sc.reason || ''}`.slice(0, 500),
+      },
+      ...(sc.file
+        ? {
+            locations: [
+              {
+                physicalLocation: {
+                  artifactLocation: { uri: sc.file },
+                  region: { startLine: Math.max(1, Number(sc.line || 1)) },
+                },
+              },
+            ],
+          }
+        : {}),
+    });
+  }
+  for (const w of seam?.expiringWaivers || []) {
+    results.push({
+      ruleId: 'AITEST-SEAM-EXPIRING-WAIVER',
+      level: 'warning',
+      message: {
+        text: `[Expiring Waiver] "${w.target}" (owner=${w.owner}, expires=${w.expiresAt}, remaining=${w.remainingHours}h): ${w.reason || ''}`.slice(0, 500),
+      },
+    });
+  }
 
   const trustLevel = verdictObj.trustLevel || verdictObj.trustTier || 'T0';
   const trustDef =

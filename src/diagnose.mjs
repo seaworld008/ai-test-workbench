@@ -20,6 +20,12 @@ import {
 import { correlateFailureWithFrontendDiff } from './diagnose/diff-correlator.mjs';
 import { computeDiagnosticFingerprint } from './diagnose/fingerprint.mjs';
 import { classifyFailureRegressionHistory, createRegressionHistoryClassifier } from './diagnose/history.mjs';
+import {
+  buildObservabilityQueries,
+  extractAttachmentsAndErrorContext,
+  loadCodeMapCorrelations,
+  selectPrimaryQueryableTraceId,
+} from './diagnose/observability.mjs';
 import { annotateDiagnosedWithKnownBlockers } from './memory/blockers.mjs';
 
 export {
@@ -55,9 +61,11 @@ export {
  *   repairPermitted?: boolean,
  *   diffEvidence?: { matchedTokens: string[], changedFiles: string[] } | null,
  *   evidence: string[],
+ *   authExpiredHint?: string | null,
  *   guidance: string,
  *   traceId: string | null,
  *   traceIds: string[],
+ *   observabilityQueries?: { traceId: string | null, lokiLogQl: string, victoriaLogsQl: string[], prometheusPromQl: string, sentryWindow: string },
  *   traceZipPath: string | null,
  *   timeWindow: { startedAt?: string, finishedAt?: string } | null,
  *   errorSnippet: string,
@@ -70,104 +78,6 @@ export {
  *   } | null,
  * }} DiagnosedFailure
  */
-
-/**
- * @param {Record<string, any>} resultObj
- * @param {string} qaDir
- */
-function extractAttachmentsAndErrorContext(resultObj, qaDir) {
-  /** @type {string | null} */
-  let tracePath = null;
-  /** @type {string | null} */
-  let errorContextText = null;
-  /** @type {string[]} */
-  let traceIds = [];
-  /** @type {string | null} */
-  let injectedTraceId = null;
-  /** @type {{ startedAt?: string, finishedAt?: string } | null} */
-  let timeWindow = null;
-  /** @type {{ serverErrors: string[], blockedRequests: string[], pageErrors: string[] } | null} */
-  let guardSignals = null;
-
-  for (const att of resultObj.attachments || []) {
-    let parsedGuard = null;
-    if (att.name === 'workbench-runtime-guard.json' || att.name === 'workbench-trace-context.json') {
-      try {
-        if (att.body) {
-          parsedGuard = JSON.parse(Buffer.from(att.body, 'base64').toString('utf8'));
-        } else if (att.path) {
-          const resolved = path.isAbsolute(att.path) ? att.path : path.resolve(qaDir, att.path);
-          if (fs.existsSync(resolved)) parsedGuard = JSON.parse(fs.readFileSync(resolved, 'utf8'));
-        }
-      } catch {
-        parsedGuard = null;
-      }
-      if (parsedGuard) {
-        if (Array.isArray(parsedGuard.traceIds)) traceIds.push(...parsedGuard.traceIds);
-        if (parsedGuard.injectedTraceId) injectedTraceId = parsedGuard.injectedTraceId;
-        if (parsedGuard.timeWindow) timeWindow = parsedGuard.timeWindow;
-        if (att.name === 'workbench-runtime-guard.json') {
-          guardSignals = {
-            serverErrors: parsedGuard.serverErrors || [],
-            blockedRequests: parsedGuard.blockedRequests || [],
-            pageErrors: parsedGuard.pageErrors || [],
-          };
-        }
-      }
-    }
-
-    if (!att.path) continue;
-    const resolved = path.isAbsolute(att.path) ? att.path : path.resolve(qaDir, att.path);
-    if (att.name === 'trace' || resolved.endsWith('trace.zip')) {
-      tracePath = resolved;
-    }
-    if ((att.name === 'error-context' || resolved.endsWith('error-context.md')) && fs.existsSync(resolved)) {
-      errorContextText = fs.readFileSync(resolved, 'utf8');
-    }
-  }
-
-  if (!errorContextText && tracePath) {
-    const candidate = path.join(path.dirname(tracePath), 'error-context.md');
-    if (fs.existsSync(candidate)) {
-      errorContextText = fs.readFileSync(candidate, 'utf8');
-    }
-  }
-
-  return {
-    tracePath,
-    errorContextText,
-    traceIds: [...new Set(traceIds)],
-    injectedTraceId,
-    timeWindow,
-    guardSignals,
-  };
-}
-
-/**
- * @param {string} qaDir
- * @param {string} specFile
- */
-function loadCodeMapCorrelations(qaDir, specFile) {
-  const cmPath = path.join(qaDir, 'knowledge', 'code-map.json');
-  if (!fs.existsSync(cmPath)) return null;
-  try {
-    const cm = JSON.parse(fs.readFileSync(cmPath, 'utf8'));
-    const normalizedSpec = String(specFile || '').replace(/\\/g, '/');
-    const matchedRoutes = Object.values(cm.routes || {}).filter((r) =>
-      (r.coveringSpecs || []).some((/** @type {string} */ s) => normalizedSpec.endsWith(s) || s.endsWith(normalizedSpec))
-    );
-    if (matchedRoutes.length === 0) return null;
-    return {
-      routes: /** @type {string[]} */ (matchedRoutes.map((r) => r.route)),
-      frontendFiles: /** @type {string[]} */ ([...new Set(matchedRoutes.map((r) => r.frontendFile).filter(Boolean))]),
-      backendFiles: /** @type {string[]} */ ([...new Set(matchedRoutes.flatMap((r) => r.linkedBackendFiles || []))]),
-      dbTables: /** @type {string[]} */ ([...new Set(matchedRoutes.flatMap((r) => r.linkedDbTables || []))]),
-      apis: /** @type {string[]} */ ([...new Set(matchedRoutes.flatMap((r) => r.linkedApis || []))]),
-    };
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Structured failure diagnosis returning Markdown report, typed `diagnosedFailures`, and deduplicated `clusters`.
@@ -251,8 +161,9 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath, options = {}) {
         guidance: `Matched frontend source diff (${diffEvidence.changedFiles.join(', ')} -> [${diffEvidence.matchedTokens.join(', ')}]); Class A-UI-Sync permits updating selector/copy via aitest_heal(action="begin").`,
       };
     }
-    const codeCorr = loadCodeMapCorrelations(qaDir, f.file);
-    const queryTraceId = injectedTraceId || (traceIds[0] ? extractQueryableTraceId(traceIds[0]) : '<trace-id>');
+    const codeCorr = loadCodeMapCorrelations(qaDir, f.file, { errorText: cleanErr });
+    const queryTraceId = selectPrimaryQueryableTraceId(traceIds, injectedTraceId);
+    const observabilityQueries = buildObservabilityQueries(queryTraceId, timeWindow);
     const normFile = String(f.file || '').replace(/\\/g, '/');
     const testId = f.testId || `${normFile}::${String(f.title || '').replace(/\\/g, '/')}`;
     const regressionHistory = classifyRegressionHistory(testId, f.status);
@@ -274,9 +185,11 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath, options = {}) {
       repairPermitted: triage.categoryCode === 'A',
       diffEvidence,
       evidence: triage.evidence || [],
+      authExpiredHint: triage.authExpiredHint || null,
       guidance: triage.guidance,
       traceId: queryTraceId === '<trace-id>' ? null : queryTraceId,
       traceIds: traceIds.map((id) => extractQueryableTraceId(id)),
+      observabilityQueries,
       traceZipPath: tracePath,
       timeWindow,
       errorSnippet: cleanErr.slice(0, 800),
@@ -292,12 +205,15 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath, options = {}) {
       `- **Suggested Category**: **${triage.category}** *(confidence: ${triage.confidence}, candidates: ${triage.candidates.join('/')})*`
     );
     detailLines.push(`- **Regression History**: \`${regressionHistory}\``);
+    if (triage.authExpiredHint) {
+      detailLines.push(`- **Auth Session Hint**: ${triage.authExpiredHint}`);
+    }
     detailLines.push(`- **Action Guidance**: ${triage.guidance}`);
     if (timeWindow) {
       detailLines.push(`- **Test Time Window**: \`${timeWindow.startedAt}\` → \`${timeWindow.finishedAt}\``);
     }
     if (traceIds.length > 0 || injectedTraceId) {
-      detailLines.push(`- **Queryable 32-char Trace ID**: \`${queryTraceId}\``);
+      detailLines.push(`- **Queryable Trace ID**: \`${queryTraceId}\``);
       detailLines.push(
         `- **Captured Trace Headers**: ${traceIds
           .slice(0, 6)
@@ -321,8 +237,9 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath, options = {}) {
           detailLines.push(`- **Linked DB Entities**: ${codeCorr.dbTables.map((t) => `\`${t}\``).join(', ')}`);
       }
       detailLines.push(
-        `- **Loki / Tempo MCP Query**: \`{env=~"staging|test"} |= "${queryTraceId}"\``,
-        `- **Prometheus MCP Query**: \`sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))\``,
+        `- **Loki / Tempo MCP Query (LogQL)**: \`${observabilityQueries.lokiLogQl}\``,
+        `- **VictoriaLogs MCP Query (LogsQL)**: \`${observabilityQueries.victoriaLogsQl[0]}\` · \`${observabilityQueries.victoriaLogsQl[1]}\``,
+        `- **Prometheus MCP Query**: \`${observabilityQueries.prometheusPromQl}\``,
         `- **Sentry MCP**: filter unresolved issues within \`${timeWindow?.startedAt || 'last 15m'}\` to \`${timeWindow?.finishedAt || 'now'}\``
       );
       if (codeCorr?.dbTables && codeCorr.dbTables.length > 0 && /^[A-Za-z_][A-Za-z0-9_.]*$/.test(codeCorr.dbTables[0])) {
