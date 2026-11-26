@@ -1,5 +1,4 @@
 // @ts-check
-import crypto from 'node:crypto';
 import http from 'node:http';
 import path from 'node:path';
 import { McpJobManager } from '../jobs.mjs';
@@ -21,16 +20,15 @@ import {
   sendHttpJson as sendJson,
   verifyBearerTokenConstantTime,
 } from './security.mjs';
+import { createMcpSessionStore } from './session-store.mjs';
 
 const MAX_JSONRPC_BATCH_SIZE = 16;
 
 /**
  * Hardened Streamable HTTP (`/mcp`) + Legacy SSE (`/sse` + `/messages`) MCP Server (`M-02..M-09`).
  *
- * Improvements over v5.0:
  * - Immediate SSE streaming on `Accept: text/event-stream` POSTs using per-request `onNotification` (no race!).
- * - Session LRU eviction runs ONLY when creating a new session (never evicts an active session mid-request!).
- * - Legacy `/sse` sessions now enforce TTL + maxSessions cap.
+ * - Session capacity/TTL management delegated to `createMcpSessionStore` (`VULN-10` 429 guard).
  * - Per-request try/catch prevents malformed requests from crashing the server.
  * - Shutdown kills all running child job process trees and closes all open SSE sockets immediately.
  * @param {{
@@ -66,42 +64,12 @@ export function createMcpHttpServer(options = {}) {
     sendNotification,
   });
 
-  /** @type {Map<string, { ctx: Record<string, any>, sseRes: http.ServerResponse | null, sseKeepalive: NodeJS.Timeout | null, createdAt: number, lastActiveAt: number }>} */
-  const streamableSessions = new Map();
-  /** @type {Map<string, { res: http.ServerResponse, ctx: Record<string, any>, keepalive: NodeJS.Timeout, createdAt: number, lastActiveAt: number }>} */
-  const legacySseSessions = new Map();
-
-  const pruneExpiredSessions = () => {
-    const now = Date.now();
-    for (const [id, s] of streamableSessions.entries()) {
-      if (now - s.lastActiveAt > sessionTtlMs) {
-        if (s.sseRes && !s.sseRes.writableEnded) s.sseRes.end();
-        streamableSessions.delete(id);
-      }
-    }
-    for (const [id, s] of legacySseSessions.entries()) {
-      if (now - s.lastActiveAt > sessionTtlMs) {
-        clearInterval(s.keepalive);
-        if (s.res && !s.res.writableEnded) s.res.end();
-        legacySseSessions.delete(id);
-      }
-    }
-  };
-
-  // Reject new unauthenticated sessions at capacity (429) instead of evicting active victim sessions (`VULN-10`)
-  /** @template T @param {Map<string, T>} map @param {(entry: T | undefined) => void} closeEntry @returns {boolean} */
-  const ensureCapacityForNewSession = (map, closeEntry) => {
-    pruneExpiredSessions();
-    if (map.size < maxSessions) return true;
-    if (!authToken) return false;
-    while (map.size >= maxSessions) {
-      const oldestId = map.keys().next().value;
-      if (!oldestId) break;
-      closeEntry(map.get(oldestId));
-      map.delete(oldestId);
-    }
-    return true;
-  };
+  const sessions = createMcpSessionStore({
+    sessionTtlMs,
+    maxSessions,
+    hasAuthToken: Boolean(authToken),
+    makeBaseCtx,
+  });
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -147,52 +115,21 @@ export function createMcpHttpServer(options = {}) {
 
       // Legacy 2024-11-05 HTTP+SSE Transport: GET /sse & POST /messages?sessionId=...
       if (pathname === '/sse' && req.method === 'GET') {
-        const hasSlot = ensureCapacityForNewSession(legacySseSessions, (s) => {
-          if (s) {
-            clearInterval(s.keepalive);
-            if (s.res && !s.res.writableEnded) s.res.end();
-          }
-        });
-        if (!hasSlot) {
+        const created = sessions.createLegacySseSession(req, res);
+        if (!created.ok) {
           sendJson(res, 429, { error: 'Too Many Requests: active MCP SSE session capacity reached' });
-          return;
         }
-        const sessionId = crypto.randomUUID();
-        res.writeHead(200, {
-          'Content-Type': 'text/event-stream; charset=utf-8',
-          'Cache-Control': 'no-cache, no-transform',
-          Connection: 'keep-alive',
-        });
-        const keepalive = setInterval(() => {
-          if (!res.writableEnded) res.write(': keepalive\n\n');
-        }, 15_000);
-        const notifyFn = (/** @type {any} */ frame) => {
-          if (!res.writableEnded) res.write(`event: message\ndata: ${JSON.stringify(frame)}\n\n`);
-        };
-        const now = Date.now();
-        legacySseSessions.set(sessionId, {
-          res,
-          ctx: makeBaseCtx(sessionId, notifyFn),
-          keepalive,
-          createdAt: now,
-          lastActiveAt: now,
-        });
-        res.write(`event: endpoint\ndata: /messages?sessionId=${sessionId}\n\n`);
-        req.on('close', () => {
-          clearInterval(keepalive);
-          legacySseSessions.delete(sessionId);
-        });
         return;
       }
 
       if (pathname === '/messages' && req.method === 'POST') {
-        pruneExpiredSessions();
+        sessions.pruneExpiredSessions();
         if (!hasJsonContentType(req.headers['content-type'])) {
           sendJson(res, 415, { error: 'Unsupported Media Type: expected application/json' });
           return;
         }
         const sessionId = reqUrl.searchParams.get('sessionId');
-        const session = sessionId ? legacySseSessions.get(sessionId) : null;
+        const session = sessions.getLegacySseSession(sessionId);
         if (!session || session.res.writableEnded) {
           sendJson(res, 404, { error: 'Unknown or closed SSE sessionId' });
           return;
@@ -244,24 +181,21 @@ export function createMcpHttpServer(options = {}) {
 
       // Modern Streamable HTTP Transport: POST / GET / DELETE /mcp
       if (pathname === '/mcp') {
-        pruneExpiredSessions();
+        sessions.pruneExpiredSessions();
 
         if (req.method === 'DELETE') {
           const sid = req.headers['mcp-session-id'] ? String(req.headers['mcp-session-id']) : null;
-          const s = sid ? streamableSessions.get(sid) : undefined;
-          if (!sid || !s) {
+          if (!sessions.deleteStreamableSession(sid)) {
             sendJson(res, 404, { error: 'Unknown or expired Mcp-Session-Id' });
             return;
           }
-          if (s.sseRes && !s.sseRes.writableEnded) s.sseRes.end();
-          streamableSessions.delete(sid);
           sendJson(res, 200, { ok: true, closed: true });
           return;
         }
 
         if (req.method === 'GET') {
           const sid = req.headers['mcp-session-id'] ? String(req.headers['mcp-session-id']) : null;
-          const session = sid ? streamableSessions.get(sid) : undefined;
+          const session = sessions.getStreamableSession(sid);
           if (!sid || !session) {
             sendJson(res, 404, { error: 'Unknown or expired Mcp-Session-Id; initialize session first' });
             return;
@@ -315,32 +249,15 @@ export function createMcpHttpServer(options = {}) {
           let session;
 
           if (isInitCall) {
-            const hasSlot = ensureCapacityForNewSession(streamableSessions, (s) => {
-              if (s?.sseKeepalive) clearInterval(s.sseKeepalive);
-              if (s?.sseRes && !s.sseRes.writableEnded) s.sseRes.end();
-            });
-            if (!hasSlot) {
+            const created = sessions.createStreamableSession();
+            if (!created.ok) {
               sendJson(res, 429, { error: 'Too Many Requests: active MCP session capacity reached' });
               return;
             }
-            sid = crypto.randomUUID();
-            /** @type {any} */
-            const sessionEntry = {
-              ctx: null,
-              sseRes: null,
-              sseKeepalive: null,
-              createdAt: Date.now(),
-              lastActiveAt: Date.now(),
-            };
-            sessionEntry.ctx = makeBaseCtx(sid, (/** @type {any} */ frame) => {
-              if (sessionEntry.sseRes && !sessionEntry.sseRes.writableEnded) {
-                sessionEntry.sseRes.write(`event: message\ndata: ${JSON.stringify(frame)}\n\n`);
-              }
-            });
-            streamableSessions.set(sid, sessionEntry);
-            session = sessionEntry;
+            sid = created.sid;
+            session = created.session;
           } else {
-            session = sid ? streamableSessions.get(sid) : undefined;
+            session = sessions.getStreamableSession(sid);
             if (!sid || !session) {
               sendJson(res, 404, {
                 error: 'Missing or unknown Mcp-Session-Id. Streamable HTTP requires calling "initialize" first.',
@@ -400,7 +317,6 @@ export function createMcpHttpServer(options = {}) {
           const wantsSseStream = acceptsSse && (!accept.includes('application/json') || hasProgressToken);
 
           if (wantsSseStream) {
-            // Stream SSE notifications IMMEDIATELY per request without mutating shared session state (`M-06`)!
             const headers = {
               'Mcp-Session-Id': sid,
               'MCP-Protocol-Version': session.ctx.protocolVersion,
@@ -472,16 +388,7 @@ export function createMcpHttpServer(options = {}) {
 
   const cleanup = () => {
     sharedJobManager.killAll();
-    for (const s of legacySseSessions.values()) {
-      clearInterval(s.keepalive);
-      if (!s.res.writableEnded) s.res.end();
-    }
-    legacySseSessions.clear();
-    for (const s of streamableSessions.values()) {
-      if (s.sseKeepalive) clearInterval(s.sseKeepalive);
-      if (s.sseRes && !s.sseRes.writableEnded) s.sseRes.end();
-    }
-    streamableSessions.clear();
+    sessions.closeAll();
   };
   server.headersTimeout = 15_000;
   server.requestTimeout = 120_000;

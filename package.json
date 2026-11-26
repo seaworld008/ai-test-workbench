@@ -1,6 +1,6 @@
 {
   "name": "ai-test-workbench",
-  "version": "6.2.1",
+  "version": "6.3.0",
   "description": "Trustworthy Verification Kernel & Multi-Protocol MCP Server for AI Coding Agents: 4-Layer Semantic AST Anti-Fake-Green Gates, Governance Lock, Run Ledger, One-Call verify_change Verdict, Stateful Heal Governance, Import-Graph Impact v2, and PerformanceObserver Web Vitals.",
   "license": "MIT",
   "author": "seaworld008",
@@ -16,6 +16,7 @@
   "exports": {
     ".": "./src/kernel/index.mjs",
     "./kernel": "./src/kernel/index.mjs",
+    "./app": "./src/app/index.mjs",
     "./target-guard": "./src/kernel/target-guard.mjs",
     "./schema-validator": "./src/kernel/schema-validator.mjs"
   },

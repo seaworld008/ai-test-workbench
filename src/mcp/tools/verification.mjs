@@ -1,4 +1,9 @@
 // @ts-check
+import {
+  executeDiagnoseDryRunFastPath,
+  executeImpactReadOnlyFastPath,
+  executeReportReadOnlyFastPath,
+} from './fast-paths.mjs';
 import { ASYNC_JOB_PROPS, pushBool, pushOpt } from './shared.mjs';
 
 /** @type {import('./shared.mjs').ToolRegistryEntry[]} */
@@ -92,6 +97,7 @@ export const VERIFICATION_TOOLS = [
       why: { type: 'array' },
     },
     isReadOnly: () => true,
+    execute: executeImpactReadOnlyFastPath,
     buildCliArgs: (args, target, lang) => {
       const a = ['impact', '--json', `--lang=${lang}`];
       pushOpt(a, '--target', target);
@@ -273,6 +279,7 @@ export const VERIFICATION_TOOLS = [
     },
     resourceSuffix: 'diagnostics',
     isReadOnly: (args) => Boolean(args.dryRun),
+    execute: executeDiagnoseDryRunFastPath,
     buildCliArgs: (args, target, lang) => {
       const a = ['diagnose', '--json', `--lang=${lang}`];
       pushOpt(a, '--target', target);
@@ -353,7 +360,7 @@ export const VERIFICATION_TOOLS = [
     category: 'verification',
     title: 'Query Reports Index, Flaky Telemetry & Requirement Traceability',
     description:
-      'Use when inspecting generated QA artifacts, historical flaky telemetry, or REQ-xxx requirement traceability coverage. Select view="artifacts" (default), "flaky", or "traceability" (read-only by default).',
+      'Use when inspecting generated QA artifacts, latest run overview, historical flaky telemetry, or REQ-xxx requirement traceability coverage. Select view="summary", "artifacts" (default), "flaky", or "traceability" (read-only by default).',
     annotations: {
       title: 'Inspect Reports, Flaky Telemetry & Trace Matrix',
       readOnlyHint: true,
@@ -367,8 +374,8 @@ export const VERIFICATION_TOOLS = [
         target: { type: 'string', description: 'Target repository or QA directory' },
         view: {
           type: 'string',
-          enum: ['artifacts', 'flaky', 'traceability'],
-          description: 'Report view: artifacts (local files), flaky (Run Ledger telemetry), or traceability (REQ-xxx matrix)',
+          enum: ['summary', 'artifacts', 'flaky', 'traceability'],
+          description: 'Report view: summary (artifacts + latest run overview), artifacts (local files), flaky (Run Ledger telemetry), or traceability (REQ-xxx matrix)',
         },
         syncQuarantine: {
           type: 'boolean',
@@ -389,6 +396,7 @@ export const VERIFICATION_TOOLS = [
       requirements: { type: 'array' },
     },
     isReadOnly: (args) => !Boolean(args.syncQuarantine),
+    execute: executeReportReadOnlyFastPath,
     buildCliArgs: (args, target, lang) => {
       const a = ['report', '--json', `--lang=${lang}`];
       pushOpt(a, '--target', target);

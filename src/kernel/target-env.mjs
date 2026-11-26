@@ -2,8 +2,41 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseEnvText } from '../core/config.mjs';
+import { isLoopbackHttpUrl } from '../core/runtime-config.mjs';
 
 export { parseEnvText };
+
+const LOOPBACK_DEFAULT_CRUD_ENVS = new Set(['local', 'dev', 'development', 'test', 'testing', 'ci']);
+
+/**
+ * Resolves tiered write/mutation defaults (`WU-04`).
+ * @param {Record<string, string | undefined>} [envInput]
+ * @param {string | undefined | null} [baseURL]
+ * @param {string} [testEnv]
+ */
+export function resolveDefaultMutationPolicy(envInput = {}, baseURL = undefined, testEnv = 'local') {
+  const normEnv = String(testEnv || envInput.TEST_ENV || 'local').trim().toLowerCase();
+  const explicitAllowRaw = envInput.TEST_ALLOW_MUTATION;
+  const explicitStrictRaw = envInput.TEST_STRICT_READONLY;
+  const isLoopback = isLoopbackHttpUrl(baseURL);
+  const loopbackDefault = LOOPBACK_DEFAULT_CRUD_ENVS.has(normEnv) && isLoopback;
+
+  const allowMutation =
+    explicitAllowRaw !== undefined && explicitAllowRaw !== ''
+      ? explicitAllowRaw === '1' || explicitAllowRaw === 'true'
+      : loopbackDefault;
+
+  const strictReadonly =
+    explicitStrictRaw !== undefined && explicitStrictRaw !== ''
+      ? explicitStrictRaw === '1' || explicitStrictRaw === 'true'
+      : !allowMutation;
+
+  return {
+    allowMutation: strictReadonly ? false : allowMutation,
+    strictReadonly,
+    isLoopback,
+  };
+}
 
 /** @param {string | undefined | null} value @returns {string[]} */
 export function parseCsvList(value) {

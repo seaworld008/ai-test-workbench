@@ -1,14 +1,14 @@
-# v5.x 到 v6.2.1 升级与迁移指南 (`upgrade.md`)
+# v5.x 到 v6.3.0 升级与迁移指南 (`upgrade.md`)
 
 > [English Version](./upgrade.en.md) · [版本兼容矩阵](../VERSION.md) · [四层门禁与治理指南](./governance.md) · [更新日志](../CHANGELOG.md)
 
-本文档完整列出 `ai-test-workbench` 从 **`v5.1.1` / `v6.1.0`** 升级到 **`v6.2.1`** 的所有破坏性变更、兼容性窗口（保留至 `v6.x` 结束，将于 `v7.0.0` 移除）、自动化迁移命令，以及日常升级 `@playwright/test` 的维护流程。
+本文档完整列出 `ai-test-workbench` 从 **`v5.1.1` / `v6.1.0`** 升级到 **`v6.3.0`** 的所有破坏性变更、兼容性窗口（保留至 `v6.x` 结束，将于 `v7.0.0` 移除）、自动化迁移命令，以及日常升级 `@playwright/test` 的维护流程。
 
 ---
 
-## 1. v5.x / v6.1 → v6.2.1 破坏性变更一览
+## 1. v5.x / v6.1 → v6.3.0 破坏性变更一览
 
-| 变更类别 | `v5.1.1` / `v6.1.0` 旧行为 | `v6.2.1` 新行为 | 兼容别名与迁移窗口 |
+| 变更类别 | `v5.1.1` / `v6.1.0` 旧行为 | `v6.3.0` 新行为 | 兼容别名与迁移窗口 |
 |---|---|---|---|
 | **MCP 工具面收敛（21 → 16）** | 独立注册 `aitest_heal_*`、`aitest_job_*`、`aitest_flaky_report`、`aitest_trace_matrix` | 合并为 **`aitest_heal`**（含 `discard`）、**`aitest_job`** 与 **`aitest_report`**（`view: "summary" \| "flaky" \| "traceability"`），并新增 **`aitest_bootstrap`**；`tools/list` 暴露精确 **16 个权威工具** | `tools/call` 在整个 `v6.x` 继续接收上述 **8 个旧名**并自动转发，同时在 `structuredContent.data._deprecation` 和 `summary` 输出弃用告警（`v7.0.0` 移除） |
 | **CLI 按命令严格参数校验** | 89 个全局平铺选项，传给无关子命令的参数会被静默忽略 | 所有子命令（含 `bootstrap` 与 `report --view`）在 `src/cli/commands.mjs` 独立声明允许选项，用法错误 `--json` 统一退出码 `64` | `governance approve` 保留 `--approver` → `--by` 弃用告警别名（`v7.0.0` 移除）；`flaky` / `trace-matrix` 作为 `report --view` 别名保留 |
@@ -42,17 +42,17 @@
 
 ```bash
 # 1. 先预览将要更新的文件与冲突
-npx ai-test-workbench@6.2.1 upgrade --target /path/to/repo --dry-run
+npx ai-test-workbench@6.3.0 upgrade --target /path/to/repo --dry-run
 
 # 2. 执行升级（默认仅升级 support/** 与 scripts/audit-results.mjs；如需全量模板对比可加 --scope all）
-npx ai-test-workbench@6.2.1 upgrade --target /path/to/repo
+npx ai-test-workbench@6.3.0 upgrade --target /path/to/repo
 
 # 3. 检查变更并在确认无误后，由人类在本地终端重签治理锁
-npx ai-test-workbench@6.2.1 governance status --target /path/to/repo
-npx ai-test-workbench@6.2.1 governance approve --target /path/to/repo --by "alice@team" --reason "升级至 ai-test-workbench v6.0.0 内核"
+npx ai-test-workbench@6.3.0 governance status --target /path/to/repo
+npx ai-test-workbench@6.3.0 governance approve --target /path/to/repo --by "alice@team" --reason "升级至 ai-test-workbench v6.0.0 内核"
 
 # 4. 确认 doctor 无内核漂移告警
-npx ai-test-workbench@6.2.1 doctor --target /path/to/repo
+npx ai-test-workbench@6.3.0 doctor --target /path/to/repo
 ```
 
 ---
@@ -66,8 +66,8 @@ npx ai-test-workbench@6.2.1 doctor --target /path/to/repo
    ```
 3. 预览并同步官方 Test Agents 定义：
    ```bash
-   npx ai-test-workbench@6.2.1 update-agents --target /path/to/repo --loop codex,claude --dry-run
-   npx ai-test-workbench@6.2.1 update-agents --target /path/to/repo --loop codex,claude
+   npx ai-test-workbench@6.3.0 update-agents --target /path/to/repo --loop codex,claude --dry-run
+   npx ai-test-workbench@6.3.0 update-agents --target /path/to/repo --loop codex,claude
    ```
 4. 若某 Agent 文件曾被人工修改，新版模板会写出为 `<file>.aitest-new` 并返回退出码 `2`；对比合并后删除 `.aitest-new`（或显式传 `--force` 覆盖）。
 5. 运行 `npm run typecheck && npm run lint`、离线 `smoke` 与目标环境回归验证，再由人类执行 `governance approve`。

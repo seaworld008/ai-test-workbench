@@ -150,7 +150,9 @@ function normalizeLockKey(workspaceKey) {
   const resolved = path.resolve(workspaceKey);
   let real = resolved;
   try {
-    if (fs.existsSync(resolved)) real = fs.realpathSync(resolved);
+    if (fs.existsSync(resolved)) {
+      real = typeof fs.realpathSync.native === 'function' ? fs.realpathSync.native(resolved) : fs.realpathSync(resolved);
+    }
   } catch {
     // keep resolved
   }

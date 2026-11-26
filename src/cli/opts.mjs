@@ -101,3 +101,31 @@ export function makeCommon(v, lang) {
     json: Boolean(v.json),
   };
 }
+
+/**
+ * Resolves paired positive/negative CLI boolean flags (`--explore-*` vs `--no-explore-*`).
+ * When both flags appear on the same command line, the last flag wins; otherwise explicit
+ * `--no-*` yields `false`, explicit `--*` yields `true`, and omitting both yields `defaultValue`.
+ * @param {Record<string, any>} values
+ * @param {string} posFlag
+ * @param {string} negFlag
+ * @param {boolean} [defaultValue]
+ * @param {Array<{ kind?: string, name?: string }>} [tokens]
+ * @returns {boolean}
+ */
+export function resolvePairedBooleanFlag(values, posFlag, negFlag, defaultValue = true, tokens = undefined) {
+  if (Array.isArray(tokens)) {
+    /** @type {boolean | undefined} */
+    let resolved;
+    for (const tok of tokens) {
+      if (tok && tok.kind === 'option') {
+        if (tok.name === posFlag) resolved = true;
+        else if (tok.name === negFlag) resolved = false;
+      }
+    }
+    if (resolved !== undefined) return resolved;
+  }
+  if (values[negFlag]) return false;
+  if (values[posFlag]) return true;
+  return defaultValue;
+}

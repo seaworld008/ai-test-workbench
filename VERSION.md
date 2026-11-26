@@ -1,6 +1,6 @@
-# 版本与兼容性矩阵 (v6.2.1)
+# 版本与兼容性矩阵 (v6.3.0)
 
-> [English Version](./VERSION.en.md) · [简体中文主文档](./README.md) · **工作台与门禁内核版本**：`6.2.1`（单一真源：`src/core/version.mjs`） · **核验日期**：`2026-11-25`
+> [English Version](./VERSION.en.md) · [简体中文主文档](./README.md) · **工作台与门禁内核版本**：`6.3.0`（单一真源：`src/core/version.mjs`） · **核验日期**：`2026-11-26`
 
 ## 1. 运行时与工具链要求
 
@@ -17,7 +17,7 @@
 
 | 工件类型 | 当前 Schema 版本 | 对应模块 |
 |---|---|---|
-| **Gate Kernel** | `6.2.1` | 权威源码 `src/kernel/gate-kernel.mjs`（17 条可插拔规则 `AITEST-G101..G117`，单向同步镜像 `templates/playwright-qa/support/gate-kernel.mjs`，`doctor` 与 `check:vendor` 双重校验漂移） |
+| **Gate Kernel** | `6.3.0` | 权威源码 `src/kernel/gate-kernel.mjs`（17 条可插拔规则 `AITEST-G101..G117`，AST 门禁 v2.2，单向同步镜像 `templates/playwright-qa/support/gate-kernel.mjs`，`doctor` 与 `check:vendor` 双重校验漂移） |
 | **CommandResult & Verdict** | `v2` | `src/core/outcome.mjs` / `src/verdict.mjs`（统一 `CommandResult<T>` 信封与 `AITEST_RESULT_FILE` 帧化 IPC） |
 | **Governance Lock** | `v1` | `src/governance.mjs`（`.aitest/governance.lock`） |
 | **Template Manifest** | `v1` | `src/upgrade.mjs` / `src/init.mjs`（`.aitest/template-manifest.json`） |

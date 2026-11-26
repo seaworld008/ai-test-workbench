@@ -92,11 +92,12 @@ export function parseUnifiedDiffByFile(diffText) {
 /**
  * Layer 3 Semantic Diff Guard (`AITEST-G101` .. `AITEST-G115`) over unified diff text.
  * @param {string} diffText
- * @param {{ assertFunctionNames?: string[], activeWaivers?: Array<Record<string, any>>, qaDir?: string, rulesConfig?: Record<string, any>, tsCompiler?: any }} [options]
+ * @param {{ assertFunctionNames?: string[], customMatchers?: Record<string, number>, activeWaivers?: Array<Record<string, any>>, qaDir?: string, rulesConfig?: Record<string, any>, tsCompiler?: any }} [options]
  */
 export function analyzeHealerDiffText(diffText, options = {}) {
   const {
     assertFunctionNames = ['expect*', 'assert*', 'verify*'],
+    customMatchers,
     activeWaivers = [],
     qaDir,
     rulesConfig = {},
@@ -148,12 +149,14 @@ export function analyzeHealerDiffText(diffText, options = {}) {
     if (ts) {
       const baseSum = analyzeSourceAst(currentFile, beforeCombined, {
         assertFunctionNames,
+        customMatchers,
         qaDir,
         wrapInAsyncFn: true,
         tsCompiler: ts,
       });
       const headSum = analyzeSourceAst(currentFile, afterCombined, {
         assertFunctionNames,
+        customMatchers,
         qaDir,
         wrapInAsyncFn: true,
         tsCompiler: ts,

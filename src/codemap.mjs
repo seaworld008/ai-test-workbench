@@ -4,10 +4,14 @@ import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
 import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import {
+  createRoutePatternMatcher,
   indexQaSpecs,
   indexRepositorySource,
+  listCodeMapAdapters,
   matchRuntimeRouteToPattern,
   normalizeRoutePath,
+  registerCodeMapAdapter,
+  unregisterCodeMapAdapter,
 } from './codemap/adapters.mjs';
 import {
   mergeLivingCodeMap,
@@ -16,14 +20,18 @@ import {
 import { generateLivingSystemMapMarkdown, syncImpactMapFromCodeMap } from './codemap/reporter.mjs';
 
 export {
+  createRoutePatternMatcher,
   generateLivingSystemMapMarkdown,
   indexQaSpecs,
   indexRepositorySource,
+  listCodeMapAdapters,
   matchRuntimeRouteToPattern,
   mergeLivingCodeMap,
   migrateCodeMapSchema,
   normalizeRoutePath,
+  registerCodeMapAdapter,
   syncImpactMapFromCodeMap,
+  unregisterCodeMapAdapter,
 };
 
 /** @param {string} filePath @returns {any} */

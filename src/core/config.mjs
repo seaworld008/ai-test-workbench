@@ -39,6 +39,25 @@ export const DEFAULT_CONFIG_PROTECTED_GLOBS = Object.freeze([
   'tests/fixtures/base.ts',
 ]);
 
+export const RESERVED_WEAK_MATCHERS = Object.freeze(
+  new Set([
+    'toBeTruthy',
+    'toBeFalsy',
+    'toBeDefined',
+    'toBeNull',
+    'toBeUndefined',
+    'toBeNaN',
+    'toBeGreaterThan',
+    'toBeGreaterThanOrEqual',
+    'toBeLessThan',
+    'toBeLessThanOrEqual',
+    'toBeCloseTo',
+    'toBeVisible',
+    'toBeAttached',
+    'toBeInViewport',
+  ])
+);
+
 /**
  * @typedef {{
  *   assertFunctionNames: string[];
@@ -49,6 +68,7 @@ export const DEFAULT_CONFIG_PROTECTED_GLOBS = Object.freeze([
  *   maxWaiverDays: number;
  *   governance: { protected: string[] };
  *   rules: Record<string, boolean | { enabled?: boolean; severity?: 'error' | 'off' }>;
+ *   customMatchers: Record<string, number>;
  *   _configError?: string;
  *   _configErrors?: string[];
  *   [key: string]: unknown;
@@ -70,6 +90,7 @@ export const DEFAULT_AITEST_CONFIG = Object.freeze({
     protected: [...DEFAULT_CONFIG_PROTECTED_GLOBS],
   },
   rules: {},
+  customMatchers: {},
 });
 
 /**
@@ -96,6 +117,16 @@ export function parseEnvText(content) {
   return result;
 }
 
+/** @returns {NormalizedAitestConfig} */
+function createDefaultAitestConfig() {
+  return {
+    ...DEFAULT_AITEST_CONFIG,
+    governance: { protected: [...DEFAULT_CONFIG_PROTECTED_GLOBS] },
+    rules: {},
+    customMatchers: {},
+  };
+}
+
 /**
  * Strictly validates a parsed `aitest.config.json` object against the v6 config schema.
  * Rejects malformed types, negative bounds, or invalid rule overrides (fail-closed).
@@ -106,15 +137,7 @@ export function validateAitestConfigObject(raw) {
   /** @type {string[]} */
   const errors = [];
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return {
-      ok: false,
-      errors: ['aitest.config.json root must be a JSON object.'],
-      config: {
-        ...DEFAULT_AITEST_CONFIG,
-        governance: { protected: [...DEFAULT_CONFIG_PROTECTED_GLOBS] },
-        rules: {},
-      },
-    };
+    return { ok: false, errors: ['aitest.config.json root must be a JSON object.'], config: createDefaultAitestConfig() };
   }
 
   const obj = /** @type {Record<string, unknown>} */ (raw);
@@ -168,8 +191,8 @@ export function validateAitestConfigObject(raw) {
       errors.push('aitest.config.json "rules" must be an object mapping rule codes (e.g. AITEST-G114) to boolean or { enabled, severity }.');
     } else {
       for (const [code, val] of Object.entries(/** @type {Record<string, unknown>} */ (obj.rules))) {
-        if (!/^AITEST-G\d{3}$/.test(code)) {
-          errors.push(`aitest.config.json "rules.${code}" is not a valid rule code (expected AITEST-G101..G115).`);
+        if (!/^(?:AITEST-G(?:10[1-9]|11[0-7]))$/.test(code)) {
+          errors.push(`aitest.config.json "rules.${code}" is not a valid rule code (expected AITEST-G101..G117).`);
           continue;
         }
         if (typeof val === 'boolean') continue;
@@ -183,6 +206,26 @@ export function validateAitestConfigObject(raw) {
         }
         if (ruleCfg.severity !== undefined && ruleCfg.severity !== 'error' && ruleCfg.severity !== 'off') {
           errors.push(`aitest.config.json "rules.${code}.severity" must be "error" or "off".`);
+        }
+      }
+    }
+  }
+
+  if (obj.customMatchers !== undefined) {
+    if (!obj.customMatchers || typeof obj.customMatchers !== 'object' || Array.isArray(obj.customMatchers)) {
+      errors.push('aitest.config.json "customMatchers" must be an object mapping custom matcher names to integer tiers 1..5.');
+    } else {
+      for (const [matcherName, tierVal] of Object.entries(/** @type {Record<string, unknown>} */ (obj.customMatchers))) {
+        if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(matcherName)) {
+          errors.push(`aitest.config.json "customMatchers.${matcherName}" must be a valid JS identifier.`);
+          continue;
+        }
+        if (RESERVED_WEAK_MATCHERS.has(matcherName)) {
+          errors.push(`aitest.config.json "customMatchers.${matcherName}" cannot override built-in weak/state matcher.`);
+          continue;
+        }
+        if (typeof tierVal !== 'number' || !Number.isInteger(tierVal) || tierVal < 1 || tierVal > 5) {
+          errors.push(`aitest.config.json "customMatchers.${matcherName}" must be an integer between 1 and 5.`);
         }
       }
     }
@@ -203,6 +246,22 @@ export function validateAitestConfigObject(raw) {
     obj.rules && typeof obj.rules === 'object' && !Array.isArray(obj.rules)
       ? /** @type {Record<string, boolean | { enabled?: boolean, severity?: 'error' | 'off' }>} */ (obj.rules)
       : {};
+  /** @type {Record<string, number>} */
+  const customMatchersObj = {};
+  if (obj.customMatchers && typeof obj.customMatchers === 'object' && !Array.isArray(obj.customMatchers)) {
+    for (const [k, v] of Object.entries(/** @type {Record<string, unknown>} */ (obj.customMatchers))) {
+      if (
+        /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(k) &&
+        !RESERVED_WEAK_MATCHERS.has(k) &&
+        typeof v === 'number' &&
+        Number.isInteger(v) &&
+        v >= 1 &&
+        v <= 5
+      ) {
+        customMatchersObj[k] = v;
+      }
+    }
+  }
 
   return {
     ok: errors.length === 0,
@@ -220,6 +279,7 @@ export function validateAitestConfigObject(raw) {
         protected: [...new Set([...DEFAULT_CONFIG_PROTECTED_GLOBS, ...customProtected])],
       },
       rules: rulesObj,
+      customMatchers: customMatchersObj,
     },
   };
 }
@@ -239,17 +299,7 @@ export function validateAitestConfigObject(raw) {
 export function loadAndValidateAitestConfigFile(qaDir) {
   const configPath = path.join(qaDir, 'aitest.config.json');
   if (!fs.existsSync(configPath)) {
-    return {
-      ok: true,
-      exists: false,
-      configPath,
-      errors: [],
-      config: {
-        ...DEFAULT_AITEST_CONFIG,
-        governance: { protected: [...DEFAULT_CONFIG_PROTECTED_GLOBS] },
-        rules: {},
-      },
-    };
+    return { ok: true, exists: false, configPath, errors: [], config: createDefaultAitestConfig() };
   }
 
   let parsed;
@@ -262,13 +312,7 @@ export function loadAndValidateAitestConfigFile(qaDir) {
       exists: true,
       configPath,
       errors: [msg],
-      config: {
-        ...DEFAULT_AITEST_CONFIG,
-        governance: { protected: [...DEFAULT_CONFIG_PROTECTED_GLOBS] },
-        rules: {},
-        _configError: msg,
-        _configErrors: [msg],
-      },
+      config: { ...createDefaultAitestConfig(), _configError: msg, _configErrors: [msg] },
     };
   }
 
@@ -280,21 +324,11 @@ export function loadAndValidateAitestConfigFile(qaDir) {
       exists: true,
       configPath,
       errors: validated.errors,
-      config: {
-        ...validated.config,
-        _configError: msg,
-        _configErrors: validated.errors,
-      },
+      config: { ...validated.config, _configError: msg, _configErrors: validated.errors },
     };
   }
 
-  return {
-    ok: true,
-    exists: true,
-    configPath,
-    errors: [],
-    config: validated.config,
-  };
+  return { ok: true, exists: true, configPath, errors: [], config: validated.config };
 }
 
 /**
@@ -384,7 +418,7 @@ export function loadWorkbenchConfig(params) {
       allowedHosts: splitCsv(mergedEnv.TEST_ALLOWED_HOSTS),
       allowMutation,
       egressMode,
-      extraAllowedHosts: splitCsv(mergedEnv.TEST_EGRESS_ALLOW_HOSTS),
+      extraAllowedHosts: splitCsv(mergedEnv.TEST_EGRESS_EXTRA_HOSTS || mergedEnv.TEST_EGRESS_ALLOW_HOSTS),
     }),
     env: Object.freeze({ ...mergedEnv }),
   });

@@ -9,11 +9,15 @@ export interface McpToolAnnotations {
 }
 
 export interface McpStructuredContent<T = Record<string, unknown>> {
+  schemaVersion: number;
   ok: boolean;
   exitCode: ExitCode | number;
   outcome?: GateOutcome;
   tool: string;
   summary: string;
+  recoverable: boolean;
+  blockerKind: string | null;
+  recoverySteps: string[];
   data: T;
   nextRecommendedActions: string[];
 }

@@ -1,0 +1,278 @@
+// @ts-check
+import { unwrapExpr } from './ts-loader.mjs';
+
+const PURE_CONVERTERS = new Set(['Number', 'String', 'Boolean', 'BigInt', 'parseInt', 'parseFloat']);
+// Guard against catastrophic ReDoS nested quantifiers like `(a+)+` while allowing lazy quantifiers `*?`, `+?`, `??` (`F07`)
+const NESTED_QUANTIFIER_RE = /\([^)]*(?:[+*]|\{\d+,\d*\})[^)]*\)[+*{]/;
+
+/** @param {any} ts @param {any} rawNode @param {any} symbolTable @param {string} scopeKey @param {Set<string>} visited */
+export function isBooleanTrueLiteralAst(ts, rawNode, symbolTable, scopeKey, visited = new Set()) {
+  const u = unwrapExpr(ts, rawNode);
+  if (!u) return false;
+  if (u.kind === ts.SyntaxKind.TrueKeyword) return true;
+  if (ts.isIdentifier(u) && symbolTable) {
+    const bound = symbolTable.getConstInit(scopeKey, u.text);
+    if (bound && !visited.has(u.text)) {
+      return isBooleanTrueLiteralAst(ts, bound, symbolTable, scopeKey, new Set([...visited, u.text]));
+    }
+  }
+  return false;
+}
+
+/** @param {any} ts @param {any} rawNode @param {any} symbolTable @param {string} scopeKey @param {Set<string>} visited */
+function isBooleanFalseLiteralAst(ts, rawNode, symbolTable, scopeKey, visited) {
+  const u = unwrapExpr(ts, rawNode);
+  if (!u) return false;
+  if (u.kind === ts.SyntaxKind.FalseKeyword) return true;
+  if (ts.isIdentifier(u) && symbolTable) {
+    const bound = symbolTable.getConstInit(scopeKey, u.text);
+    if (bound && !visited.has(u.text)) {
+      return isBooleanFalseLiteralAst(ts, bound, symbolTable, scopeKey, new Set([...visited, u.text]));
+    }
+  }
+  return false;
+}
+
+/**
+ * Evaluates a constant primitive literal (string/number/boolean/null/undefined) for branch-equality checks (`G2-F08`).
+ * @param {any} ts @param {any} rawNode @param {any} symbolTable @param {string | null} testTitle @param {Set<string>} [visited]
+ * @returns {{ ok: boolean, value: any }}
+ */
+function evalConstPrimitive(ts, rawNode, symbolTable, testTitle, visited = new Set()) {
+  const u = unwrapExpr(ts, rawNode);
+  if (!u) return { ok: false, value: undefined };
+  if (u.kind === ts.SyntaxKind.TrueKeyword) return { ok: true, value: true };
+  if (u.kind === ts.SyntaxKind.FalseKeyword) return { ok: true, value: false };
+  if (u.kind === ts.SyntaxKind.NullKeyword) return { ok: true, value: null };
+  if (ts.isStringLiteral(u) || ts.isNoSubstitutionTemplateLiteral(u)) return { ok: true, value: u.text };
+  if (ts.isNumericLiteral(u)) return { ok: true, value: Number(u.text) };
+  if (ts.isIdentifier(u)) {
+    if (u.text === 'undefined') return { ok: true, value: undefined };
+    if (symbolTable && !visited.has(u.text)) {
+      const bound = symbolTable.getConstInit(testTitle, u.text);
+      if (bound) return evalConstPrimitive(ts, bound, symbolTable, testTitle, new Set([...visited, u.text]));
+    }
+  }
+  return { ok: false, value: undefined };
+}
+
+/**
+ * Evaluates whether a regex pattern semantically matches empty or arbitrary single-char strings (vacuous match-all).
+ * Guarded by length <= 256 and ReDoS nested-quantifier check while permitting lazy `*?` / `+?` (`F07`, `G2-F07`).
+ * @param {string} body
+ * @param {string} flags
+ * @returns {boolean}
+ */
+export function isSemanticVacuousRegex(body, flags = '') {
+  if (typeof body !== 'string') return false;
+  const trimmed = body.trim();
+  if (
+    trimmed === '' ||
+    trimmed === '.*' ||
+    trimmed === '.*?' ||
+    trimmed === '^.*$' ||
+    trimmed === '^.*?$' ||
+    trimmed === '[\\s\\S]*' ||
+    trimmed === '[\\s\\S]*?' ||
+    trimmed === '[\\s\\S]' ||
+    trimmed === '[\\S\\s]' ||
+    trimmed === '[^]' ||
+    (trimmed === '.' && String(flags || '').includes('s')) ||
+    trimmed === '(?:)' ||
+    trimmed === '^.*' ||
+    trimmed === '.*$' ||
+    trimmed === '^' ||
+    trimmed === '$'
+  ) {
+    return true;
+  }
+  if (body.length > 256 || NESTED_QUANTIFIER_RE.test(body)) return false;
+  try {
+    const safeFlags = String(flags || '').replace(/[^dgimsuvy]/g, '').replace(/[gy]/g, '');
+    const re = new RegExp(body, safeFlags);
+    return re.test('') && re.test('__aitest_probe_9f3c__');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Collects ALL `ReturnStatement` expressions inside a callback function body without descending into nested functions (`F47`).
+ * @param {any} ts @param {any} fnNode @returns {any[]}
+ */
+export function extractCallbackReturnExprs(ts, fnNode) {
+  const fn = unwrapExpr(ts, fnNode);
+  if (!fn || (!ts.isArrowFunction(fn) && !ts.isFunctionExpression(fn))) return [];
+  if (!ts.isBlock(fn.body)) return [unwrapExpr(ts, fn.body)];
+  /** @type {any[]} */
+  const out = [];
+  /** @param {any} n */
+  const walk = (n) => {
+    if (!n) return;
+    if (n !== fn && (ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n))) return;
+    if (ts.isReturnStatement(n) && n.expression) {
+      out.push(unwrapExpr(ts, n.expression));
+      return;
+    }
+    ts.forEachChild(n, walk);
+  };
+  walk(fn.body);
+  return out;
+}
+
+/** @param {any} ts @param {any} fnNode @returns {any | null} */
+export function extractSingleReturnCallbackExpr(ts, fnNode) {
+  const exprs = extractCallbackReturnExprs(ts, fnNode);
+  return exprs.length === 1 ? exprs[0] : null;
+}
+
+/**
+ * Recursive AST constant & logical-tautology evaluator for S0 detection (`G-04`, `WU-05`, v6.2.1).
+ * @param {any} ts @param {any} sf @param {any} rawNode
+ * @param {any} [symbolTable] @param {string | null} [testTitle] @param {Set<string>} [visited]
+ * @returns {boolean}
+ */
+export function isConstantExpressionAst(ts, sf, rawNode, symbolTable = null, testTitle = null, visited = new Set()) {
+  if (!rawNode) return false;
+  const node = unwrapExpr(ts, rawNode);
+  if (!node) return false;
+  const scopeKey = testTitle || '<file>';
+
+  if (
+    node.kind === ts.SyntaxKind.TrueKeyword ||
+    node.kind === ts.SyntaxKind.FalseKeyword ||
+    node.kind === ts.SyntaxKind.NullKeyword ||
+    ts.isNumericLiteral(node) ||
+    ts.isStringLiteral(node) ||
+    ts.isNoSubstitutionTemplateLiteral(node) ||
+    ts.isBigIntLiteral(node)
+  ) {
+    return true;
+  }
+
+  if (ts.isIdentifier(node)) {
+    if (node.text === 'undefined' || node.text === 'NaN' || node.text === 'Infinity') return true;
+    if (symbolTable && !visited.has(node.text)) {
+      const bound = symbolTable.getConstInit(testTitle, node.text);
+      if (bound && !ts.isArrayLiteralExpression(bound) && !ts.isObjectLiteralExpression(bound)) {
+        return isConstantExpressionAst(ts, sf, bound, symbolTable, testTitle, new Set([...visited, node.text]));
+      }
+    }
+    return false;
+  }
+
+  if (ts.isTemplateExpression(node)) {
+    return node.templateSpans.every((/** @type {any} */ span) =>
+      isConstantExpressionAst(ts, sf, span.expression, symbolTable, testTitle, visited)
+    );
+  }
+
+  if (ts.isPrefixUnaryExpression(node) || ts.isTypeOfExpression(node) || ts.isVoidExpression(node)) {
+    return isConstantExpressionAst(ts, sf, node.expression, symbolTable, testTitle, visited);
+  }
+
+  // `cond ? 'ok' : 'ok'` identical constant branches (`G2-F08`)
+  if (ts.isConditionalExpression(node)) {
+    const tConst = isConstantExpressionAst(ts, sf, node.whenTrue, symbolTable, testTitle, visited);
+    const fConst = isConstantExpressionAst(ts, sf, node.whenFalse, symbolTable, testTitle, visited);
+    if (tConst && fConst) {
+      if (isConstantExpressionAst(ts, sf, node.condition, symbolTable, testTitle, visited)) return true;
+      const tv = evalConstPrimitive(ts, node.whenTrue, symbolTable, testTitle, visited);
+      const fv = evalConstPrimitive(ts, node.whenFalse, symbolTable, testTitle, visited);
+      if (tv.ok && fv.ok && Object.is(tv.value, fv.value)) return true;
+      try {
+        if (node.whenTrue.getText(sf).replace(/\s+/g, '') === node.whenFalse.getText(sf).replace(/\s+/g, '')) {
+          return true;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return false;
+  }
+
+  if (ts.isBinaryExpression(node)) {
+    const op = node.operatorToken.kind;
+    if (op === ts.SyntaxKind.BarBarToken || op === ts.SyntaxKind.QuestionQuestionToken) {
+      if (
+        isBooleanTrueLiteralAst(ts, node.left, symbolTable, scopeKey, visited) ||
+        isBooleanTrueLiteralAst(ts, node.right, symbolTable, scopeKey, visited)
+      ) {
+        return true;
+      }
+    }
+    if (op === ts.SyntaxKind.AmpersandAmpersandToken) {
+      if (
+        isBooleanFalseLiteralAst(ts, node.left, symbolTable, scopeKey, visited) ||
+        isBooleanFalseLiteralAst(ts, node.right, symbolTable, scopeKey, visited)
+      ) {
+        return true;
+      }
+    }
+    return (
+      isConstantExpressionAst(ts, sf, node.left, symbolTable, testTitle, visited) &&
+      isConstantExpressionAst(ts, sf, node.right, symbolTable, testTitle, visited)
+    );
+  }
+
+  if (ts.isArrayLiteralExpression(node)) {
+    return node.elements.every((/** @type {any} */ el) =>
+      isConstantExpressionAst(ts, sf, el, symbolTable, testTitle, visited)
+    );
+  }
+
+  if (ts.isObjectLiteralExpression(node)) {
+    return node.properties.every((/** @type {any} */ prop) =>
+      ts.isPropertyAssignment(prop)
+        ? isConstantExpressionAst(ts, sf, prop.initializer, symbolTable, testTitle, visited)
+        : false
+    );
+  }
+
+  if (ts.isPropertyAccessExpression(node)) {
+    return isConstantExpressionAst(ts, sf, node.expression, symbolTable, testTitle, visited);
+  }
+
+  if (ts.isElementAccessExpression(node)) {
+    return (
+      isConstantExpressionAst(ts, sf, node.expression, symbolTable, testTitle, visited) &&
+      isConstantExpressionAst(ts, sf, node.argumentExpression, symbolTable, testTitle, visited)
+    );
+  }
+
+  if (ts.isAwaitExpression(node)) {
+    const inner = unwrapExpr(ts, node.expression);
+    if (
+      ts.isCallExpression(inner) &&
+      ts.isPropertyAccessExpression(inner.expression) &&
+      inner.expression.name.text === 'evaluate' &&
+      inner.arguments.length >= 1
+    ) {
+      const returns = extractCallbackReturnExprs(ts, inner.arguments[0]);
+      if (returns.length > 0) {
+        return returns.every((r) => isConstantExpressionAst(ts, sf, r, symbolTable, testTitle, visited));
+      }
+    }
+    return isConstantExpressionAst(ts, sf, inner, symbolTable, testTitle, visited);
+  }
+
+  if (ts.isCallExpression(node)) {
+    if (ts.isIdentifier(node.expression) && PURE_CONVERTERS.has(node.expression.text)) {
+      return (
+        node.arguments.length > 0 &&
+        node.arguments.every((/** @type {any} */ a) => isConstantExpressionAst(ts, sf, a, symbolTable, testTitle, visited))
+      );
+    }
+    if (
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      ['Math', 'JSON', 'Object', 'Array'].includes(node.expression.expression.text)
+    ) {
+      return node.arguments.every((/** @type {any} */ a) =>
+        isConstantExpressionAst(ts, sf, a, symbolTable, testTitle, visited)
+      );
+    }
+  }
+
+  return false;
+}

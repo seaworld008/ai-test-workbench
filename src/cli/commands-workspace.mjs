@@ -11,7 +11,7 @@ import { runMcpServeCommand } from '../mcp-server.mjs';
 import { runSkillInstallCommand } from '../skill-install.mjs';
 import { runUpgradeCommand } from '../upgrade.mjs';
 
-import { BOOL, STR, TARGET_OPTS, WORKSPACE_MUTATION_OPTS, makeCommon } from './opts.mjs';
+import { BOOL, STR, TARGET_OPTS, WORKSPACE_MUTATION_OPTS, makeCommon, resolvePairedBooleanFlag } from './opts.mjs';
 
 /**
  * Workspace initialization, discovery, exploration, and setup CLI commands (`WU-04`).
@@ -119,7 +119,7 @@ export const WORKSPACE_CLI_COMMANDS = {
       'no-explore-portals': BOOL,
       'no-sync-impact': BOOL,
     },
-    run: (/** @type {Record<string, any>} */ v, /** @type {string[]} */ _pos, /** @type {'zh' | 'en'} */ lang) =>
+    run: (/** @type {Record<string, any>} */ v, /** @type {string[]} */ _pos, /** @type {'zh' | 'en'} */ lang, /** @type {Array<Record<string, any>> | undefined} */ tokens) =>
       runExploreCommand({
         ...makeCommon(v, lang),
         baseUrl: v['base-url'],
@@ -128,9 +128,9 @@ export const WORKSPACE_CLI_COMMANDS = {
         maxPortals: v['max-portals'] ? Number(v['max-portals']) : undefined,
         maxTabsPerPage: v['max-tabs'] !== undefined ? Number(v['max-tabs']) : undefined,
         maxDialogsPerPage: v['max-dialogs'] !== undefined ? Number(v['max-dialogs']) : undefined,
-        exploreTabs: v['no-explore-tabs'] ? false : true,
-        exploreDialogs: v['no-explore-dialogs'] ? false : true,
-        explorePortals: v['no-explore-portals'] ? false : true,
+        exploreTabs: resolvePairedBooleanFlag(v, 'explore-tabs', 'no-explore-tabs', true, tokens),
+        exploreDialogs: resolvePairedBooleanFlag(v, 'explore-dialogs', 'no-explore-dialogs', true, tokens),
+        explorePortals: resolvePairedBooleanFlag(v, 'explore-portals', 'no-explore-portals', true, tokens),
         noSyncImpact: Boolean(v['no-sync-impact']),
       }),
   },

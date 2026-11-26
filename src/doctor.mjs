@@ -132,17 +132,26 @@ export function detectHostGateKernelVersion(qaDir) {
 }
 
 /**
+ * Pure, side-effect-free environment & Gate Kernel readiness collector.
+ * Performs ZERO `console.log` or `process.exitCode` mutations so both CLI and in-process MCP
+ * fast paths can reuse it cleanly.
  * @param {{
  *   lang?: 'zh' | 'en' | string,
  *   target?: string,
  *   qaDir?: string,
- *   dryRun?: boolean,
- *   force?: boolean,
- *   json?: boolean,
  * }} [options]
- * @returns {Promise<number>}
+ * @returns {Promise<{
+ *   ok: boolean,
+ *   exitCode: number,
+ *   failCount: number,
+ *   warnCount: number,
+ *   okCount: number,
+ *   summary: string,
+ *   checks: Array<{ status: 'OK' | 'WARN' | 'FAIL', name: string, detail: string }>,
+ *   nextRecommendedActions: string[],
+ * }>}
  */
-export async function runDoctor(options = {}) {
+export async function collectDoctorReport(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   const targetDir = options.target ? path.resolve(options.target) : null;
   /** @type {Array<{ status: 'OK' | 'WARN' | 'FAIL', name: string, detail: string }>} */
@@ -183,22 +192,51 @@ export async function runDoctor(options = {}) {
     );
   }
 
+  // Launch all independent external tool probes concurrently to cut doctor latency while
+  // preserving deterministic check ordering in the final output.
+  const templateQaDir = path.join(WORKBENCH_ROOT, 'templates', 'playwright-qa');
+  const templatePwCli = resolvePlaywrightCli(templateQaDir);
+
+  const [
+    npmVerProbe,
+    npmRegProbe,
+    gitInfo,
+    codexInfo,
+    claudeInfo,
+    dockerInfo,
+    templatePwRes,
+  ] = await Promise.all([
+    runNpm(['--version'], { timeoutMs: 8000 }).then(
+      (res) => ({ ok: true, res, err: null }),
+      (err) => ({ ok: false, res: null, err })
+    ),
+    runNpm(['config', 'get', 'registry'], { timeoutMs: 8000 }).then(
+      (res) => ({ ok: true, res, err: null }),
+      (err) => ({ ok: false, res: null, err })
+    ),
+    probeToolVersion('git'),
+    probeToolVersion('codex'),
+    probeToolVersion('claude'),
+    probeToolVersion('docker'),
+    templatePwCli ? runPlaywright(templateQaDir, ['--version'], { timeoutMs: 8000 }) : Promise.resolve(null),
+  ]);
+
   // 3. npm
-  try {
-    const npmVerRes = await runNpm(['--version'], { timeoutMs: 8000 });
-    const npmRegistryRes = await runNpm(['config', 'get', 'registry'], { timeoutMs: 8000 });
-    const npmVer = npmVerRes.stdout.trim() || 'unknown';
-    const reg = redactSecrets(npmRegistryRes.stdout.trim() || 'unknown');
-    add(npmVerRes.code === 0 ? 'OK' : 'WARN', 'npm', `v${npmVer}, registry=${reg}`);
-  } catch (err) {
+  if (!npmVerProbe.ok || !npmVerProbe.res) {
+    const err = npmVerProbe.err;
     add('FAIL', 'npm', err instanceof Error ? err.message : String(err));
+  } else if (!npmRegProbe.ok || !npmRegProbe.res) {
+    const err = npmRegProbe.err;
+    add('FAIL', 'npm', err instanceof Error ? err.message : String(err));
+  } else {
+    const npmVer = npmVerProbe.res.stdout.trim() || 'unknown';
+    const reg = redactSecrets(npmRegProbe.res.stdout.trim() || 'unknown');
+    add(npmVerProbe.res.code === 0 ? 'OK' : 'WARN', 'npm', `v${npmVer}, registry=${reg}`);
   }
 
   // 4. Git / Codex / Claude / Docker
-  const gitInfo = await probeToolVersion('git');
   add(gitInfo.installed ? 'OK' : 'WARN', 'Git', gitInfo.installed ? `${gitInfo.version} (${gitInfo.path})` : 'not found');
 
-  const codexInfo = await probeToolVersion('codex');
   add(
     codexInfo.installed ? 'OK' : 'WARN',
     'Codex CLI',
@@ -209,7 +247,6 @@ export async function runDoctor(options = {}) {
         : 'not found (optional)'
   );
 
-  const claudeInfo = await probeToolVersion('claude');
   add(
     claudeInfo.installed ? 'OK' : 'WARN',
     'Claude Code',
@@ -220,7 +257,6 @@ export async function runDoctor(options = {}) {
         : 'not found (optional)'
   );
 
-  const dockerInfo = await probeToolVersion('docker');
   add(
     dockerInfo.installed ? 'OK' : 'WARN',
     'Docker',
@@ -252,14 +288,11 @@ export async function runDoctor(options = {}) {
   }
 
   // 7. Template Playwright status
-  const templateQaDir = path.join(WORKBENCH_ROOT, 'templates', 'playwright-qa');
-  const templatePwCli = resolvePlaywrightCli(templateQaDir);
-  if (templatePwCli) {
-    const pwRes = await runPlaywright(templateQaDir, ['--version'], { timeoutMs: 8000 });
+  if (templatePwCli && templatePwRes) {
     add(
-      pwRes.code === 0 ? 'OK' : 'WARN',
+      templatePwRes.code === 0 ? 'OK' : 'WARN',
       'Template @playwright/test',
-      `${pwRes.stdout.trim()} (${templateQaDir})`
+      `${templatePwRes.stdout.trim()} (${templateQaDir})`
     );
   } else {
     add(
@@ -330,30 +363,58 @@ export async function runDoctor(options = {}) {
   const okCount = checks.length - failCount - warnCount;
   const exitCode = failCount === 0 ? 0 : 1;
   const summary = `Doctor checked ${checks.length} items: OK=${okCount}, WARN=${warnCount}, FAIL=${failCount}`;
+  const nextRecommendedActions =
+    exitCode === 0
+      ? ['Call aitest_init(dryRun=true) or run "verify-change" on an initialized QA workspace.']
+      : checks.filter((c) => c.status === 'FAIL').map((c) => `Fix FAILED check "${c.name}": ${c.detail}`);
+
+  return {
+    ok: exitCode === 0,
+    exitCode,
+    failCount,
+    warnCount,
+    okCount,
+    summary,
+    checks,
+    nextRecommendedActions,
+  };
+}
+
+/**
+ * @param {{
+ *   lang?: 'zh' | 'en' | string,
+ *   target?: string,
+ *   qaDir?: string,
+ *   dryRun?: boolean,
+ *   force?: boolean,
+ *   json?: boolean,
+ * }} [options]
+ * @returns {Promise<number>}
+ */
+export async function runDoctor(options = {}) {
+  const lang = options.lang === 'zh' ? 'zh' : 'en';
+  const report = await collectDoctorReport(options);
 
   if (!options.json) {
     console.log(`\n=== ${lang === 'zh' ? 'AI Test Workbench 环境体检 (doctor)' : 'AI Test Workbench Environment Doctor'} ===`);
-    for (const c of checks) {
+    for (const c of report.checks) {
       const badge = c.status === 'OK' ? '[OK]  ' : c.status === 'WARN' ? '[WARN]' : '[FAIL]';
       console.log(`${badge} ${c.name}: ${c.detail}`);
     }
     console.log(
-      `\n${lang === 'zh' ? '汇总' : 'Summary'}: OK=${okCount}, WARN=${warnCount}, FAIL=${failCount}\n`
+      `\n${lang === 'zh' ? '汇总' : 'Summary'}: OK=${report.okCount}, WARN=${report.warnCount}, FAIL=${report.failCount}\n`
     );
   }
 
   return emitCommandResult(
     buildCommandResult({
       tool: 'doctor',
-      outcome: exitCode === 0 ? 'pass' : 'fail',
-      ok: exitCode === 0,
-      exitCode,
-      summary,
-      data: { ok: exitCode === 0, failCount, warnCount, checks },
-      nextRecommendedActions:
-        exitCode === 0
-          ? ['Call aitest_init(dryRun=true) or run "verify-change" on an initialized QA workspace.']
-          : checks.filter((c) => c.status === 'FAIL').map((c) => `Fix FAILED check "${c.name}": ${c.detail}`),
+      outcome: report.ok ? 'pass' : 'fail',
+      ok: report.ok,
+      exitCode: report.exitCode,
+      summary: report.summary,
+      data: { ok: report.ok, failCount: report.failCount, warnCount: report.warnCount, checks: report.checks },
+      nextRecommendedActions: report.nextRecommendedActions,
     }),
     { asJson: Boolean(options.json) }
   );

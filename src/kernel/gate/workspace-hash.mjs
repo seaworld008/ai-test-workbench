@@ -2,7 +2,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execGitSync, resolveGitRoot } from './git-utils.mjs';
+import { canonicalFsPath, execGitSync, resolveGitRoot } from './git-utils.mjs';
 
 const WORKSPACE_HASH_IGNORE_DIRS = new Set([
   '.git',
@@ -37,20 +37,22 @@ export function sha256Hex(content) {
  */
 export function computeWorkspaceInputHash(qaDir, repoDir = path.dirname(qaDir)) {
   const hash = crypto.createHash('sha256');
-  const resolvedQa = path.resolve(qaDir);
-  const resolvedRepo = path.resolve(repoDir);
+  const resolvedQa = canonicalFsPath(qaDir);
+  const resolvedRepo = canonicalFsPath(repoDir);
 
+  const repoWithSep = resolvedRepo.endsWith(path.sep) ? resolvedRepo : `${resolvedRepo}${path.sep}`;
   const looksLikeRealHostRepo =
     resolvedRepo !== resolvedQa &&
-    resolvedQa.startsWith(resolvedRepo) &&
+    resolvedQa.startsWith(repoWithSep) &&
     (path.basename(resolvedQa) === 'qa' ||
       Boolean(resolveGitRoot(resolvedRepo)) ||
       fs.existsSync(path.join(resolvedRepo, 'package.json')));
 
   const scanRoot = looksLikeRealHostRepo ? resolvedRepo : resolvedQa;
   const gitRoot = resolveGitRoot(scanRoot);
+  const gitRootWithSep = gitRoot ? (gitRoot.endsWith(path.sep) ? gitRoot : `${gitRoot}${path.sep}`) : '';
 
-  if (gitRoot && (scanRoot === gitRoot || scanRoot.startsWith(`${gitRoot}${path.sep}`))) {
+  if (gitRoot && (scanRoot === gitRoot || scanRoot.startsWith(gitRootWithSep))) {
     const relSub = path.relative(gitRoot, scanRoot).replace(/\\/g, '/') || '.';
     const lsRes = execGitSync(gitRoot, ['ls-files', '-s', '-z', '--', relSub], { timeoutMs: 10_000 });
     if (lsRes.status === 0) {

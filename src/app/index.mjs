@@ -13,8 +13,16 @@ export { analyzeHealerDiffText, runAuditCommand, runAuditForQaDir } from '../aud
 export { bootstrapWorkspaceCore, inferRuntimeConfigForRepo, runBootstrapCommand } from '../bootstrap.mjs';
 export { runCli } from '../cli.mjs';
 export { CLI_COMMANDS } from '../cli/commands.mjs';
-export { runMapCommand, syncLivingCodeMap } from '../codemap.mjs';
+export {
+  createRoutePatternMatcher,
+  listCodeMapAdapters,
+  registerCodeMapAdapter,
+  runMapCommand,
+  syncLivingCodeMap,
+  unregisterCodeMapAdapter,
+} from '../codemap.mjs';
 export { generateDiagnosticsMarkdown, runDiagnoseCommand, suggestFailureCategory } from '../diagnose.mjs';
+export { collectDoctorReport, runDoctor } from '../doctor.mjs';
 export { computeFlakyReport, runFlakyCommand, syncQuarantineFromLedger } from '../flaky.mjs';
 export { ensureInitialGovernanceLock, runGovernanceCommand, writeGovernanceLock } from '../governance.mjs';
 export {
@@ -26,8 +34,14 @@ export {
   runHealCommand,
 } from '../heal.mjs';
 export { computeImpact, evaluateImpactForFiles, runImpactCommand } from '../impact.mjs';
-export { runInit } from '../init.mjs';
-export { beginRunLedger, finalizeRunLedger, readLedgerHistory, resolveGitHeadSha } from '../ledger.mjs';
+export {
+  STACK_DESCRIPTORS,
+  detectPackageManager,
+  registerStackDescriptor,
+  runInit,
+  unregisterStackDescriptor,
+} from '../init.mjs';
+export { beginRunLedger, finalizeRunLedger, readJsonlTail, readLedgerHistory, resolveGitHeadSha } from '../ledger.mjs';
 export { TOOL_REGISTRY } from '../mcp/registry.mjs';
 export { handleMcpJsonRpcMessage } from '../mcp-server.mjs';
 export { evaluateTargetSafety, checkOutgoingRequestSafety, loadMergedQaEnv } from '../origin-guard.mjs';
@@ -41,12 +55,14 @@ export { runUpgradeCommand, upgradeQaWorkspace } from '../upgrade.mjs';
 export { checkHealSessionConflicts, runVerifyChangeCommand, verifyChangeCore } from '../verdict.mjs';
 export {
   GATE_KERNEL_VERSION,
+  clearGitRootCache,
   compareChangesetAst,
   compareSpecSourcesAst,
   computeDomainHmac,
   computeWorkspaceInputHash,
   openTrustContext,
   resolveDefaultDiffBase,
+  resolveGitHeadAndTreeSha,
   resolveGitTreeSha,
   resolveTypeScriptCompiler,
   scanSpecFilesFallback,

@@ -190,6 +190,7 @@ export async function runCli(argv = process.argv.slice(2)) {
       args: cmdArgv,
       allowPositionals: true,
       strict: true,
+      tokens: true,
       options: spec.options,
     });
   } catch (err) {
@@ -236,7 +237,7 @@ export async function runCli(argv = process.argv.slice(2)) {
   }
 
   try {
-    return await spec.run(v, parsed.positionals, lang);
+    return await spec.run(v, parsed.positionals, lang, parsed.tokens);
   } catch (err) {
     const msg = err instanceof Error && err.message ? err.message : String(err);
     if (!v.json) console.error(`[Error] ${msg}`);

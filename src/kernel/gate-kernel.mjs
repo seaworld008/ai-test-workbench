@@ -45,11 +45,14 @@ export {
 } from './gate/baseline-ref.mjs';
 
 export {
+  canonicalFsPath,
+  clearGitRootCache,
   execGitSync,
   getFileAtGitRef,
   listChangedFilesUnderDir,
   parseGitDiffHeaderPath,
   resolveDefaultDiffBase,
+  resolveGitHeadAndTreeSha,
   resolveGitHeadSha,
   resolveGitIdentity,
   resolveGitRoot,

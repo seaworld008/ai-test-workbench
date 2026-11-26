@@ -71,10 +71,10 @@ function checkUniversalTestSafety(rel, stripped, errors, hasGuardedBaseFixture) 
  * Scans ALL `tests` TS/JS/MJS files (except locked `fixtures/base.ts`) for egress/import safety,
  * and runs full AST semantic rules on executable `*.spec.*` / `*.test.*` specs.
  * @param {string} testsDir
- * @param {{ assertFunctionNames?: string[], activeWaivers?: Array<Record<string, any>>, qaDir?: string, rulesConfig?: Record<string, any> }} [options]
+ * @param {{ assertFunctionNames?: string[], customMatchers?: Record<string, number>, activeWaivers?: Array<Record<string, any>>, qaDir?: string, rulesConfig?: Record<string, any> }} [options]
  */
 export function scanSpecFilesFallback(testsDir, options = {}) {
-  const { assertFunctionNames = ['expect*', 'assert*', 'verify*'], activeWaivers = [], qaDir, rulesConfig = {} } = options;
+  const { assertFunctionNames = ['expect*', 'assert*', 'verify*'], customMatchers, activeWaivers = [], qaDir, rulesConfig = {} } = options;
   const errors = [...validateAssertFunctionNames(assertFunctionNames)];
   if (!fs.existsSync(testsDir)) return { ok: errors.length === 0, errors };
 
@@ -108,7 +108,7 @@ export function scanSpecFilesFallback(testsDir, options = {}) {
       }
 
       if (ts) {
-        const astSum = analyzeSourceAst(rel, raw, { assertFunctionNames, qaDir: qaDir || path.dirname(testsDir) });
+        const astSum = analyzeSourceAst(rel, raw, { assertFunctionNames, customMatchers, qaDir: qaDir || path.dirname(testsDir) });
         const emptyBaseSum = {
           file: rel,
           usedAst: true,
@@ -228,6 +228,7 @@ export function runStaticSpecChecks(qaDir, options = {}) {
     }
     const semanticScan = scanSpecFilesFallback(testsDir, {
       assertFunctionNames: cfg.assertFunctionNames,
+      customMatchers: cfg.customMatchers || {},
       activeWaivers,
       qaDir,
       rulesConfig: cfg.rules || {},
@@ -244,6 +245,7 @@ export function runStaticSpecChecks(qaDir, options = {}) {
     }
     const fallback = scanSpecFilesFallback(testsDir, {
       assertFunctionNames: cfg.assertFunctionNames,
+      customMatchers: cfg.customMatchers || {},
       activeWaivers,
       qaDir,
       rulesConfig: cfg.rules || {},

@@ -1,6 +1,6 @@
 // @ts-check
 import { MAX_EXPLORE_PAGES } from '../../explore/safety.mjs';
-import { getMcpPresetsSummary } from '../../mcp-hub/catalog.mjs';
+import { executeDoctorReadOnlyFastPath, executeMcpHubReadOnlyFastPath } from './fast-paths.mjs';
 import { ASYNC_JOB_PROPS, pushBool, pushOpt } from './shared.mjs';
 
 /** @type {import('./shared.mjs').ToolRegistryEntry[]} */
@@ -33,6 +33,7 @@ export const DISCOVERY_TOOLS = [
       checks: { type: 'array' },
     },
     isReadOnly: () => true,
+    execute: executeDoctorReadOnlyFastPath,
     buildCliArgs: (_args, target, lang) => {
       const a = ['doctor', '--json', `--lang=${lang}`];
       pushOpt(a, '--target', target);
@@ -315,15 +316,7 @@ export const DISCOVERY_TOOLS = [
     },
     dataProps: {},
     skipWorkspaceBoundary: (args) => args.action === 'presets',
-    execute: (args) => {
-      if (args.action !== 'presets') return null;
-      return {
-        ok: true,
-        exitCode: 0,
-        summary: 'Listed 7-pillar pinned MCP presets',
-        data: getMcpPresetsSummary(),
-      };
-    },
+    execute: executeMcpHubReadOnlyFastPath,
     isReadOnly: (args) => args.action === 'presets' || (args.action === 'doctor' && !args.lock),
     buildCliArgs: (args, target, lang) => {
       const a = ['mcp', args.action || 'presets', '--json', `--lang=${lang}`];

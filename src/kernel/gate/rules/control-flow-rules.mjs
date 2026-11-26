@@ -201,10 +201,46 @@ export const ruleG109 = {
 };
 
 /**
+ * Counts unconditional non-tautological assertions per lexical scope (`testTitle || '<top-level>'`).
+ * @param {import('../parser.mjs').AstAssertion[] | undefined} assertions
+ * @returns {Map<string, number>}
+ */
+function countUnconditionalByScope(assertions) {
+  /** @type {Map<string, number>} */
+  const counts = new Map();
+  for (const a of assertions || []) {
+    if (a.insideIf || a.insideTernary || a.isTautology) continue;
+    const key = a.testTitle || '<top-level>';
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * Summarizes assertion count, total strength, and max tier per lexical scope (`testTitle || '<top-level>'`).
+ * @param {import('../parser.mjs').AstAssertion[] | undefined} assertions
+ * @returns {Map<string, { count: number, sumTier: number, maxTier: number }>}
+ */
+function summarizeScopeStrength(assertions) {
+  /** @type {Map<string, { count: number, sumTier: number, maxTier: number }>} */
+  const map = new Map();
+  for (const a of assertions || []) {
+    const key = a.testTitle || '<top-level>';
+    const cur = map.get(key) || { count: 0, sumTier: 0, maxTier: 0 };
+    cur.count += 1;
+    cur.sumTier += Number(a.tier || 0);
+    if (Number(a.tier || 0) > cur.maxTier) cur.maxTier = Number(a.tier || 0);
+    map.set(key, cur);
+  }
+  return map;
+}
+
+/**
  * AITEST-G110: Conditional assertions (`if (...) { expect(...) }`, ternary `expect()`, early conditional `return`).
  * Scope-aware: distinguishes file/describe-level conditional test registration (`if (!isBuild) { test(...) }`)
- * from in-test conditional assertion wrapping, and distinguishes rewriting an already-existing early-return guard
- * in the same scope from introducing a new early-return bypass.
+ * from in-test conditional assertion wrapping, distinguishes rewriting an already-existing early-return guard
+ * in the same scope from introducing a new early-return bypass, and allows strengthening an already-existing
+ * `if`-wrapped assertion in-place when scope conditional/unconditional counts and assertion strength are conserved.
  */
 export const ruleG110 = {
   code: 'AITEST-G110',
@@ -214,11 +250,26 @@ export const ruleG110 = {
   defaultEnabled: true,
   /** @param {RuleEvalCtx} ctx @returns {GateFinding[]} */
   evaluate(ctx) {
-    const { file = '', baseSum, headSum, canWaive = () => false } = ctx;
+    const { file = '', baseSum, headSum, canWaive = () => false, priorFindingCodes = null } = ctx;
     /** @type {GateFinding[]} */
     const findings = [];
     const baseEarlyByScope = countByScope(baseSum?.events?.conditionalAssertions, (e) => e.kind === 'early-return');
     const headEarlyByScope = countByScope(headSum?.events?.conditionalAssertions, (e) => e.kind === 'early-return');
+    const baseIfWrapByScope = countByScope(
+      baseSum?.events?.conditionalAssertions,
+      (e) => e.kind === 'if-wrap' && e.insideIfInTest !== false
+    );
+    const headIfWrapByScope = countByScope(
+      headSum?.events?.conditionalAssertions,
+      (e) => e.kind === 'if-wrap' && e.insideIfInTest !== false
+    );
+    const baseUncondByScope = countUnconditionalByScope(baseSum?.assertions);
+    const headUncondByScope = countUnconditionalByScope(headSum?.assertions);
+    const baseScopeStrength = summarizeScopeStrength(baseSum?.assertions);
+    const headScopeStrength = summarizeScopeStrength(headSum?.assertions);
+    const hasFileAssertionDowngrade = Boolean(
+      priorFindingCodes && (priorFindingCodes.has('AITEST-G102') || priorFindingCodes.has('AITEST-G103'))
+    );
 
     for (const ev of diffEventSnippets(baseSum?.events?.conditionalAssertions, headSum?.events?.conditionalAssertions)) {
       if (canWaive(ev.snippet) || canWaive('AITEST-G110')) continue;
@@ -230,6 +281,30 @@ export const ruleG110 = {
         const baseCnt = baseEarlyByScope.get(scopeKey) || 0;
         const headCnt = headEarlyByScope.get(scopeKey) || 0;
         if (baseCnt > 0 && headCnt <= baseCnt) continue;
+      }
+      // Editing/strengthening a pre-existing `if-wrap` assertion in the same scope without adding new
+      // conditional assertions, reducing unconditional assertions, or weakening assertion strength (`AST Gate v2.2`)
+      if (ev.kind === 'if-wrap') {
+        const scopeKey = ev.testTitle || '<top-level>';
+        const baseIfCnt = baseIfWrapByScope.get(scopeKey) || 0;
+        const headIfCnt = headIfWrapByScope.get(scopeKey) || 0;
+        const baseUncondCnt = baseUncondByScope.get(scopeKey) || 0;
+        const headUncondCnt = headUncondByScope.get(scopeKey) || 0;
+        const bStr = baseScopeStrength.get(scopeKey) || { count: 0, sumTier: 0, maxTier: 0 };
+        const hStr = headScopeStrength.get(scopeKey) || { count: 0, sumTier: 0, maxTier: 0 };
+        const assertionSelfStrong = !ev.isTautology && typeof ev.tier === 'number' && ev.tier >= 2;
+        const scopeConserved =
+          hStr.count >= bStr.count && hStr.sumTier >= bStr.sumTier && hStr.maxTier >= bStr.maxTier;
+        if (
+          !hasFileAssertionDowngrade &&
+          assertionSelfStrong &&
+          baseIfCnt > 0 &&
+          headIfCnt <= baseIfCnt &&
+          headUncondCnt >= baseUncondCnt &&
+          scopeConserved
+        ) {
+          continue;
+        }
       }
       findings.push({
         code: 'AITEST-G110',

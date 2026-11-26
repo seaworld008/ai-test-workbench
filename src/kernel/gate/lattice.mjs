@@ -3,6 +3,12 @@ import {
   inspectMatcherExpectedArgAst,
   isConstantExpressionAst,
 } from './constant-eval.mjs';
+import {
+  classifyCustomDomainMatcherAst,
+  extractNumericArray,
+  extractScreenshotTolerances,
+  extractStatusOracleMeta,
+} from './lattice-helpers.mjs';
 import { resolveTypeScriptCompiler, unwrapExpr } from './ts-loader.mjs';
 
 export const S5_EXACT_MATCHERS = new Set([
@@ -51,103 +57,6 @@ function isBooleanComparisonOrIncludesAst(ts, rawNode) {
     return ['includes', 'some', 'every'].includes(n.expression.name.text);
   }
   return false;
-}
-
-/** @param {any} ts @param {any} sf @param {any} rawNode */
-function extractNumericArray(ts, sf, rawNode) {
-  const n = rawNode ? unwrapExpr(ts, rawNode) : null;
-  if (!n || !ts.isArrayLiteralExpression(n)) return [];
-  /** @type {number[]} */
-  const out = [];
-  for (const el of n.elements) {
-    const u = unwrapExpr(ts, el);
-    if (ts.isNumericLiteral(u)) out.push(Number(u.text));
-  }
-  return out;
-}
-
-/** @param {any} ts @param {any} sf @param {string} matcher @param {any} chain @param {any} [symbolTable] @param {string | null} [testTitle] */
-function extractStatusOracleMeta(ts, sf, matcher, chain, symbolTable = null, testTitle = null) {
-  const actUnwrapped = chain.actualNode ? unwrapExpr(ts, chain.actualNode) : null;
-  const expUnwrappedRaw = chain.expectedNode ? unwrapExpr(ts, chain.expectedNode) : null;
-  const expUnwrapped =
-    expUnwrappedRaw && ts.isIdentifier(expUnwrappedRaw) && symbolTable?.getConstInit
-      ? unwrapExpr(ts, symbolTable.getConstInit(testTitle, expUnwrappedRaw.text) || expUnwrappedRaw)
-      : expUnwrappedRaw;
-  const actText = actUnwrapped ? actUnwrapped.getText(sf) : '';
-  const expText = expUnwrapped ? expUnwrapped.getText(sf) : '';
-  const isActStatusVar = Boolean(
-    actUnwrapped && ts.isIdentifier(actUnwrapped) && symbolTable?.isStatusVar?.(testTitle, actUnwrapped.text)
-  );
-  const isExpStatusVar = Boolean(
-    expUnwrappedRaw && ts.isIdentifier(expUnwrappedRaw) && symbolTable?.isStatusVar?.(testTitle, expUnwrappedRaw.text)
-  );
-  const isActStatus =
-    isActStatusVar || /\.status\s*(?:\(\s*\))?$/.test(actText.trim()) || /^(?:res|response)?status(?:Code)?$/i.test(actText.trim());
-  const isExpStatus =
-    isExpStatusVar || /\.status\s*(?:\(\s*\))?$/.test(expText.trim()) || /^(?:res|response)?status(?:Code)?$/i.test(expText.trim());
-
-  /** @type {number[]} */
-  let statusCodes = [];
-  let isStatusRangeCheck = false;
-
-  // Detect century/digit obfuscation (`String(res.status())[0]`, `res.status().toString()[0]`, `Math.floor(res.status() / 100)`) (`G2-F10`)
-  const actRefsStatus = /\.status\b/.test(actText) || (symbolTable?.isStatusVar && /\b([A-Za-z_$][\w$]*)\b/.test(actText) &&
-    (actText.match(/\b[A-Za-z_$][\w$]*\b/g) || []).some((/** @type {string} */ id) => symbolTable.isStatusVar(testTitle, id)));
-  const isCenturySlice =
-    !isActStatus &&
-    actRefsStatus &&
-    (/(?:String\s*\([^)]*\)|\.toString\s*\(\s*\))\s*(?:\[\s*0\s*\]|\.startsWith\s*\()/.test(actText) ||
-      /(?:Math\.(?:floor|trunc)|parseInt)\s*\([^)]*\/\s*100\b/.test(actText));
-
-  if (isActStatus) {
-    if (expUnwrapped && ts.isNumericLiteral(expUnwrapped)) {
-      statusCodes = [Number(expUnwrapped.text)];
-      if (/^toBe(?:Less|Greater)Than/.test(matcher)) isStatusRangeCheck = true;
-    } else if (expUnwrapped && ts.isArrayLiteralExpression(expUnwrapped)) {
-      statusCodes = extractNumericArray(ts, sf, expUnwrapped);
-    }
-  } else if (isCenturySlice) {
-    isStatusRangeCheck = true;
-    const digit =
-      expUnwrapped && (ts.isStringLiteral(expUnwrapped) || ts.isNumericLiteral(expUnwrapped))
-        ? Number(String(expUnwrapped.text).trim())
-        : NaN;
-    if (digit >= 1 && digit <= 5) statusCodes = [digit * 100];
-  } else if (matcher === 'toContain' && isExpStatus) {
-    statusCodes = extractNumericArray(ts, sf, chain.actualNode);
-  } else if (matcher === 'toBe' && /^(true|false)$/.test(expText.trim()) && actRefsStatus) {
-    if (actUnwrapped && ts.isBinaryExpression(actUnwrapped)) {
-      isStatusRangeCheck = true;
-    } else if (actUnwrapped && ts.isCallExpression(actUnwrapped)) {
-      statusCodes = extractNumericArray(ts, sf, actUnwrapped.expression?.expression);
-    }
-  }
-
-  return {
-    isStatusCheck: isActStatus || isCenturySlice || (matcher === 'toContain' && isExpStatus) || isStatusRangeCheck || statusCodes.length > 0,
-    statusCodes,
-    isStatusRangeCheck: isStatusRangeCheck || statusCodes.length > 1,
-  };
-}
-
-/** @param {any} ts @param {any} sf @param {any} args */
-function extractScreenshotTolerances(ts, sf, args) {
-  /** @type {Record<string, number>} */
-  const opts = {};
-  for (const arg of args || []) {
-    const u = unwrapExpr(ts, arg);
-    if (!u || !ts.isObjectLiteralExpression(u)) continue;
-    for (const p of u.properties) {
-      if (!ts.isPropertyAssignment(p)) continue;
-      const k = ts.isIdentifier(p.name) ? p.name.text : ts.isStringLiteral(p.name) ? p.name.text : '';
-      const v = unwrapExpr(ts, p.initializer);
-      if (['maxDiffPixelRatio', 'maxDiffPixels', 'threshold'].includes(k) && ts.isNumericLiteral(v)) {
-        opts[k] = Number(v.text);
-      }
-    }
-  }
-  return Object.keys(opts).length > 0 ? opts : null;
 }
 
 /**
@@ -228,12 +137,12 @@ export function extractExpectChainFromCall(ts, sf, callNode, symbolTable = null)
 }
 
 /**
- * Classifies an AST expect chain on the S0..S5 strength lattice (`WU-05`).
+ * Classifies an AST expect chain on the S0..S5 strength lattice (`WU-05`, `AST Gate v2.2`).
  * @param {any} ts @param {any} sf @param {any} chain @param {string} rawText
- * @param {{ symbolTable?: any, testTitle?: string | null }} [opts]
+ * @param {{ symbolTable?: any, testTitle?: string | null, customMatchers?: Record<string, number> }} [opts]
  */
 export function classifyExpectChainAst(ts, sf, chain, rawText, opts = {}) {
-  const { symbolTable = null, testTitle = null } = opts;
+  const { symbolTable = null, testTitle = null, customMatchers = null } = opts;
 
   if (chain.kind === 'domainHelper') {
     const extraArgs = (chain.matcherArgs || []).slice(1);
@@ -340,6 +249,7 @@ export function classifyExpectChainAst(ts, sf, chain, rawText, opts = {}) {
 
   let baseTier = 3;
   let label = 'S3-other';
+  let consolidatedFieldCount = 0;
 
   if (expInfo.isNonEmptyRegex) {
     baseTier = 1;
@@ -383,6 +293,13 @@ export function classifyExpectChainAst(ts, sf, chain, rawText, opts = {}) {
   } else if (S1_WEAK_MATCHERS.has(matcher)) {
     baseTier = 1;
     label = 'S1-weak';
+  } else {
+    const customDomain = classifyCustomDomainMatcherAst(ts, matcher, chain, expArgs, customMatchers);
+    if (customDomain) {
+      baseTier = customDomain.baseTier;
+      label = customDomain.label;
+      consolidatedFieldCount = customDomain.consolidatedFieldCount;
+    }
   }
 
   const finalTier = chain.isNegated ? Math.max(1, baseTier - 2) : baseTier;
@@ -399,6 +316,7 @@ export function classifyExpectChainAst(ts, sf, chain, rawText, opts = {}) {
     isSelfReferential: false,
     isVacuous: false,
     isAriaSnapshot: matcher === 'toMatchAriaSnapshot',
+    consolidatedFieldCount,
     implicitCountCredit:
       matcher === 'toHaveText' && Boolean(chain.expectedNode && ts.isArrayLiteralExpression(unwrapExpr(ts, chain.expectedNode))),
     hasApiSchema: false,

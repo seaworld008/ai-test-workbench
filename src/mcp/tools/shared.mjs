@@ -14,10 +14,15 @@ export function makeOutputSchema(dataProperties = {}) {
   return {
     type: 'object',
     properties: {
+      schemaVersion: { type: 'integer' },
       ok: { type: 'boolean' },
       exitCode: { type: 'integer' },
+      outcome: { type: 'string' },
       tool: { type: 'string' },
       summary: { type: 'string' },
+      recoverable: { type: 'boolean' },
+      blockerKind: { type: ['string', 'null'] },
+      recoverySteps: { type: 'array', items: { type: 'string' } },
       data: {
         type: 'object',
         properties: dataProperties,
@@ -56,6 +61,10 @@ export function pushBool(arr, flag, val) {
  * @typedef {{
  *   ok: boolean,
  *   exitCode: number,
+ *   outcome?: string,
+ *   recoverable?: boolean,
+ *   blockerKind?: string | null,
+ *   recoverySteps?: string[],
  *   summary: string,
  *   data: Record<string, any>,
  *   nextActions?: string[],
@@ -69,6 +78,7 @@ export function pushBool(arr, flag, val) {
  *   target: string | null,
  *   lang: string,
  *   protocolVersion: string,
+ *   onProgress?: ((info: { progress: number, message: string }) => void) | null,
  * }} ToolExecContext
  */
 

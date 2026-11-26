@@ -12,8 +12,10 @@ import {
   suggestFailureCategory,
 } from './diagnose/classifier.mjs';
 import { correlateFailureWithFrontendDiff } from './diagnose/diff-correlator.mjs';
+import { classifyFailureRegressionHistory, createRegressionHistoryClassifier } from './diagnose/history.mjs';
 
 export {
+  classifyFailureRegressionHistory,
   correlateFailureWithFrontendDiff,
   extractQueryableTraceId,
   parsePlaywrightErrorEvidence,
@@ -29,6 +31,7 @@ export {
  *   line: number,
  *   projectName: string,
  *   status: string,
+ *   regressionHistory: import('./diagnose/history.mjs').RegressionHistoryKind,
  *   categoryCode: string,
  *   subCategory?: string | null,
  *   category: string,
@@ -161,7 +164,9 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
   if (!fs.existsSync(resultsPath)) {
     throw new Error(`Results file not found: ${resultsPath}`);
   }
-  const resultsJson = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
+  const rawResultsText = fs.readFileSync(resultsPath, 'utf8');
+  const resultsJson = JSON.parse(rawResultsText);
+  const classifyRegressionHistory = createRegressionHistoryClassifier(qaDir, rawResultsText, resultsJson);
   const failures = flattenPlaywrightResults(resultsJson)
     .filter((t) => t.status === 'unexpected' || t.status === 'flaky' || t.retryPassed)
     .map((t) => ({
@@ -226,6 +231,7 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
     const queryTraceId = injectedTraceId || (traceIds[0] ? extractQueryableTraceId(traceIds[0]) : '<trace-id>');
     const normFile = String(f.file || '').replace(/\\/g, '/');
     const testId = f.testId || `${normFile}::${String(f.title || '').replace(/\\/g, '/')}`;
+    const regressionHistory = classifyRegressionHistory(testId, f.status);
 
     diagnosedFailures.push({
       testId,
@@ -234,6 +240,7 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
       line: f.line,
       projectName: f.projectName,
       status: f.status,
+      regressionHistory,
       categoryCode: triage.categoryCode,
       subCategory,
       category: triage.category,
@@ -257,6 +264,7 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
     lines.push(
       `- **Suggested Category**: **${triage.category}** *(confidence: ${triage.confidence}, candidates: ${triage.candidates.join('/')})*`
     );
+    lines.push(`- **Regression History**: \`${regressionHistory}\``);
     lines.push(`- **Action Guidance**: ${triage.guidance}`);
     if (timeWindow) {
       lines.push(`- **Test Time Window**: \`${timeWindow.startedAt}\` → \`${timeWindow.finishedAt}\``);

@@ -1,0 +1,134 @@
+// @ts-check
+
+/**
+ * @typedef {import('./governance-rules.mjs').RuleEvalCtx} RuleEvalCtx
+ */
+
+/**
+ * Computes commit-level cross-file assertion & strength pooling metrics when `changesetContext`
+ * contains multiple changed spec files (e.g. splitting a large spec into sibling spec files).
+ * @param {RuleEvalCtx['changesetContext']} changesetContext
+ * @param {string} currentFile
+ */
+export function computeChangesetPoolMetrics(changesetContext, currentFile) {
+  const entries = changesetContext?.entries;
+  if (!Array.isArray(entries) || entries.length <= 1) return null;
+
+  let totalBaseCount = 0;
+  let totalHeadCount = 0;
+  let totalBaseStrength = 0;
+  let totalHeadStrength = 0;
+  let totalBaseMax = 0;
+  let totalHeadMax = 0;
+  let siblingAddedCount = 0;
+  let siblingAddedStrength = 0;
+  let totalBaseCriticalTags = 0;
+  let totalHeadCriticalTags = 0;
+  let siblingAddedCriticalTags = 0;
+
+  for (const e of entries) {
+    if (e.isExecutableSpec === false && e.filePath !== currentFile) continue;
+    const bAsserts = e.baseSum?.assertions || [];
+    const hAsserts = e.headSum?.assertions || [];
+    const bCount = bAsserts.length;
+    const hCount = hAsserts.length;
+    const bStr = bAsserts.reduce((/** @type {number} */ s, /** @type {any} */ a) => s + a.tier, 0);
+    const hStr = hAsserts.reduce((/** @type {number} */ s, /** @type {any} */ a) => s + a.tier, 0);
+    const bMax = bCount > 0 ? Math.max(...bAsserts.map((/** @type {any} */ a) => a.tier)) : 0;
+    const hMax = hCount > 0 ? Math.max(...hAsserts.map((/** @type {any} */ a) => a.tier)) : 0;
+    const bCrit = (e.baseSum?.criticalTags || []).length;
+    const hCrit = (e.headSum?.criticalTags || []).length;
+
+    totalBaseCount += bCount;
+    totalHeadCount += hCount;
+    totalBaseStrength += bStr;
+    totalHeadStrength += hStr;
+    totalBaseCriticalTags += bCrit;
+    totalHeadCriticalTags += hCrit;
+    if (bMax > totalBaseMax) totalBaseMax = bMax;
+    if (hMax > totalHeadMax) totalHeadMax = hMax;
+
+    if (e.filePath !== currentFile) {
+      if (hCount > bCount) siblingAddedCount += hCount - bCount;
+      if (hStr > bStr) siblingAddedStrength += hStr - bStr;
+      if (hCrit > bCrit) siblingAddedCriticalTags += hCrit - bCrit;
+    }
+  }
+
+  return {
+    totalBaseCount,
+    totalHeadCount,
+    totalBaseStrength,
+    totalHeadStrength,
+    totalBaseMax,
+    totalHeadMax,
+    siblingAddedCount,
+    siblingAddedStrength,
+    totalBaseCriticalTags,
+    totalHeadCriticalTags,
+    siblingAddedCriticalTags,
+  };
+}
+
+/**
+ * Filters assertions to baseline-existing test blocks when `baselineTestTitles` is provided (`WU-04`).
+ * @param {any[]} assertions
+ * @param {Set<string> | null | undefined} baselineTestTitles
+ */
+export function scopeAssertionsToBaseline(assertions, baselineTestTitles) {
+  if (!baselineTestTitles) return assertions;
+  return assertions.filter((a) => !a.testTitle || baselineTestTitles.has(a.testTitle));
+}
+
+/**
+ * Computes per-scope consolidation credit when newly introduced structured custom domain matchers
+ * (`consolidatedFieldCount >= 2`, capped `<= 3`) replace multiple granular assertions within the
+ * SAME lexical test scope without downgrading that scope's max assertion tier (`AST Gate v2.2`).
+ * @param {any[]} baseAsserts
+ * @param {any[]} headAsserts
+ */
+export function computeStructuredConsolidationCredit(baseAsserts, headAsserts) {
+  /** @type {Map<string, any[]>} */
+  const baseByScope = new Map();
+  /** @type {Map<string, any[]>} */
+  const headByScope = new Map();
+
+  for (const a of baseAsserts || []) {
+    const k = a.testTitle || '<top-level>';
+    const list = baseByScope.get(k) || [];
+    list.push(a);
+    baseByScope.set(k, list);
+  }
+  for (const a of headAsserts || []) {
+    const k = a.testTitle || '<top-level>';
+    const list = headByScope.get(k) || [];
+    list.push(a);
+    headByScope.set(k, list);
+  }
+
+  let countCredit = 0;
+  let strengthCredit = 0;
+  for (const [scopeKey, hList] of headByScope.entries()) {
+    const bList = baseByScope.get(scopeKey) || [];
+    if (bList.length === 0 || hList.length === 0) continue;
+    const bMax = Math.max(...bList.map((a) => a.tier));
+    const hMax = Math.max(...hList.map((a) => a.tier));
+    if (hMax < bMax) continue;
+
+    const bExtra = bList.reduce((s, a) => s + Math.max(0, Math.min(3, Number(a.consolidatedFieldCount || 0)) - 1), 0);
+    const hExtra = hList.reduce((s, a) => s + Math.max(0, Math.min(3, Number(a.consolidatedFieldCount || 0)) - 1), 0);
+    const deltaExtra = Math.max(0, hExtra - bExtra);
+    if (deltaExtra === 0) continue;
+
+    const countDeficit = Math.max(0, bList.length - hList.length);
+    const scopeCountCredit = Math.min(deltaExtra, countDeficit);
+    countCredit += scopeCountCredit;
+
+    const bStr = bList.reduce((s, a) => s + a.tier, 0);
+    const hStr = hList.reduce((s, a) => s + a.tier, 0);
+    const strengthDeficit = Math.max(0, bStr - hStr);
+    strengthCredit += Math.min(deltaExtra * 3, strengthDeficit);
+  }
+
+  return { countCredit, strengthCredit };
+}

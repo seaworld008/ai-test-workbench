@@ -14,20 +14,22 @@ import { loadRuntimeConfig } from './core/runtime-config.mjs';
 import { SCHEMA_VERSIONS, WORKBENCH_VERSION } from './core/version.mjs';
 import { generateDiagnosticsMarkdown } from './diagnose.mjs';
 import { computeImpact } from './impact.mjs';
-import { openTrustContext, resolveGitTreeSha } from './kernel/gate-kernel.mjs';
-import { resolveGitHeadSha } from './ledger.mjs';
+import { openTrustContext, resolveGitHeadAndTreeSha } from './kernel/gate-kernel.mjs';
 import { evaluateTargetSafety, loadMergedQaEnv } from './origin-guard.mjs';
 import { resolvePlaywrightCli } from './proc.mjs';
 import { executeSuiteCore } from './runner.mjs';
 import { buildRequirementTraceMatrix } from './traceability.mjs';
 import {
   TRUST_LEVEL_DEFINITIONS,
-  buildInTotoVerdictAttestation,
   resolveVerdictTrustTier,
-  tryCosignKeylessSign,
 } from './trust.mjs';
 import { buildBlockedVerdict } from './verdict/blocked.mjs';
-import { buildPrVerdictMarkdown, buildSarifReport, checkHealSessionConflicts } from './verdict/reports.mjs';
+import {
+  buildPrVerdictMarkdown,
+  buildSarifReport,
+  checkHealSessionConflicts,
+  writeVerdictArtifacts,
+} from './verdict/reports.mjs';
 
 export { buildPrVerdictMarkdown, buildSarifReport, checkHealSessionConflicts };
 
@@ -63,11 +65,14 @@ export async function verifyChangeCore(options = {}) {
 
   // Step 0: Resolve real Git root (monorepo/worktree aware) & safe diff base (`T-05`)
   const baseResolution = resolveDefaultDiffBase(repoDir, options.base || null);
+  /** @type {{ headSha: string, treeSha: string | null } | null} */
+  let cachedGitInfo = null;
+  const getGitInfo = () => (cachedGitInfo ??= resolveGitHeadAndTreeSha(repoDir));
 
   if (!workbenchConfig.ok) {
     return buildBlockedVerdict({
       reasonCode: 'invalid-workbench-config',
-      gitSha: resolveGitHeadSha(repoDir),
+      gitSha: getGitInfo().headSha,
       base: baseResolution,
       requestedMode,
       gates: { governance: 'blocked', static: 'skipped', runtime: 'skipped', semanticDiff: 'skipped' },
@@ -81,7 +86,7 @@ export async function verifyChangeCore(options = {}) {
   if (!govPre.ok) {
     return buildBlockedVerdict({
       reasonCode: 'governance-tamper-detected',
-      gitSha: resolveGitHeadSha(repoDir),
+      gitSha: getGitInfo().headSha,
       base: baseResolution,
       requestedMode,
       gates: { governance: govPre.status || 'blocked', static: 'skipped', runtime: 'skipped', semanticDiff: 'skipped' },
@@ -95,7 +100,7 @@ export async function verifyChangeCore(options = {}) {
   if ((!baseResolution.isGitRepo || !baseResolution.resolved) && !allowNonGit) {
     return buildBlockedVerdict({
       reasonCode: 'semantic-diff-base-unresolved',
-      gitSha: resolveGitHeadSha(repoDir),
+      gitSha: getGitInfo().headSha,
       base: baseResolution,
       requestedMode,
       gates: { governance: govPre.status || 'pass', static: 'skipped', runtime: 'skipped', semanticDiff: 'blocked' },
@@ -123,7 +128,7 @@ export async function verifyChangeCore(options = {}) {
   if (!safety.ok) {
     return buildBlockedVerdict({
       reasonCode: 'target-guard-blocked',
-      gitSha: resolveGitHeadSha(repoDir),
+      gitSha: getGitInfo().headSha,
       base: baseResolution,
       requestedMode,
       gates: { governance: govPre.status || 'pass', static: 'skipped', runtime: 'skipped', semanticDiff: 'skipped' },
@@ -142,7 +147,7 @@ export async function verifyChangeCore(options = {}) {
         'Run aitest bootstrap --target <repo> (or configure loopback baseURL/webServer in qa/aitest.runtime.json).',
         'Or pass --base-url http://127.0.0.1:<port>, or pass --allow-offline-smoke for offline smoke only.',
       ],
-      gitSha: resolveGitHeadSha(repoDir),
+      gitSha: getGitInfo().headSha,
       base: baseResolution,
       requestedMode,
       gates: { governance: govPre.status || 'pass', static: 'skipped', runtime: 'blocked', semanticDiff: 'skipped' },
@@ -162,7 +167,7 @@ export async function verifyChangeCore(options = {}) {
       blockerKind: 'playwright-missing',
       recoverable: true,
       recoverySteps: ['Run aitest bootstrap --target <repo> or "npm --prefix qa ci" to install Playwright.'],
-      gitSha: resolveGitHeadSha(repoDir),
+      gitSha: getGitInfo().headSha,
       base: baseResolution,
       requestedMode,
       gates: { governance: govPre.status || 'pass', static: 'skipped', runtime: 'blocked', semanticDiff: 'skipped' },
@@ -303,8 +308,7 @@ export async function verifyChangeCore(options = {}) {
     }
   }
 
-  const gitSha = resolveGitHeadSha(repoDir);
-  const treeDigest = resolveGitTreeSha(repoDir);
+  const { headSha: gitSha, treeSha: treeDigest } = getGitInfo();
   const trustDef = TRUST_LEVEL_DEFINITIONS[trustTier] || TRUST_LEVEL_DEFINITIONS.T0;
   const verdictPayload = {
     schemaVersion: SCHEMA_VERSIONS.verdict,
@@ -365,58 +369,19 @@ export async function verifyChangeCore(options = {}) {
   };
 
   // Step 8: Write in-toto Statement v1 Attestation, PR Markdown Summary & SARIF 2.1.0
-  const reportsDir = path.join(qaDir, 'reports');
-  fs.mkdirSync(reportsDir, { recursive: true });
-  const mdSummary = buildPrVerdictMarkdown(verdictPayload, lang);
-  const sarifObj = buildSarifReport(verdictPayload);
-  const summaryMdPath = path.join(reportsDir, 'verdict-summary.md');
-  const sarifPath = path.join(reportsDir, 'verdict.sarif.json');
-  fs.writeFileSync(summaryMdPath, mdSummary, 'utf8');
-  fs.writeFileSync(sarifPath, JSON.stringify(sarifObj, null, 2) + '\n', 'utf8');
-
-  if (process.env.GITHUB_STEP_SUMMARY) {
-    try {
-      fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n${mdSummary}\n`, 'utf8');
-    } catch {
-      // ignore CI step summary write failure
-    }
-  }
-
-  let attestationPath = null;
-  let predicatePath = null;
-  let sigstoreBundlePath = null;
-  if (runOut.runId) {
-    const runDir = path.join(qaDir, '.aitest', 'runs', runOut.runId);
-    fs.mkdirSync(runDir, { recursive: true });
-    attestationPath = path.join(runDir, 'attestation.json');
-    predicatePath = path.join(runDir, 'verdict-predicate.json');
-    const statement = buildInTotoVerdictAttestation({
-      verdictPayload,
-      qaDir,
-      repoDir,
-      treeDigest,
-      resultsDigest: auditOut.evidence?.resultsDigest,
-      lockDigest: auditOut.evidence?.lockDigest,
-      gateKernelVersion: GATE_KERNEL_VERSION,
-    });
-    fs.writeFileSync(attestationPath, JSON.stringify(statement, null, 2) + '\n', 'utf8');
-    fs.writeFileSync(predicatePath, JSON.stringify(statement.predicate, null, 2) + '\n', 'utf8');
-
-    const cosignRes = tryCosignKeylessSign(attestationPath);
-    if (cosignRes.signed) {
-      sigstoreBundlePath = cosignRes.bundlePath;
-    }
-  }
+  const artifacts = writeVerdictArtifacts({
+    qaDir,
+    repoDir,
+    lang,
+    verdictPayload,
+    treeDigest,
+    auditOut,
+    gateKernelVersion: GATE_KERNEL_VERSION,
+  });
 
   return {
     ...verdictPayload,
-    artifacts: {
-      summaryMdPath,
-      sarifPath,
-      attestationPath,
-      predicatePath,
-      sigstoreBundlePath,
-    },
+    artifacts,
   };
 }
 

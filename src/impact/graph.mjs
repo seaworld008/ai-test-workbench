@@ -3,7 +3,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { compileGlob } from '../core/glob.mjs';
 import { runProcess } from '../core/proc.mjs';
-import { resolveGitRoot } from '../kernel/gate-kernel.mjs';
+import { canonicalFsPath, resolveGitRoot } from '../kernel/gate-kernel.mjs';
+import {
+  MAX_GRAPH_FILES,
+  buildRepoSourceIndex,
+  resolveRepoImportFromIndex,
+  stripJsCommentsPreserveStrings,
+} from './scanner.mjs';
+
+export { MAX_GRAPH_FILES, stripJsCommentsPreserveStrings };
 
 export const GLOBAL_INFRA_PATTERNS = [
   /(^|\/)package\.json$/i,
@@ -23,10 +31,6 @@ export const GLOBAL_INFRA_PATTERNS = [
   /(^|\/)tailwind\.config\.[mc]?[jt]s$/i,
   /(^|\/)(?:src\/)?(router|interceptor|interceptors|middleware|store|auth|permission|gateway)(\/|\.(?:[jt]sx?|mjs|vue)$)/i,
 ];
-
-const GRAPH_EXTS = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '/index.ts', '/index.tsx', '/index.js', '/index.vue'];
-const GRAPH_IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'reports', 'playwright-report', 'test-results', '.aitest']);
-export const MAX_GRAPH_FILES = 3000;
 
 /** @param {string} pattern @returns {boolean} */
 export function isOverbroadCatchAllGlob(pattern) {
@@ -63,25 +67,29 @@ export function listAllSpecFiles(testsDir, qaDir) {
 
 /** @param {string} repoDir */
 function loadTsConfigPathAliases(repoDir) {
-  /** @type {Array<{ prefix: string, targetPrefix: string }>} */
+  /** @type {Array<{ prefix: string, targetRelPrefix: string }>} */
   const aliases = [];
+  const realRepoDir = canonicalFsPath(repoDir);
   for (const name of ['tsconfig.json', 'jsconfig.json']) {
-    const p = path.join(repoDir, name);
+    const p = path.join(realRepoDir, name);
     if (!fs.existsSync(p)) continue;
     try {
-      const stripped = fs
-        .readFileSync(p, 'utf8')
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/^\s*\/\/.*$/gm, '');
+      const stripped = stripJsCommentsPreserveStrings(fs.readFileSync(p, 'utf8'));
       const parsed = JSON.parse(stripped);
-      const baseUrl = parsed?.compilerOptions?.baseUrl ? path.resolve(repoDir, parsed.compilerOptions.baseUrl) : repoDir;
+      const baseUrl = parsed?.compilerOptions?.baseUrl
+        ? path.resolve(realRepoDir, parsed.compilerOptions.baseUrl)
+        : realRepoDir;
       const pathsObj = parsed?.compilerOptions?.paths || {};
       for (const [key, targets] of Object.entries(pathsObj)) {
         if (!Array.isArray(targets) || targets.length === 0) continue;
         const prefix = key.endsWith('*') ? key.slice(0, -1) : key;
         const t0 = String(targets[0] || '');
         const tPrefix = t0.endsWith('*') ? t0.slice(0, -1) : t0;
-        aliases.push({ prefix, targetPrefix: path.resolve(baseUrl, tPrefix) });
+        const absTarget = canonicalFsPath(path.resolve(baseUrl, tPrefix));
+        const targetRelPrefix = path.relative(realRepoDir, absTarget).replace(/\\/g, '/').replace(/\/+$/, '');
+        if (!targetRelPrefix.startsWith('..')) {
+          aliases.push({ prefix, targetRelPrefix });
+        }
       }
     } catch {
       // ignore non-standard tsconfig
@@ -91,42 +99,11 @@ function loadTsConfigPathAliases(repoDir) {
 }
 
 /**
- * @param {string} fromFileAbs
- * @param {string} specifier
- * @param {string} repoDir
- * @param {Array<{ prefix: string, targetPrefix: string }>} [pathAliases]
- * @returns {string | null}
- */
-function resolveRepoImport(fromFileAbs, specifier, repoDir, pathAliases = []) {
-  let baseAbs = null;
-  if (specifier.startsWith('./') || specifier.startsWith('../')) {
-    baseAbs = path.resolve(path.dirname(fromFileAbs), specifier);
-  } else if (specifier.startsWith('@/') || specifier.startsWith('~/')) {
-    const sub = specifier.slice(2);
-    baseAbs = fs.existsSync(path.join(repoDir, 'src')) ? path.join(repoDir, 'src', sub) : path.join(repoDir, sub);
-  } else {
-    for (const al of pathAliases) {
-      if (al.prefix && specifier.startsWith(al.prefix)) {
-        baseAbs = path.resolve(al.targetPrefix, specifier.slice(al.prefix.length));
-        break;
-      }
-    }
-  }
-  if (!baseAbs) return null;
-
-  for (const ext of GRAPH_EXTS) {
-    const candidate = `${baseAbs}${ext}`;
-    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-      return path.relative(repoDir, candidate).replace(/\\/g, '/');
-    }
-  }
-  return null;
-}
-
-/**
  * Builds a static reverse import graph (`targetRel -> Set<importerRel>`) across TS/JS/Vue files.
+ * Uses a single-pass in-memory source index (zero per-import `fs.existsSync`/`statSync` storms)
+ * and strips comments before scanning imports.
  * @param {string} repoDir
- * @param {{ includeQa?: boolean }} [options]
+ * @param {{ includeQa?: boolean, maxFiles?: number }} [options]
  */
 export function buildReverseImportGraph(repoDir, options = {}) {
   /** @type {Map<string, Set<string>> & { truncated?: boolean }} */
@@ -135,60 +112,40 @@ export function buildReverseImportGraph(repoDir, options = {}) {
   if (!repoDir || !fs.existsSync(repoDir)) return reverse;
 
   const pathAliases = loadTsConfigPathAliases(repoDir);
-  let scanned = 0;
+  const index = buildRepoSourceIndex(repoDir, {
+    includeQa: Boolean(options.includeQa),
+    maxFiles: options.maxFiles ?? MAX_GRAPH_FILES,
+  });
+  reverse.truncated = index.truncated;
+
   const importRe =
-    /(?:import\s+(?:[\s\S]*?\s+from\s+)?['"`]([^'"`]+)['"`]|export\s+[\s\S]*?\s+from\s+['"`]([^'"`]+)['"`]|import\s*\(\s*['"`]([^'"`]+)['"`]\s*\)|require\s*\(\s*['"`]([^'"`]+)['"`]\s*\))/g;
+    /(?:import\s+(?:[^'"`;]{0,200}\s+from\s+)?['"`]([^'"`]+)['"`]|export\s+[^'"`;]{0,200}\s+from\s+['"`]([^'"`]+)['"`]|import\s*\(\s*['"`]([^'"`]+)['"`]\s*\)|require\s*\(\s*['"`]([^'"`]+)['"`]\s*\))/g;
 
-  const walk = (/** @type {string} */ dir) => {
-    if (scanned >= MAX_GRAPH_FILES) {
-      reverse.truncated = true;
-      return;
-    }
-    let entries;
+  for (const { full, rel: fromRel } of index.files) {
+    let stat;
     try {
-      entries = fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+      stat = fs.statSync(full);
     } catch {
-      return;
+      continue;
     }
-    for (const entry of entries) {
-      if (scanned >= MAX_GRAPH_FILES) {
-        reverse.truncated = true;
-        break;
-      }
-      if (GRAPH_IGNORE_DIRS.has(entry.name) || entry.name.startsWith('.')) continue;
-      if (!options.includeQa && entry.name === 'qa') continue;
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(full);
-      } else if (entry.isFile() && /\.(ts|tsx|js|jsx|mjs|cjs|vue)$/i.test(entry.name)) {
-        let stat;
-        try {
-          stat = fs.statSync(full);
-        } catch {
-          continue;
+    if (stat.size > 512 * 1024) continue;
+    const rawText = fs.readFileSync(full, 'utf8');
+    const text = stripJsCommentsPreserveStrings(rawText);
+    for (const m of text.matchAll(importRe)) {
+      const spec = m[1] || m[2] || m[3] || m[4];
+      if (!spec) continue;
+      const targetRel = resolveRepoImportFromIndex(fromRel, spec, pathAliases, index);
+      if (targetRel && targetRel !== fromRel) {
+        let importers = reverse.get(targetRel);
+        if (!importers) {
+          importers = new Set();
+          reverse.set(targetRel, importers);
         }
-        if (stat.size > 512 * 1024) continue;
-        scanned += 1;
-        const fromRel = path.relative(repoDir, full).replace(/\\/g, '/');
-        const text = fs.readFileSync(full, 'utf8');
-        for (const m of text.matchAll(importRe)) {
-          const spec = m[1] || m[2] || m[3] || m[4];
-          if (!spec) continue;
-          const targetRel = resolveRepoImport(full, spec, repoDir, pathAliases);
-          if (targetRel && targetRel !== fromRel) {
-            let importers = reverse.get(targetRel);
-            if (!importers) {
-              importers = new Set();
-              reverse.set(targetRel, importers);
-            }
-            importers.add(fromRel);
-          }
-        }
+        importers.add(fromRel);
       }
     }
-  };
+  }
 
-  walk(repoDir);
   return reverse;
 }
 
@@ -323,6 +280,7 @@ export async function collectGitChangedFiles(repoDir, baseRef = 'HEAD~1') {
   if (!gitRoot) {
     return { ok: false, reason: 'Target is not a git repository.', files: /** @type {string[]} */ ([]), validBaseRef: false };
   }
+  const realRepoDir = canonicalFsPath(repoDir);
 
   /** @type {Set<string>} */
   const files = new Set();
@@ -331,43 +289,55 @@ export async function collectGitChangedFiles(repoDir, baseRef = 'HEAD~1') {
       const trimmed = raw.trim();
       if (!trimmed) continue;
       const abs = path.join(gitRoot, trimmed);
-      const rel = path.relative(repoDir, abs).replace(/\\/g, '/');
+      const rel = path.relative(realRepoDir, abs).replace(/\\/g, '/');
       if (rel && !rel.startsWith('..')) {
         files.add(rel);
       }
     }
   };
 
-  let validBaseRef = false;
-  if (baseRef) {
-    const verifyRes = await runProcess('git', ['-c', 'core.quotePath=off', 'rev-parse', '--verify', baseRef], {
+  const [verifyRes, branchDiff, headCheck, wtDiffHead, untracked] = await Promise.all([
+    baseRef
+      ? runProcess('git', ['-c', 'core.quotePath=off', 'rev-parse', '--verify', baseRef], {
+          cwd: gitRoot,
+          timeoutMs: 5000,
+        })
+      : Promise.resolve(null),
+    baseRef
+      ? runProcess('git', ['-c', 'core.quotePath=off', 'diff', '--name-only', '-z', `${baseRef}...HEAD`], {
+          cwd: gitRoot,
+          timeoutMs: 8000,
+        })
+      : Promise.resolve(null),
+    runProcess('git', ['-c', 'core.quotePath=off', 'rev-parse', '--verify', 'HEAD'], {
       cwd: gitRoot,
       timeoutMs: 5000,
-    });
-    if (verifyRes.code === 0) {
-      validBaseRef = true;
-      const branchDiff = await runProcess('git', ['-c', 'core.quotePath=off', 'diff', '--name-only', '-z', `${baseRef}...HEAD`], {
-        cwd: gitRoot,
-        timeoutMs: 8000,
-      });
-      if (branchDiff.code === 0) addNulOutput(branchDiff.stdout);
-    }
+    }),
+    runProcess('git', ['-c', 'core.quotePath=off', 'diff', '--name-only', '-z', 'HEAD'], {
+      cwd: gitRoot,
+      timeoutMs: 8000,
+    }),
+    runProcess('git', ['-c', 'core.quotePath=off', 'ls-files', '--others', '--exclude-standard', '-z'], {
+      cwd: gitRoot,
+      timeoutMs: 8000,
+    }),
+  ]);
+
+  const validBaseRef = Boolean(verifyRes && verifyRes.code === 0);
+  if (validBaseRef && branchDiff && branchDiff.code === 0) {
+    addNulOutput(branchDiff.stdout);
   }
 
-  const headCheck = await runProcess('git', ['-c', 'core.quotePath=off', 'rev-parse', '--verify', 'HEAD'], {
-    cwd: gitRoot,
-    timeoutMs: 5000,
-  });
-  const wtDiff =
-    headCheck.code === 0
-      ? await runProcess('git', ['-c', 'core.quotePath=off', 'diff', '--name-only', '-z', 'HEAD'], { cwd: gitRoot, timeoutMs: 8000 })
-      : await runProcess('git', ['-c', 'core.quotePath=off', 'diff', '--name-only', '-z'], { cwd: gitRoot, timeoutMs: 8000 });
-  if (wtDiff.code === 0) addNulOutput(wtDiff.stdout);
+  if (headCheck.code === 0) {
+    if (wtDiffHead.code === 0) addNulOutput(wtDiffHead.stdout);
+  } else {
+    const wtDiff = await runProcess('git', ['-c', 'core.quotePath=off', 'diff', '--name-only', '-z'], {
+      cwd: gitRoot,
+      timeoutMs: 8000,
+    });
+    if (wtDiff.code === 0) addNulOutput(wtDiff.stdout);
+  }
 
-  const untracked = await runProcess('git', ['-c', 'core.quotePath=off', 'ls-files', '--others', '--exclude-standard', '-z'], {
-    cwd: gitRoot,
-    timeoutMs: 8000,
-  });
   if (untracked.code === 0) addNulOutput(untracked.stdout);
 
   if (!validBaseRef && files.size === 0) {
