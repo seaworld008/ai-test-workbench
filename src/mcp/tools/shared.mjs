@@ -56,6 +56,10 @@ export function pushBool(arr, flag, val) {
  * @typedef {{
  *   ok: boolean,
  *   exitCode: number,
+ *   outcome?: string,
+ *   recoverable?: boolean,
+ *   blockerKind?: string | null,
+ *   recoverySteps?: string[],
  *   summary: string,
  *   data: Record<string, any>,
  *   nextActions?: string[],

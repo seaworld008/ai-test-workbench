@@ -1,6 +1,6 @@
-# Version & Compatibility Matrix (v6.2.1)
+# Version & Compatibility Matrix (v6.3.0)
 
-> [简体中文 (默认)](./VERSION.md) · [English README](./README.en.md) · **Workbench & Gate Kernel Version**: `6.2.1` (single source: `src/core/version.mjs`) · **Verified Date**: `2026-11-25`
+> [简体中文 (默认)](./VERSION.md) · [English README](./README.en.md) · **Workbench & Gate Kernel Version**: `6.3.0` (single source: `src/core/version.mjs`) · **Verified Date**: `2026-11-26`
 
 ## 1. Runtime & Engine Requirements
 
@@ -17,7 +17,7 @@
 
 | Artifact | Schema Version | Module |
 |---|---|---|
-| **Gate Kernel** | `6.2.1` | Authoritative `src/kernel/gate-kernel.mjs` (17 pluggable rules `AITEST-G101..G117`, one-way vendor mirror `templates/playwright-qa/support/gate-kernel.mjs`, drift-checked by `doctor` & `check:vendor`) |
+| **Gate Kernel** | `6.3.0` | Authoritative `src/kernel/gate-kernel.mjs` (17 pluggable rules `AITEST-G101..G117`, AST Gate v2.2, one-way vendor mirror `templates/playwright-qa/support/gate-kernel.mjs`, drift-checked by `doctor` & `check:vendor`) |
 | **CommandResult & Verdict** | `v2` | `src/core/outcome.mjs` / `src/verdict.mjs` (Unified `CommandResult<T>` envelope & `AITEST_RESULT_FILE` framed IPC) |
 | **Governance Lock** | `v1` | `src/governance.mjs` (`.aitest/governance.lock`) |
 | **Template Manifest** | `v1` | `src/upgrade.mjs` / `src/init.mjs` (`.aitest/template-manifest.json`) |

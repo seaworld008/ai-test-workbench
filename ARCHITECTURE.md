@@ -4,7 +4,7 @@
 
 ## 1. 分层架构与单向依赖边界
 
-`ai-test-workbench v6.2` 采用严格无环的四层架构（由 `test/unit/architecture-boundaries.test.mjs` 自动化守卫：`0` 条 `src/scripts -> templates` 反向依赖、`0` 条 `src/**` 循环导入、全量 `src/**/*.mjs <= 500` 行、严格 `checkJs` 零错误）：
+`ai-test-workbench v6.3` 采用严格无环的四层架构（由 `test/unit/architecture-boundaries.test.mjs` 自动化守卫：`0` 条 `src/scripts -> templates` 反向依赖、`0` 条 `src/**` 循环导入、全量 `src/**/*.mjs <= 500` 行、严格 `checkJs` 零错误）：
 
 1. **Layer 1 基础叶模块（`src/core/` + `src/types/`）**：零外部依赖的纯工具层，提供 `version`、`outcome`（`CommandResult v2`）、`config`（集中环境与 `aitest.config.json` Schema 校验）、`glob`、`redact`（Redaction v3 + VT ANSI 剥离）、`playwright-results`、`playwright-resolve`、`proc`、`i18n`。
 2. **Layer 2 权威验证内核（`src/kernel/`）**：唯一真源，通过 `package.json#exports` 暴露 `.`、`./kernel`、`./target-guard`、`./schema-validator`，包含不可变 `TrustContext`（`src/kernel/gate/trust-context.mjs`）、`SymbolTable` 与 `AITEST-G101..G117` 规则引擎，并通过 `scripts/sync-template-vendor.mjs` 传递闭包确定性镜像至 `templates/playwright-qa/support/`（CI 强检字节一致，详见 [ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.md)）。
@@ -13,7 +13,7 @@
 
 ## 2. 跨项目物理隔离 (`<repo>/qa/`) 与安全升级
 
-每个业务仓库获得完全独立的 `<repo>/qa/` 子工程，拥有精确锁版本的依赖、`.aitest/template-manifest.json`、`.aitest/governance.lock`、`.aitest/runs/` 运行账本、`.aitest/quarantine.json`、`specs/`、`tests/`、`knowledge/`、`impact-map.json`、`waivers.json` 与 `reports/`，不污染宿主构建配置。可通过 `npx ai-test-workbench@6.2.1 upgrade --target <repo>` 做三方哈希安全升级。
+每个业务仓库获得完全独立的 `<repo>/qa/` 子工程，拥有精确锁版本的依赖、`.aitest/template-manifest.json`、`.aitest/governance.lock`、`.aitest/runs/` 运行账本、`.aitest/quarantine.json`、`specs/`、`tests/`、`knowledge/`、`impact-map.json`、`waivers.json` 与 `reports/`，不污染宿主构建配置。可通过 `npx ai-test-workbench@6.3.0 upgrade --target <repo>` 做三方哈希安全升级。
 
 ## 3. 全平面默认拒绝安全守卫 (`src/kernel/target-guard.mjs` + `base.ts`)
 

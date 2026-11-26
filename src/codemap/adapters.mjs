@@ -38,7 +38,7 @@ const CODE_EXTS = new Set([
   '.sql',
 ]);
 const VIEW_EXTS = ['', '.vue', '.tsx', '.ts', '.jsx', '.js', '/index.vue', '/index.tsx', '/index.ts', '/index.js'];
-export const DEFAULT_MAX_SCAN_FILES = 2500;
+export const DEFAULT_MAX_SCAN_FILES = 10000;
 const MAX_FILE_BYTES = 256 * 1024;
 
 /** @param {string | null | undefined} p @returns {string} */
@@ -144,24 +144,41 @@ export function walkSourceFiles(rootDir, limit = DEFAULT_MAX_SCAN_FILES) {
   return { files: out, truncated };
 }
 
-/** @param {string} baseFile @param {string} importSpec @param {string} repoDir */
-function resolveImportCandidate(baseFile, importSpec, repoDir) {
+/**
+ * @param {string} baseFile
+ * @param {string} importSpec
+ * @param {string} repoDir
+ * @param {{ relSet?: Set<string>, hasSrcDir?: boolean, truncated?: boolean }} [fileIndex]
+ */
+function resolveImportCandidate(baseFile, importSpec, repoDir, fileIndex) {
   let resolvedBase = null;
   if (importSpec.startsWith('./') || importSpec.startsWith('../')) {
     resolvedBase = path.resolve(path.dirname(baseFile), importSpec);
   } else if (importSpec.startsWith('@/views/') || importSpec.startsWith('@/pages/') || importSpec.startsWith('@/')) {
     const sub = importSpec.slice(2);
-    const srcCandidate = path.join(repoDir, 'src', sub);
-    resolvedBase = fs.existsSync(path.join(repoDir, 'src')) ? srcCandidate : path.join(repoDir, sub);
+    const hasSrc = fileIndex?.hasSrcDir !== undefined ? fileIndex.hasSrcDir : fs.existsSync(path.join(repoDir, 'src'));
+    resolvedBase = hasSrc ? path.join(repoDir, 'src', sub) : path.join(repoDir, sub);
   }
   if (!resolvedBase) return { resolvedRel: null, exists: true };
+  const baseRel = normalizeSlash(path.relative(repoDir, resolvedBase));
+  if (fileIndex?.relSet) {
+    for (const ext of VIEW_EXTS) {
+      const candRel = `${baseRel}${ext}`;
+      if (fileIndex.relSet.has(candRel)) {
+        return { resolvedRel: candRel, exists: true };
+      }
+    }
+    if (!fileIndex.truncated) {
+      return { resolvedRel: baseRel, exists: false };
+    }
+  }
   for (const ext of VIEW_EXTS) {
     const candidate = `${resolvedBase}${ext}`;
     if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
       return { resolvedRel: normalizeSlash(path.relative(repoDir, candidate)), exists: true };
     }
   }
-  return { resolvedRel: normalizeSlash(path.relative(repoDir, resolvedBase)), exists: false };
+  return { resolvedRel: baseRel, exists: false };
 }
 
 // --- Frontend Framework Adapters ---
@@ -191,8 +208,14 @@ function extractNextjsRoutes(relFile) {
   return routes;
 }
 
-/** @param {string} filePath @param {string} relFile @param {string} text @param {string} repoDir */
-function extractRouterConfigRoutes(filePath, relFile, text, repoDir) {
+/**
+ * @param {string} filePath
+ * @param {string} relFile
+ * @param {string} text
+ * @param {string} repoDir
+ * @param {{ relSet?: Set<string>, hasSrcDir?: boolean, truncated?: boolean }} [fileIndex]
+ */
+function extractRouterConfigRoutes(filePath, relFile, text, repoDir, fileIndex) {
   /** @type {Array<{ route: string, file: string, kind: string }>} */
   const routes = [];
   /** @type {Array<{ route: string, routerFile: string, importSpec: string, expectedFile: string | null }>} */
@@ -208,7 +231,7 @@ function extractRouterConfigRoutes(filePath, relFile, text, repoDir) {
       const importSpec = importMatch ? importMatch[1] : null;
       let targetFile = relFile;
       if (importSpec) {
-        const chk = resolveImportCandidate(filePath, importSpec, repoDir);
+        const chk = resolveImportCandidate(filePath, importSpec, repoDir, fileIndex);
         if (chk.resolvedRel) targetFile = chk.resolvedRel;
         if (!chk.exists) {
           brokenImports.push({
@@ -246,10 +269,16 @@ function extractFrontendApiCalls(relFile, text) {
   return apiCalls;
 }
 
-/** @param {string} filePath @param {string} relFile @param {string} text @param {string} repoDir */
-export function extractFrontendData(filePath, relFile, text, repoDir) {
+/**
+ * @param {string} filePath
+ * @param {string} relFile
+ * @param {string} text
+ * @param {string} repoDir
+ * @param {{ relSet?: Set<string>, hasSrcDir?: boolean, truncated?: boolean }} [fileIndex]
+ */
+export function extractFrontendData(filePath, relFile, text, repoDir, fileIndex) {
   const nextRoutes = extractNextjsRoutes(relFile);
-  const routerRes = extractRouterConfigRoutes(filePath, relFile, text, repoDir);
+  const routerRes = extractRouterConfigRoutes(filePath, relFile, text, repoDir, fileIndex);
   const apiCalls = extractFrontendApiCalls(relFile, text);
   return {
     routes: [...nextRoutes, ...routerRes.routes],
@@ -381,6 +410,12 @@ export function indexRepositorySource(repoDir, options = {}) {
     result.warnings.push(`Source scan reached maxScanFiles=${maxScanFiles}; configure a narrower --repo or higher limit.`);
   }
 
+  const fileIndex = {
+    relSet: new Set(walked.files.map((fp) => normalizeSlash(path.relative(repoDir, fp)))),
+    hasSrcDir: fs.existsSync(path.join(repoDir, 'src')),
+    truncated: walked.truncated,
+  };
+
   for (const filePath of walked.files) {
     let stat;
     try {
@@ -392,7 +427,7 @@ export function indexRepositorySource(repoDir, options = {}) {
     const text = fs.readFileSync(filePath, 'utf8');
     const relFile = normalizeSlash(path.relative(repoDir, filePath));
 
-    const fe = extractFrontendData(filePath, relFile, text, repoDir);
+    const fe = extractFrontendData(filePath, relFile, text, repoDir, fileIndex);
     result.frontendRoutes.push(...fe.routes);
     result.brokenRouteImports.push(...fe.brokenImports);
     result.frontendApiCalls.push(...fe.apiCalls);

@@ -4,7 +4,7 @@
 
 ## 1. Layered Architecture & Acyclic Dependency Boundaries
 
-`ai-test-workbench v6.2` enforces a strictly acyclic four-layer architecture (verified by `test/unit/architecture-boundaries.test.mjs`: `0` `src/scripts -> templates` inversions, `0` `src/**` circular imports, every `src/**/*.mjs <= 500` LOC, `0` strict `checkJs` errors):
+`ai-test-workbench v6.3` enforces a strictly acyclic four-layer architecture (verified by `test/unit/architecture-boundaries.test.mjs`: `0` `src/scripts -> templates` inversions, `0` `src/**` circular imports, every `src/**/*.mjs <= 500` LOC, `0` strict `checkJs` errors):
 
 1. **Layer 1 Core Leaf Utilities (`src/core/` + `src/types/`)**: Zero-dependency primitives (`version`, `outcome` with `CommandResult v2`, schema-validated `config`, `glob`, `redact` v3 with VT ANSI stripping, `playwright-results`, `playwright-resolve`, `proc`, `i18n`).
 2. **Layer 2 Authoritative Verification Kernel (`src/kernel/`)**: Single source of truth exported via `package.json#exports` (`.`, `./kernel`, `./target-guard`, `./schema-validator`), housing immutable `TrustContext` (`src/kernel/gate/trust-context.mjs`), `SymbolTable`, and `AITEST-G101..G117`, deterministically mirrored by transitive closure into `templates/playwright-qa/support/` via `scripts/sync-template-vendor.mjs` (byte-identity enforced in CI; see [ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.en.md)).
@@ -13,7 +13,7 @@
 
 ## 2. Project Isolation (`<repo>/qa/`) & Safe Upgrades
 
-Each repository receives an isolated `<repo>/qa/` subproject with exact-pinned dependencies, `.aitest/template-manifest.json`, `.aitest/governance.lock`, `.aitest/runs/` ledgers, `.aitest/quarantine.json`, `specs/`, `tests/`, `knowledge/`, `impact-map.json`, `waivers.json`, and `reports/`. Host kernels upgrade safely via 3-way hash diffing in `npx ai-test-workbench@6.2.1 upgrade --target <repo>`.
+Each repository receives an isolated `<repo>/qa/` subproject with exact-pinned dependencies, `.aitest/template-manifest.json`, `.aitest/governance.lock`, `.aitest/runs/` ledgers, `.aitest/quarantine.json`, `specs/`, `tests/`, `knowledge/`, `impact-map.json`, `waivers.json`, and `reports/`. Host kernels upgrade safely via 3-way hash diffing in `npx ai-test-workbench@6.3.0 upgrade --target <repo>`.
 
 ## 3. Default-Deny Security Guardrails (`src/kernel/target-guard.mjs` + `base.ts`)
 

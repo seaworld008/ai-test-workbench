@@ -22,7 +22,7 @@ import { BOOL, STR, TARGET_OPTS, makeCommon } from './opts.mjs';
  *   options: Record<string, { type: 'string' | 'boolean', short?: string }>,
  *   requireTarget?: boolean,
  *   deprecatedAliases?: Record<string, { replacement: string, deprecatedSince: string, removeIn: string }>,
- *   run: (v: Record<string, any>, positionals: string[], lang: 'zh' | 'en') => Promise<number>,
+ *   run: (v: Record<string, any>, positionals: string[], lang: 'zh' | 'en', tokens?: Array<Record<string, any>>) => Promise<number>,
  * }>}
  */
 export const CLI_COMMANDS = {

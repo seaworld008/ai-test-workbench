@@ -240,7 +240,7 @@ async function executeMcpTool(name, rawArgs = {}, ctx = {}, meta = {}) {
     }
   }
 
-  // 3. Declarative in-memory tool execution hook (e.g. aitest_job, aitest_mcp_hub presets)
+  // 3. Declarative in-memory tool execution hook (e.g. aitest_job, aitest_mcp_hub presets, pure read-only queries)
   if (typeof toolEntry.execute === 'function') {
     const outcome = await toolEntry.execute(args, { jobManager, sessionId, target, lang, protocolVersion });
     if (outcome !== null) {
@@ -251,7 +251,16 @@ async function executeMcpTool(name, rawArgs = {}, ctx = {}, meta = {}) {
         outcome.summary,
         outcome.data,
         outcome.nextActions ?? toolEntry.nextActions(outcome.ok, args),
-        { target, resourceSuffix: toolEntry.resourceSuffix, protocolVersion, deprecation }
+        {
+          target,
+          resourceSuffix: toolEntry.resourceSuffix,
+          protocolVersion,
+          outcome: outcome.outcome,
+          recoverable: outcome.recoverable,
+          blockerKind: outcome.blockerKind,
+          recoverySteps: outcome.recoverySteps,
+          deprecation,
+        }
       );
     }
   }

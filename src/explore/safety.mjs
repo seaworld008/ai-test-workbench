@@ -6,7 +6,7 @@ export const MAX_EXPLORE_PAGES = 500;
 export const DEFAULT_EXPLORE_PAGES = 60;
 
 const MUTATION_LABEL_RE =
-  /(新增|添加|创建|新建|修改|编辑|更新|删除|移除|清空|导入|导出|审核|审批|通过|驳回|停用|启用|发布|退费|退款|缴费|支付|下单|提交|发送|获取验证码|退出|注销|取消|保存|重置密码|create|add|new|edit|update|save|delete|remove|import|export|approve|reject|audit|disable|enable|publish|refund|pay|submit|send|logout|sign\s*out)/i;
+  /(新增|添加|创建|新建|修改|编辑|更新|删除|移除|清空|导入|导出|审核|审批|通过|驳回|停用|启用|发布|退费|退款|缴费|支付|下单|提交|发送|获取验证码|退出|注销|取消|保存|重置密码|create|add|new|edit|update|save|delete|remove|import|export|approve|reject|audit|disable|enable|publish|refund|pay|submit|send|logout|sign[ \t]{0,8}out)/i;
 
 const READONLY_LABEL_RE =
   /(搜索|查询|检索|重置|刷新|查看|详情|明细|展开|收起|折叠|预览|筛选|返回|关闭|search|query|reset|refresh|view|detail|expand|collapse|preview|filter|back|close|more)/i;
@@ -124,13 +124,13 @@ export function redactEndpointUrl(rawUrl) {
 export function detectUrlQueryAnomalies(rawUrl) {
   const input = String(rawUrl || '');
   const anomalies = [];
-  if (/(?:\[|%5B)\$[a-zA-Z0-9_]+(?:\]|%5D)=/i.test(input)) {
+  if (/(?:\[|%5B)\$[a-zA-Z0-9_]{1,64}(?:\]|%5D)=/i.test(input)) {
     anomalies.push('Serialized date/object internals in query parameters (e.g. dayjs [$L]/[$d])');
   }
   if (/\[object Object\]|%5Bobject%20Object%5D/i.test(input)) {
     anomalies.push('Literal [object Object] serialized in URL query');
   }
-  if (/[?&][^=]+=undefined(?:&|$)/i.test(input)) {
+  if (/[?&][^=&?\s]{1,128}=undefined(?:&|$)/i.test(input)) {
     anomalies.push('Literal "undefined" passed as URL query parameter');
   }
   return anomalies;
@@ -214,7 +214,8 @@ export function detectPageArchetype(pageInfo = {}) {
 export function routeToSafeSlug(routePath) {
   const clean = String(routePath || '/')
     .split('?')[0]
-    .replace(/^\/+|\/+$/g, '')
+    .replace(/^\/+/, '')
+    .replace(/(?<!\/)\/+$/, '')
     .replace(/[^a-zA-Z0-9_-]+/g, '-');
   return clean || 'root';
 }
@@ -222,11 +223,12 @@ export function routeToSafeSlug(routePath) {
 /**
  * Redacts both secrets AND PII (email, mobile numbers, 18-digit national IDs, 13-19 digit PANs)
  * and neutralizes Markdown triple-backtick fence escapes from untrusted DOM/ARIA content (`E-04`).
+ * Bounded matchers prevent polynomial ReDoS on pathological inputs.
  * @param {string} raw
  */
 export function sanitizeUntrustedDomText(raw) {
   let out = redactSecrets(String(raw || ''));
-  out = out.replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, '[REDACTED_EMAIL]');
+  out = out.replace(/(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24}\b/g, '[REDACTED_EMAIL]');
   out = out.replace(/(?<!\d)1[3-9]\d{9}(?!\d)/g, '[REDACTED_PHONE]');
   out = out.replace(/\+\d{1,3}[-.\s]?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{4}\b/g, '[REDACTED_PHONE]');
   out = out.replace(/(?<!\d)[1-9]\d{5}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx](?!\d)/g, '[REDACTED_ID]');

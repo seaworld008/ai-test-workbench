@@ -183,22 +183,51 @@ export async function runDoctor(options = {}) {
     );
   }
 
+  // Launch all independent external tool probes concurrently to cut doctor latency while
+  // preserving deterministic check ordering in the final output.
+  const templateQaDir = path.join(WORKBENCH_ROOT, 'templates', 'playwright-qa');
+  const templatePwCli = resolvePlaywrightCli(templateQaDir);
+
+  const [
+    npmVerProbe,
+    npmRegProbe,
+    gitInfo,
+    codexInfo,
+    claudeInfo,
+    dockerInfo,
+    templatePwRes,
+  ] = await Promise.all([
+    runNpm(['--version'], { timeoutMs: 8000 }).then(
+      (res) => ({ ok: true, res, err: null }),
+      (err) => ({ ok: false, res: null, err })
+    ),
+    runNpm(['config', 'get', 'registry'], { timeoutMs: 8000 }).then(
+      (res) => ({ ok: true, res, err: null }),
+      (err) => ({ ok: false, res: null, err })
+    ),
+    probeToolVersion('git'),
+    probeToolVersion('codex'),
+    probeToolVersion('claude'),
+    probeToolVersion('docker'),
+    templatePwCli ? runPlaywright(templateQaDir, ['--version'], { timeoutMs: 8000 }) : Promise.resolve(null),
+  ]);
+
   // 3. npm
-  try {
-    const npmVerRes = await runNpm(['--version'], { timeoutMs: 8000 });
-    const npmRegistryRes = await runNpm(['config', 'get', 'registry'], { timeoutMs: 8000 });
-    const npmVer = npmVerRes.stdout.trim() || 'unknown';
-    const reg = redactSecrets(npmRegistryRes.stdout.trim() || 'unknown');
-    add(npmVerRes.code === 0 ? 'OK' : 'WARN', 'npm', `v${npmVer}, registry=${reg}`);
-  } catch (err) {
+  if (!npmVerProbe.ok || !npmVerProbe.res) {
+    const err = npmVerProbe.err;
     add('FAIL', 'npm', err instanceof Error ? err.message : String(err));
+  } else if (!npmRegProbe.ok || !npmRegProbe.res) {
+    const err = npmRegProbe.err;
+    add('FAIL', 'npm', err instanceof Error ? err.message : String(err));
+  } else {
+    const npmVer = npmVerProbe.res.stdout.trim() || 'unknown';
+    const reg = redactSecrets(npmRegProbe.res.stdout.trim() || 'unknown');
+    add(npmVerProbe.res.code === 0 ? 'OK' : 'WARN', 'npm', `v${npmVer}, registry=${reg}`);
   }
 
   // 4. Git / Codex / Claude / Docker
-  const gitInfo = await probeToolVersion('git');
   add(gitInfo.installed ? 'OK' : 'WARN', 'Git', gitInfo.installed ? `${gitInfo.version} (${gitInfo.path})` : 'not found');
 
-  const codexInfo = await probeToolVersion('codex');
   add(
     codexInfo.installed ? 'OK' : 'WARN',
     'Codex CLI',
@@ -209,7 +238,6 @@ export async function runDoctor(options = {}) {
         : 'not found (optional)'
   );
 
-  const claudeInfo = await probeToolVersion('claude');
   add(
     claudeInfo.installed ? 'OK' : 'WARN',
     'Claude Code',
@@ -220,7 +248,6 @@ export async function runDoctor(options = {}) {
         : 'not found (optional)'
   );
 
-  const dockerInfo = await probeToolVersion('docker');
   add(
     dockerInfo.installed ? 'OK' : 'WARN',
     'Docker',
@@ -252,14 +279,11 @@ export async function runDoctor(options = {}) {
   }
 
   // 7. Template Playwright status
-  const templateQaDir = path.join(WORKBENCH_ROOT, 'templates', 'playwright-qa');
-  const templatePwCli = resolvePlaywrightCli(templateQaDir);
-  if (templatePwCli) {
-    const pwRes = await runPlaywright(templateQaDir, ['--version'], { timeoutMs: 8000 });
+  if (templatePwCli && templatePwRes) {
     add(
-      pwRes.code === 0 ? 'OK' : 'WARN',
+      templatePwRes.code === 0 ? 'OK' : 'WARN',
       'Template @playwright/test',
-      `${pwRes.stdout.trim()} (${templateQaDir})`
+      `${templatePwRes.stdout.trim()} (${templateQaDir})`
     );
   } else {
     add(

@@ -77,14 +77,17 @@ export function evaluateDiffRules(ctx) {
   const rulesConfig = ctx.rulesConfig || {};
   const findings = [];
   const seenKeys = new Set();
+  /** @type {Set<string>} */
+  const priorFindingCodes = new Set();
 
   for (const rule of ALL_GATE_RULES) {
     if (!isRuleEnabled(rule.code, rulesConfig)) continue;
-    const emitted = rule.evaluate(ctx) || [];
+    const emitted = rule.evaluate({ ...ctx, priorFindingCodes }) || [];
     for (const f of emitted) {
       const formatted = formatFinding(f);
       if (seenKeys.has(formatted)) continue;
       seenKeys.add(formatted);
+      priorFindingCodes.add(f.code);
       findings.push(f);
     }
   }

@@ -22,11 +22,12 @@ export { isExecutablePlaywrightSpecPath };
  * @param {string} filePath
  * @param {string} baseSource
  * @param {string} headSource
- * @param {{ assertFunctionNames?: string[], activeWaivers?: any[], qaDir?: string, tsCompiler?: any, rulesConfig?: Record<string, any>, protectedGlobs?: string[], changesetContext?: any }} [options]
+ * @param {{ assertFunctionNames?: string[], customMatchers?: Record<string, number>, activeWaivers?: any[], qaDir?: string, tsCompiler?: any, rulesConfig?: Record<string, any>, protectedGlobs?: string[], changesetContext?: any }} [options]
  */
 export function compareSpecSourcesAst(filePath, baseSource, headSource, options = {}) {
   const {
     assertFunctionNames = ['expect*', 'assert*', 'verify*'],
+    customMatchers,
     activeWaivers = [],
     qaDir,
     rulesConfig = {},
@@ -38,6 +39,7 @@ export function compareSpecSourcesAst(filePath, baseSource, headSource, options 
   const canWaive = (key) => Boolean(isCoveredByWaiver({ file: filePath, title: key }, activeWaivers, 'diff'));
   const astOpts = {
     assertFunctionNames,
+    customMatchers,
     qaDir,
     wrapInAsyncFn: false,
     ...('tsCompiler' in options ? { tsCompiler: options.tsCompiler } : {}),
@@ -107,11 +109,12 @@ function meetsBranchNewAssertionFloor(headSum, baselineTestTitles, isBaselineNew
  * (e.g., tests split or moved across spec files in the same commit).
  *
  * @param {Array<{ filePath: string, baseSource: string, headSource: string, isBaselineNewSpec?: boolean, baselineTestTitles?: Set<string> | null }>} fileChanges
- * @param {{ assertFunctionNames?: string[], activeWaivers?: any[], qaDir?: string, tsCompiler?: any, rulesConfig?: Record<string, any>, protectedGlobs?: string[], enforceProjectScopes?: boolean }} [options]
+ * @param {{ assertFunctionNames?: string[], customMatchers?: Record<string, number>, activeWaivers?: any[], qaDir?: string, tsCompiler?: any, rulesConfig?: Record<string, any>, protectedGlobs?: string[], enforceProjectScopes?: boolean }} [options]
  */
 export function compareChangesetAst(fileChanges, options = {}) {
   const {
     assertFunctionNames = ['expect*', 'assert*', 'verify*'],
+    customMatchers,
     activeWaivers = [],
     qaDir,
     rulesConfig = {},
@@ -121,6 +124,7 @@ export function compareChangesetAst(fileChanges, options = {}) {
 
   const astOpts = {
     assertFunctionNames,
+    customMatchers,
     qaDir,
     wrapInAsyncFn: false,
     ...('tsCompiler' in options ? { tsCompiler: options.tsCompiler } : {}),
@@ -334,6 +338,7 @@ export function runGitDiffGuard(qaDir, diffBase, options = {}) {
         } else {
           const baseAstOpts = {
             assertFunctionNames: cfg.assertFunctionNames,
+            customMatchers: cfg.customMatchers || {},
             qaDir,
             wrapInAsyncFn: false,
             ...('tsCompiler' in options ? { tsCompiler: options.tsCompiler } : {}),
@@ -359,6 +364,7 @@ export function runGitDiffGuard(qaDir, diffBase, options = {}) {
   if (specChanges.length > 0) {
     const cmp = compareChangesetAst(specChanges, {
       assertFunctionNames: cfg.assertFunctionNames,
+      customMatchers: cfg.customMatchers || {},
       activeWaivers,
       qaDir,
       enforceProjectScopes: true,

@@ -82,6 +82,59 @@ function scopeAssertionsToBaseline(assertions, baselineTestTitles) {
 }
 
 /**
+ * Computes per-scope consolidation credit when newly introduced structured custom domain matchers
+ * (`consolidatedFieldCount >= 2`, capped `<= 3`) replace multiple granular assertions within the
+ * SAME lexical test scope without downgrading that scope's max assertion tier (`AST Gate v2.2`).
+ * @param {any[]} baseAsserts
+ * @param {any[]} headAsserts
+ */
+function computeStructuredConsolidationCredit(baseAsserts, headAsserts) {
+  /** @type {Map<string, any[]>} */
+  const baseByScope = new Map();
+  /** @type {Map<string, any[]>} */
+  const headByScope = new Map();
+
+  for (const a of baseAsserts || []) {
+    const k = a.testTitle || '<top-level>';
+    const list = baseByScope.get(k) || [];
+    list.push(a);
+    baseByScope.set(k, list);
+  }
+  for (const a of headAsserts || []) {
+    const k = a.testTitle || '<top-level>';
+    const list = headByScope.get(k) || [];
+    list.push(a);
+    headByScope.set(k, list);
+  }
+
+  let countCredit = 0;
+  let strengthCredit = 0;
+  for (const [scopeKey, hList] of headByScope.entries()) {
+    const bList = baseByScope.get(scopeKey) || [];
+    if (bList.length === 0 || hList.length === 0) continue;
+    const bMax = Math.max(...bList.map((a) => a.tier));
+    const hMax = Math.max(...hList.map((a) => a.tier));
+    if (hMax < bMax) continue;
+
+    const bExtra = bList.reduce((s, a) => s + Math.max(0, Math.min(3, Number(a.consolidatedFieldCount || 0)) - 1), 0);
+    const hExtra = hList.reduce((s, a) => s + Math.max(0, Math.min(3, Number(a.consolidatedFieldCount || 0)) - 1), 0);
+    const deltaExtra = Math.max(0, hExtra - bExtra);
+    if (deltaExtra === 0) continue;
+
+    const countDeficit = Math.max(0, bList.length - hList.length);
+    const scopeCountCredit = Math.min(deltaExtra, countDeficit);
+    countCredit += scopeCountCredit;
+
+    const bStr = bList.reduce((s, a) => s + a.tier, 0);
+    const hStr = hList.reduce((s, a) => s + a.tier, 0);
+    const strengthDeficit = Math.max(0, bStr - hStr);
+    strengthCredit += Math.min(deltaExtra * 3, strengthDeficit);
+  }
+
+  return { countCredit, strengthCredit };
+}
+
+/**
  * AITEST-G102: Net assertion deletion between base and head (with commit-level cross-file split pooling).
  */
 export const ruleG102 = {
@@ -115,7 +168,8 @@ export const ruleG102 = {
     const rawHeadCount = headAsserts.length;
     const baseHasCount = baseAsserts.some((a) => a.matcher === 'toHaveCount');
     const implicitCredits = baseHasCount ? headAsserts.filter((a) => a.implicitCountCredit).length : 0;
-    const headCount = rawHeadCount + implicitCredits;
+    const structCredit = computeStructuredConsolidationCredit(baseAsserts, headAsserts);
+    const headCount = rawHeadCount + implicitCredits + structCredit.countCredit;
     const baseAriaCount = baseAsserts.filter((a) => a.isAriaSnapshot).length;
     const headAriaCount = headAsserts.filter((a) => a.isAriaSnapshot).length;
     const consolidatedIntoAria = headAriaCount > baseAriaCount && baseCount - rawHeadCount <= 2;
@@ -217,7 +271,8 @@ export const ruleG103 = {
     const implicitStrengthCredit = baseHasCount
       ? headAsserts.filter((a) => a.implicitCountCredit).length * 4
       : 0;
-    const headSumTier = headAsserts.reduce((s, a) => s + a.tier, 0) + implicitStrengthCredit;
+    const structCredit = computeStructuredConsolidationCredit(baseAsserts, headAsserts);
+    const headSumTier = headAsserts.reduce((s, a) => s + a.tier, 0) + implicitStrengthCredit + structCredit.strengthCredit;
     const baseNegated = baseAsserts.filter((a) => a.isNegated).length;
     const headNegated = headAsserts.filter((a) => a.isNegated).length;
 

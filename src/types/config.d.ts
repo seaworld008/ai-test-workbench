@@ -17,6 +17,7 @@ export interface AitestConfig {
   allowedEnvNames?: string[];
   requireGovernanceLock?: boolean;
   rules?: Record<string, boolean | AitestRuleConfig>;
+  customMatchers?: Record<string, number>;
 }
 
 export interface TargetSafetyConfig {

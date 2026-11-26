@@ -12,4 +12,4 @@ Start inside `<repo>/qa/` (`cd qa`). Invoke the official Playwright **Generator*
 2. Prefer `getByRole`, `getByLabel`, `getByTestId`, `toMatchAriaSnapshot`, and web-first assertions.
 3. Forbidden: `waitForTimeout()`, `.only()`, `test.skip()`, `test.fixme()`, `{ force: true }`, or empty assertions.
 4. Tag any state-modifying spec with `@mutation` and isolate data per worker.
-5. Verify with `npm run typecheck`, `npm run lint`, and `npx ai-test-workbench@6.2.1 run --target .. --suite e2e --audit`.
+5. Verify with `npm run typecheck`, `npm run lint`, and `npx ai-test-workbench@6.3.0 run --target .. --suite e2e --audit`.

@@ -4,6 +4,30 @@
 
 本日志遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 与 [语义化版本 (SemVer)](https://semver.org/spec/v2.0.0.html) 规范。
 
+## [6.3.0] - 2026-11-26
+
+### 性能优化与零依赖运行时提速 (Zero-Dep Runtime & Read-Only Fast Paths)
+- **`doctor` 外部工具探测全面并行化（`src/doctor.mjs`）**：将原本串行执行的 7 项外部子进程探测（`npm --version`、`npm config get registry`、`git`、`codex`、`claude`、`docker`、模板 `@playwright/test --version`）改为 `Promise.all` 并发启动，同时严格保持 `checks` 数组与控制台输出的确定性顺序；实测 CLI 端到端耗时从 `2.44s` 降至 **`0.81s`**（进程内 `runDoctor` 约 `0.65s`）。
+- **零系统调用风暴的 10,000 文件反向依赖图与代码地图扫描（`src/impact/scanner.mjs`、`src/impact/graph.mjs`、`src/codemap/adapters.mjs`）**：
+  - 新增单遍内存路径索引 `buildRepoSourceIndex` 与 O(1) `resolveRepoImportFromIndex`，支持相对路径、`@/`、`~/`、`tsconfig.json#paths` 与 TypeScript ESM `.js -> .ts` 映射，彻底消除 `resolveRepoImport` 每次导入最多 12 次 `fs.existsSync`/`statSync` 的同步系统调用风暴；
+  - 新增线性 O(N) 词法状态机 `stripJsCommentsPreserveStrings`，在依赖提取前安全剥离 `/* ... */` 与 `// ...` 注释并保留单/双/模板字符串与正则字面量（如 `http://`），防止注释掉的死 `import` 产生虚假反向依赖边；
+  - `MAX_GRAPH_FILES`（`3000 -> 10000`）与 `DEFAULT_MAX_SCAN_FILES`（`2500 -> 10000`）扩容至万级源码仓库规模，并将 `collectGitChangedFiles` 的独立 Git 状态查询改为 `Promise.all` 并发执行。
+- **MCP 高频纯只读查询进程内快速通道（`src/mcp/tools/fast-paths.mjs`、`src/mcp/tools/verification.mjs`、`src/mcp/protocol.mjs`）**：为纯计算无副作用的 `aitest_impact` 与 `aitest_report`（`!args.syncQuarantine` 时）提供轻量进程内 `execute`，免除每次只读查询的 ~150ms 子进程冷启动开销；严格保留在 `validateToolArguments`、`validateToolPathArgs` 工作区根目录边界校验与 `redactStructuredValue` 结构化脱敏之后执行，写盘/编译器/Playwright 工具（含 `syncQuarantine: true`）继续走 `McpJobManager` 子进程隔离。
+
+### AST 门禁 v2.2 精度打磨（零逃逸防作弊）
+- **修复 `AITEST-G110` 既有 `if` 块内增强/修改原有断言的文本去重误报（`src/kernel/gate/parser.mjs`、`src/kernel/gate/rules/control-flow-rules.mjs`）**：引入作用域级 `if-wrap` 与无条件非恒真断言双计次守恒，仅当同一作用域原本存在 `if-wrap` 断言（`baseIfCnt > 0`）、`headIfCnt <= baseIfCnt`、无条件断言未减少（`headUncondCnt >= baseUncondCnt`，彻底堵死把无条件 `expect` 挪进既有 `if` 块的移花接木作弊）、未触发 `G102`/`G103` 退化且该断言 `!isTautology && tier >= 2` 时才豁免编辑既有 `if-wrap` 断言。
+- **结构化自定义领域匹配器识别与受治理锁保护的 `customMatchers`（`src/core/config.mjs`、`src/kernel/gate/lattice.mjs`、`src/kernel/gate/lattice-helpers.mjs`、`src/kernel/gate/rules/assertion-rules.mjs`）**：
+  - `aitest.config.json` Schema 新增可选 `customMatchers`（合法标识符、整数 `1..5`、禁止覆盖内置弱匹配器如 `toBeDefined`/`toBeTruthy`/`toBeVisible`，且受 Layer 0 `.aitest/governance.lock` 保护）；
+  - 通用 AST 格规则自动将带 `>= 2` 个有效对象属性或 `>= 3` 行非空模板内容的正向自定义 `toHave*`/`toMatch*` 匹配器识别为 `S4` 结构化领域断言（含上限 `<= 3` 的同作用域合并折算），同时继续将空对象 `{}` 或无参自定义匹配器严控为 `S1` 防止降级逃逸。
+- **统计口径诚实披露**：保留冻结的 **`v6.0` 未见留出集盲测原始结果 `6.1% (3/49, Wilson 95% CI [2.1%, 16.5%])`** 不做篡改；在 100-Commit 真实开源提交回归语料上执行 **`v6.3.0` 后验复测**，误报率从 `5.2% (5/97)` 进一步降至 **`4.1% (4/97, Wilson 95% CI [1.6%, 10.1%])`**（试跑集 `4.2% (2/48)` + 留出集语料后验复测 `4.1% (2/49)`，`3/3` 真报 100% 保留），同时 `FGER-internal = 0.0% (26/26)`、`FGER-holdout = 0.0% (24/24)`、`Gate-FPR(internal) = 0.0% (12/12)` 全部零回退。
+
+### 契约对齐、账本级需求追溯、历史差分诊断与 ReDoS 线性化加固
+- **修复 `report --view summary` 契约缺口（`src/report.mjs`、`src/mcp/tools/verification.mjs`）**：CLI `report --view` 与 MCP `aitest_report(view=...)` 正式支持 `"summary"`（兼容 `"artifacts"`，附带最新运行账本摘要 `latestRunSummary` 与 `resultsCounts`，并在 `data.view` 标明视图名）。
+- **修复 `explore` CLI 正向布尔开关优先级（`src/cli/opts.mjs`、`src/cli/commands-workspace.mjs`）**：使用 `parseArgs({ tokens: true })` 追踪参数顺序，正确区分显式 `--no-explore-tabs|dialogs|portals`（`false`）、显式 `--explore-*`（`true`）、缺省值（`true`）及同命令行多次传参的最后出现优先规则。
+- **运行账本绑定的用例级 `REQ-xxx` 需求追溯矩阵（`src/traceability.mjs`）**：优先按单个测试用例标题（`specTitle` -> `title`）映射每个 `REQ-xxx` 的精确 `pass/fail/flaky/skip` 状态（仅当单文件内没有任何用例标题携带 `REQ-xxx` 时回退至文件级汇总），并校对 `.aitest/runs/latest.json` 与 `manifest.json#resultsSha256` 输出 `runId` 与 `ledgerBound`。
+- **基于运行账本的历史差分回归诊断（`src/diagnose/history.mjs`、`src/diagnose.mjs`）**：按 `.aitest/runs/index.jsonl` 与历史 `tests-summary.json`（排除本次运行）对比每条失败用例的历史轨迹，为每条诊断标注 `regressionHistory`（`new-regression` / `persistent-failure` / `intermittent-flaky` / `first-observed`）并输出到 JSON 与 `ai-diagnostics.md`。
+- **正则线性化防 ReDoS 加固（`src/core/redact.mjs`、`src/explore/safety.mjs`）**：以线性 O(N) 扫描替换 PEM 私钥多项式正则，预编译并收紧 JSON/URL/KEY=VALUE/`setItem`/Bearer/Basic/ANSI/Email/Query 匹配量词与边界锚点；11 类 100KB 病态输入全量实测耗时 `< 40ms`（单条均 `< 10ms`），脱敏召回率保持 `100% (35/35)`。
+
 ## [6.2.1] - 2026-11-25
 
 ### 安全加固与可信边界修复 (Security & Trust-Boundary Hardening)

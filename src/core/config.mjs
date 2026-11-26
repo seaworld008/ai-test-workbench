@@ -39,6 +39,25 @@ export const DEFAULT_CONFIG_PROTECTED_GLOBS = Object.freeze([
   'tests/fixtures/base.ts',
 ]);
 
+export const RESERVED_WEAK_MATCHERS = Object.freeze(
+  new Set([
+    'toBeTruthy',
+    'toBeFalsy',
+    'toBeDefined',
+    'toBeNull',
+    'toBeUndefined',
+    'toBeNaN',
+    'toBeGreaterThan',
+    'toBeGreaterThanOrEqual',
+    'toBeLessThan',
+    'toBeLessThanOrEqual',
+    'toBeCloseTo',
+    'toBeVisible',
+    'toBeAttached',
+    'toBeInViewport',
+  ])
+);
+
 /**
  * @typedef {{
  *   assertFunctionNames: string[];
@@ -49,6 +68,7 @@ export const DEFAULT_CONFIG_PROTECTED_GLOBS = Object.freeze([
  *   maxWaiverDays: number;
  *   governance: { protected: string[] };
  *   rules: Record<string, boolean | { enabled?: boolean; severity?: 'error' | 'off' }>;
+ *   customMatchers: Record<string, number>;
  *   _configError?: string;
  *   _configErrors?: string[];
  *   [key: string]: unknown;
@@ -70,6 +90,7 @@ export const DEFAULT_AITEST_CONFIG = Object.freeze({
     protected: [...DEFAULT_CONFIG_PROTECTED_GLOBS],
   },
   rules: {},
+  customMatchers: {},
 });
 
 /**
@@ -113,6 +134,7 @@ export function validateAitestConfigObject(raw) {
         ...DEFAULT_AITEST_CONFIG,
         governance: { protected: [...DEFAULT_CONFIG_PROTECTED_GLOBS] },
         rules: {},
+        customMatchers: {},
       },
     };
   }
@@ -188,6 +210,26 @@ export function validateAitestConfigObject(raw) {
     }
   }
 
+  if (obj.customMatchers !== undefined) {
+    if (!obj.customMatchers || typeof obj.customMatchers !== 'object' || Array.isArray(obj.customMatchers)) {
+      errors.push('aitest.config.json "customMatchers" must be an object mapping custom matcher names to integer tiers 1..5.');
+    } else {
+      for (const [matcherName, tierVal] of Object.entries(/** @type {Record<string, unknown>} */ (obj.customMatchers))) {
+        if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(matcherName)) {
+          errors.push(`aitest.config.json "customMatchers.${matcherName}" must be a valid JS identifier.`);
+          continue;
+        }
+        if (RESERVED_WEAK_MATCHERS.has(matcherName)) {
+          errors.push(`aitest.config.json "customMatchers.${matcherName}" cannot override built-in weak/state matcher.`);
+          continue;
+        }
+        if (typeof tierVal !== 'number' || !Number.isInteger(tierVal) || tierVal < 1 || tierVal > 5) {
+          errors.push(`aitest.config.json "customMatchers.${matcherName}" must be an integer between 1 and 5.`);
+        }
+      }
+    }
+  }
+
   const rawNames = Array.isArray(obj.assertFunctionNames)
     ? /** @type {string[]} */ (obj.assertFunctionNames)
     : [...DEFAULT_AITEST_CONFIG.assertFunctionNames];
@@ -203,6 +245,22 @@ export function validateAitestConfigObject(raw) {
     obj.rules && typeof obj.rules === 'object' && !Array.isArray(obj.rules)
       ? /** @type {Record<string, boolean | { enabled?: boolean, severity?: 'error' | 'off' }>} */ (obj.rules)
       : {};
+  /** @type {Record<string, number>} */
+  const customMatchersObj = {};
+  if (obj.customMatchers && typeof obj.customMatchers === 'object' && !Array.isArray(obj.customMatchers)) {
+    for (const [k, v] of Object.entries(/** @type {Record<string, unknown>} */ (obj.customMatchers))) {
+      if (
+        /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(k) &&
+        !RESERVED_WEAK_MATCHERS.has(k) &&
+        typeof v === 'number' &&
+        Number.isInteger(v) &&
+        v >= 1 &&
+        v <= 5
+      ) {
+        customMatchersObj[k] = v;
+      }
+    }
+  }
 
   return {
     ok: errors.length === 0,
@@ -220,6 +278,7 @@ export function validateAitestConfigObject(raw) {
         protected: [...new Set([...DEFAULT_CONFIG_PROTECTED_GLOBS, ...customProtected])],
       },
       rules: rulesObj,
+      customMatchers: customMatchersObj,
     },
   };
 }
@@ -248,6 +307,7 @@ export function loadAndValidateAitestConfigFile(qaDir) {
         ...DEFAULT_AITEST_CONFIG,
         governance: { protected: [...DEFAULT_CONFIG_PROTECTED_GLOBS] },
         rules: {},
+        customMatchers: {},
       },
     };
   }
@@ -266,6 +326,7 @@ export function loadAndValidateAitestConfigFile(qaDir) {
         ...DEFAULT_AITEST_CONFIG,
         governance: { protected: [...DEFAULT_CONFIG_PROTECTED_GLOBS] },
         rules: {},
+        customMatchers: {},
         _configError: msg,
         _configErrors: [msg],
       },
