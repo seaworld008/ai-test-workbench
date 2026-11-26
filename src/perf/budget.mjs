@@ -17,6 +17,12 @@ export const DEFAULT_BUDGET = {
     maxP99Ms: 3000,
     maxErrorRate: 0.01,
   },
+  streaming: {
+    maxTtftMedianMs: 1000,
+    maxTtftP95Ms: 2500,
+    maxStreamTotalP95Ms: 15000,
+    requireCleanTermination: true,
+  },
 };
 
 /**
@@ -68,15 +74,17 @@ export function p75OfNullable(nums) {
  * plus optional relative baseline regression check (`P-01`, `P-02`).
  * @typedef {{ route: string, samples?: number, ttfbMs?: number | null, domReadyMs?: number | null, loadMs?: number | null, fcpMs?: number | null, lcpMs?: number | null, lcpP75Ms?: number | null, inpMs?: number | null, cls?: number | null, domNodes?: number | null, transferKb?: number | null, jsHeapMb?: number | null, duplicateApisCount?: number | null }} BrowserMetric
  * @typedef {{ endpoint: string, method?: string, concurrency: number, totalRequests: number, errorCount?: number, envelopeErrorCount?: number, errorRate: number, rps: number, minMs: number, p50Ms: number, p75Ms: number, p90Ms: number, p95Ms: number, p99Ms: number, maxMs: number, avgMs?: number }} ApiBenchmark
- * @typedef {{ baseURL: string, measuredAt: string, mode: string, readOnly?: boolean, budgetPassed: boolean, violations: string[], browserMetrics: BrowserMetric[], apiBenchmark: ApiBenchmark | null }} PerfReport
- * @param {{ browserMetrics?: BrowserMetric[], apiBenchmark?: ApiBenchmark | null } | null | undefined} report
- * @param {{ browser?: Partial<typeof DEFAULT_BUDGET.browser>, api?: Partial<typeof DEFAULT_BUDGET.api> } | null} [budgetInput]
+ * @typedef {{ endpoint: string, method?: string, totalStreams: number, errorCount: number, envelopeErrors: number, ttftMedianMs: number | null, ttftP95Ms: number | null, streamTotalP95Ms: number | null, framesPerStream: number, cleanTerminationRate: number }} SseBenchmark
+ * @typedef {{ baseURL: string, measuredAt: string, mode: string, readOnly?: boolean, budgetPassed: boolean, violations: string[], browserMetrics: BrowserMetric[], apiBenchmark: ApiBenchmark | null, sseBenchmark?: SseBenchmark | null }} PerfReport
+ * @param {{ browserMetrics?: BrowserMetric[], apiBenchmark?: ApiBenchmark | null, sseBenchmark?: SseBenchmark | null } | null | undefined} report
+ * @param {{ browser?: Partial<typeof DEFAULT_BUDGET.browser>, api?: Partial<typeof DEFAULT_BUDGET.api>, streaming?: Partial<typeof DEFAULT_BUDGET.streaming> } | null} [budgetInput]
  * @param {{ browserSummary?: Array<{ route: string, lcpMs?: number | null }> } | null} [baselineSnapshot]
  */
 export function evaluatePerfBudget(report, budgetInput = DEFAULT_BUDGET, baselineSnapshot = null) {
   const budget = {
     browser: { ...DEFAULT_BUDGET.browser, ...(budgetInput?.browser || {}) },
     api: { ...DEFAULT_BUDGET.api, ...(budgetInput?.api || {}) },
+    streaming: { ...DEFAULT_BUDGET.streaming, ...(budgetInput?.streaming || {}) },
   };
   const violations = [];
 
@@ -134,6 +142,33 @@ export function evaluatePerfBudget(report, budgetInput = DEFAULT_BUDGET, baselin
     }
   }
 
+  const sse = report?.sseBenchmark;
+  if (sse && sse.totalStreams > 0) {
+    if (sse.ttftMedianMs != null && sse.ttftMedianMs > budget.streaming.maxTtftMedianMs) {
+      violations.push(
+        `[Streaming SLO] TTFT median=${sse.ttftMedianMs}ms exceeds maxTtftMedianMs=${budget.streaming.maxTtftMedianMs}ms`
+      );
+    }
+    if (sse.ttftP95Ms != null && sse.ttftP95Ms > budget.streaming.maxTtftP95Ms) {
+      violations.push(
+        `[Streaming SLO] TTFT P95=${sse.ttftP95Ms}ms exceeds maxTtftP95Ms=${budget.streaming.maxTtftP95Ms}ms`
+      );
+    }
+    if (sse.streamTotalP95Ms != null && sse.streamTotalP95Ms > budget.streaming.maxStreamTotalP95Ms) {
+      violations.push(
+        `[Streaming SLO] Stream total P95=${sse.streamTotalP95Ms}ms exceeds maxStreamTotalP95Ms=${budget.streaming.maxStreamTotalP95Ms}ms`
+      );
+    }
+    if (budget.streaming.requireCleanTermination && sse.cleanTerminationRate < 1) {
+      violations.push(
+        `[Streaming SLO] cleanTerminationRate=${sse.cleanTerminationRate} < 1 (truncated or unclean SSE stream)`
+      );
+    }
+    if (sse.envelopeErrors > 0) {
+      violations.push(`[Streaming SLO] detected ${sse.envelopeErrors} mid-stream SSE envelope error(s)`);
+    }
+  }
+
   return { ok: violations.length === 0, violations, budget };
 }
 
@@ -170,6 +205,17 @@ export function buildPerfMarkdown(report, lang = 'zh') {
       `- Endpoint: \`GET ${a.endpoint}\` (concurrency=\`${a.concurrency}\`, requests=\`${a.totalRequests}\`)`,
       `- Throughput: **${a.rps} req/s** · Error Rate: \`${(a.errorRate * 100).toFixed(2)}%\``,
       `- Latency: Min=\`${a.minMs}ms\` · P50=\`${a.p50Ms}ms\` · P75=\`${a.p75Ms}ms\` · P90=\`${a.p90Ms}ms\` · **P95=\`${a.p95Ms}ms\`** · P99=\`${a.p99Ms}ms\` · Max=\`${a.maxMs}ms\``,
+      ''
+    );
+  }
+
+  if (report.sseBenchmark) {
+    const s = report.sseBenchmark;
+    lines.push(
+      isZh ? '## 2b. 流式 SSE / TTFT 性能基准' : '## 2b. Streaming SSE & TTFT Benchmark',
+      `- Endpoint: \`${s.method || 'GET'} ${s.endpoint}\` (streams=\`${s.totalStreams}\`, frames/stream=\`${s.framesPerStream}\`)`,
+      `- **TTFT Median**: \`${s.ttftMedianMs ?? '-'}ms\` · **TTFT P95**: \`${s.ttftP95Ms ?? '-'}ms\` · **Stream Total P95**: \`${s.streamTotalP95Ms ?? '-'}ms\``,
+      `- Clean Termination Rate: \`${(s.cleanTerminationRate * 100).toFixed(1)}%\` · Envelope Errors: \`${s.envelopeErrors}\``,
       ''
     );
   }

@@ -11,13 +11,24 @@ import {
   selectFirstFailedAttempt,
   suggestFailureCategory,
 } from './diagnose/classifier.mjs';
+import {
+  clusterDiagnosedFailures,
+  formatClustersMarkdown,
+  loadPreviousDiagnoseClusters,
+  saveDiagnoseClustersSnapshot,
+} from './diagnose/cluster.mjs';
 import { correlateFailureWithFrontendDiff } from './diagnose/diff-correlator.mjs';
+import { computeDiagnosticFingerprint } from './diagnose/fingerprint.mjs';
 import { classifyFailureRegressionHistory, createRegressionHistoryClassifier } from './diagnose/history.mjs';
+import { annotateDiagnosedWithKnownBlockers } from './memory/blockers.mjs';
 
 export {
   classifyFailureRegressionHistory,
+  clusterDiagnosedFailures,
+  computeDiagnosticFingerprint,
   correlateFailureWithFrontendDiff,
   extractQueryableTraceId,
+  loadPreviousDiagnoseClusters,
   parsePlaywrightErrorEvidence,
   selectFirstFailedAttempt,
   suggestFailureCategory,
@@ -31,6 +42,10 @@ export {
  *   line: number,
  *   projectName: string,
  *   status: string,
+ *   durationMs?: number,
+ *   fingerprintId?: string,
+ *   linkedKnownBlockerId?: string | null,
+ *   knownBlockerReason?: string | null,
  *   regressionHistory: import('./diagnose/history.mjs').RegressionHistoryKind,
  *   categoryCode: string,
  *   subCategory?: string | null,
@@ -155,12 +170,13 @@ function loadCodeMapCorrelations(qaDir, specFile) {
 }
 
 /**
- * Structured failure diagnosis returning both Markdown report and typed `diagnosedFailures` array (`D-01..D-03`).
+ * Structured failure diagnosis returning Markdown report, typed `diagnosedFailures`, and deduplicated `clusters`.
  * @param {string} qaDir
  * @param {string} resultsPath
- * @returns {{ failureCount: number, failures: DiagnosedFailure[], markdown: string }}
+ * @param {{ previousClusters?: import('./diagnose/cluster.mjs').DiagnosticCluster[] | null }} [options]
+ * @returns {{ failureCount: number, failures: DiagnosedFailure[], clusters: import('./diagnose/cluster.mjs').DiagnosticCluster[], markdown: string }}
  */
-export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
+export function generateDiagnosticsMarkdown(qaDir, resultsPath, options = {}) {
   if (!fs.existsSync(resultsPath)) {
     throw new Error(`Results file not found: ${resultsPath}`);
   }
@@ -176,6 +192,7 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
       line: t.line,
       projectName: t.projectName,
       status: t.status,
+      durationMs: t.durationMs,
       results: t.results,
     }));
 
@@ -190,12 +207,19 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
 
   if (failures.length === 0) {
     lines.push('No unexpected or flaky test failures found in `results.json`.');
-    return { failureCount: 0, failures: /** @type {DiagnosedFailure[]} */ ([]), markdown: lines.join('\n') + '\n' };
+    return {
+      failureCount: 0,
+      failures: /** @type {DiagnosedFailure[]} */ ([]),
+      clusters: /** @type {import('./diagnose/cluster.mjs').DiagnosticCluster[]} */ ([]),
+      markdown: lines.join('\n') + '\n',
+    };
   }
 
   lines.push(`Total Failing / Flaky Specs: **${failures.length}**`, '');
   /** @type {DiagnosedFailure[]} */
   const diagnosedFailures = [];
+  /** @type {string[]} */
+  const detailLines = [];
 
   failures.forEach((f, idx) => {
     // Pick FIRST failed attempt so flaky tests that pass on retry retain their original failure evidence (`D-03`)!
@@ -233,13 +257,14 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
     const testId = f.testId || `${normFile}::${String(f.title || '').replace(/\\/g, '/')}`;
     const regressionHistory = classifyRegressionHistory(testId, f.status);
 
-    diagnosedFailures.push({
+    const diagEntry = {
       testId,
       title: redactSecrets(f.title),
       file: normFile,
       line: f.line,
       projectName: f.projectName,
       status: f.status,
+      durationMs: typeof f.durationMs === 'number' ? f.durationMs : Number(failedResult?.duration || 0),
       regressionHistory,
       categoryCode: triage.categoryCode,
       subCategory,
@@ -256,22 +281,24 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
       timeWindow,
       errorSnippet: cleanErr.slice(0, 800),
       codeCorrelation: codeCorr,
-    });
+    };
+    const fp = computeDiagnosticFingerprint(diagEntry);
+    diagnosedFailures.push({ ...diagEntry, fingerprintId: fp.fingerprintId });
 
-    lines.push(`## ${idx + 1}. ${redactSecrets(f.title)}`);
-    lines.push(`- **Test ID**: \`${redactSecrets(testId)}\``);
-    lines.push(`- **Location**: \`${normFile}:${f.line}\` (project: \`${f.projectName}\`, status: \`${f.status}\`)`);
-    lines.push(
+    detailLines.push(`## ${idx + 1}. ${redactSecrets(f.title)}`);
+    detailLines.push(`- **Test ID**: \`${redactSecrets(testId)}\` · **Fingerprint**: \`${fp.fingerprintId}\``);
+    detailLines.push(`- **Location**: \`${normFile}:${f.line}\` (project: \`${f.projectName}\`, status: \`${f.status}\`)`);
+    detailLines.push(
       `- **Suggested Category**: **${triage.category}** *(confidence: ${triage.confidence}, candidates: ${triage.candidates.join('/')})*`
     );
-    lines.push(`- **Regression History**: \`${regressionHistory}\``);
-    lines.push(`- **Action Guidance**: ${triage.guidance}`);
+    detailLines.push(`- **Regression History**: \`${regressionHistory}\``);
+    detailLines.push(`- **Action Guidance**: ${triage.guidance}`);
     if (timeWindow) {
-      lines.push(`- **Test Time Window**: \`${timeWindow.startedAt}\` → \`${timeWindow.finishedAt}\``);
+      detailLines.push(`- **Test Time Window**: \`${timeWindow.startedAt}\` → \`${timeWindow.finishedAt}\``);
     }
     if (traceIds.length > 0 || injectedTraceId) {
-      lines.push(`- **Queryable 32-char Trace ID**: \`${queryTraceId}\``);
-      lines.push(
+      detailLines.push(`- **Queryable 32-char Trace ID**: \`${queryTraceId}\``);
+      detailLines.push(
         `- **Captured Trace Headers**: ${traceIds
           .slice(0, 6)
           .map((id) => `\`${redactSecrets(id)}\``)
@@ -279,34 +306,34 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
       );
     }
     if (tracePath) {
-      lines.push(`- **Trace Replay**: \`npx playwright show-trace "${tracePath}"\``);
+      detailLines.push(`- **Trace Replay**: \`npx playwright show-trace "${tracePath}"\``);
     }
 
     if (codeCorr || traceIds.length > 0 || injectedTraceId || timeWindow) {
-      lines.push('', '### Full-Link Code Map & Multi-MCP Root-Cause Playbook');
+      detailLines.push('', '### Full-Link Code Map & Multi-MCP Root-Cause Playbook');
       if (codeCorr) {
-        if (codeCorr.routes.length > 0) lines.push(`- **CodeMap Routes**: ${codeCorr.routes.map((r) => `\`${r}\``).join(', ')}`);
+        if (codeCorr.routes.length > 0) detailLines.push(`- **CodeMap Routes**: ${codeCorr.routes.map((r) => `\`${r}\``).join(', ')}`);
         if (codeCorr.frontendFiles.length > 0)
-          lines.push(`- **Frontend Source**: ${codeCorr.frontendFiles.map((s) => `\`${s}\``).join(', ')}`);
+          detailLines.push(`- **Frontend Source**: ${codeCorr.frontendFiles.map((s) => `\`${s}\``).join(', ')}`);
         if (codeCorr.backendFiles.length > 0)
-          lines.push(`- **Backend Controllers**: ${codeCorr.backendFiles.map((s) => `\`${s}\``).join(', ')}`);
+          detailLines.push(`- **Backend Controllers**: ${codeCorr.backendFiles.map((s) => `\`${s}\``).join(', ')}`);
         if (codeCorr.dbTables.length > 0)
-          lines.push(`- **Linked DB Entities**: ${codeCorr.dbTables.map((t) => `\`${t}\``).join(', ')}`);
+          detailLines.push(`- **Linked DB Entities**: ${codeCorr.dbTables.map((t) => `\`${t}\``).join(', ')}`);
       }
-      lines.push(
+      detailLines.push(
         `- **Loki / Tempo MCP Query**: \`{env=~"staging|test"} |= "${queryTraceId}"\``,
         `- **Prometheus MCP Query**: \`sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))\``,
         `- **Sentry MCP**: filter unresolved issues within \`${timeWindow?.startedAt || 'last 15m'}\` to \`${timeWindow?.finishedAt || 'now'}\``
       );
       if (codeCorr?.dbTables && codeCorr.dbTables.length > 0 && /^[A-Za-z_][A-Za-z0-9_.]*$/.test(codeCorr.dbTables[0])) {
-        lines.push(`- **Read-Only DB MCP Check**: \`SELECT COUNT(*) FROM ${codeCorr.dbTables[0]} LIMIT 1;\``);
+        detailLines.push(`- **Read-Only DB MCP Check**: \`SELECT COUNT(*) FROM ${codeCorr.dbTables[0]} LIMIT 1;\``);
       }
     }
 
-    lines.push('', '### Error Snippet (Redacted)', '```text', cleanErr.slice(0, 2500), '```', '');
+    detailLines.push('', '### Error Snippet (Redacted)', '```text', cleanErr.slice(0, 2500), '```', '');
 
     if (errorContextText) {
-      lines.push(
+      detailLines.push(
         '### Official Playwright `error-context.md` (Redacted ARIA Snapshot)',
         '```markdown',
         redactSecrets(errorContextText).slice(0, 3500),
@@ -316,7 +343,14 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath) {
     }
   });
 
-  return { failureCount: failures.length, failures: diagnosedFailures, markdown: lines.join('\n') + '\n' };
+  const clusters = clusterDiagnosedFailures(diagnosedFailures, {
+    qaDir,
+    previousClusters: options.previousClusters,
+  });
+  annotateDiagnosedWithKnownBlockers(qaDir, diagnosedFailures, clusters);
+  lines.push(...formatClustersMarkdown(clusters), ...detailLines);
+
+  return { failureCount: failures.length, failures: diagnosedFailures, clusters, markdown: lines.join('\n') + '\n' };
 }
 
 /**
@@ -354,14 +388,17 @@ export async function runDiagnoseCommand(options = {}) {
     return failDiag(lang === 'zh' ? `未找到测试结果文件: ${resultsPath}` : `Results JSON not found: ${resultsPath}`);
   }
 
-  const { failureCount, failures, markdown } = generateDiagnosticsMarkdown(qaDir, resultsPath);
+  const { failureCount, failures, clusters, markdown } = generateDiagnosticsMarkdown(qaDir, resultsPath);
   if (!options.dryRun) {
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     fs.writeFileSync(outPath, markdown, 'utf8');
+    saveDiagnoseClustersSnapshot(qaDir, clusters);
   }
 
   const payload = {
     failureCount,
+    clusterCount: clusters.length,
+    clusters,
     failures,
     resultsPath,
     outputPath: options.dryRun ? null : outPath,

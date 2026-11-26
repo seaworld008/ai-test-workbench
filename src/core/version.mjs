@@ -14,9 +14,9 @@ function loadRootPackageVersion() {
   try {
     const pkgPath = path.join(REPO_ROOT, 'package.json');
     const parsed = /** @type {{ version?: unknown }} */ (JSON.parse(fs.readFileSync(pkgPath, 'utf8')));
-    return typeof parsed.version === 'string' && parsed.version.trim() ? parsed.version.trim() : '6.3.0';
+    return typeof parsed.version === 'string' && parsed.version.trim() ? parsed.version.trim() : '6.4.0';
   } catch {
-    return '6.3.0';
+    return '6.4.0';
   }
 }
 

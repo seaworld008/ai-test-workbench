@@ -13,6 +13,7 @@ import {
   describeTrustLevel,
   tryCosignKeylessSign,
 } from '../trust.mjs';
+import { buildSeamGatekeeperCard, renderSeamGatekeeperMarkdown } from './seam-card.mjs';
 
 /**
  * @param {Record<string, any>} verdictObj
@@ -121,6 +122,10 @@ export function buildPrVerdictMarkdown(verdict, lang = 'zh') {
     `- **AI-BOM**: llmCalls=\`${verdict.ai?.llmCalls ?? 0}\``,
     '',
   ];
+
+  if (verdict.seamReview) {
+    lines.push(...renderSeamGatekeeperMarkdown(verdict.seamReview, lang));
+  }
 
   if (verdict.failures.length > 0) {
     lines.push(isZh ? '### 失败定责与根因证据' : '### Failure Triage & Trace Evidence');
@@ -264,6 +269,7 @@ export function checkHealSessionConflicts(qaDir, baseResolution, trustContext = 
  *   qaDir: string,
  *   repoDir: string,
  *   lang: string,
+ *   baseResolution?: { isGitRepo?: boolean, gitRoot?: string | null, resolved?: string | null } | null,
  *   verdictPayload: Record<string, any>,
  *   treeDigest: string | null,
  *   auditOut: Record<string, any>,
@@ -274,11 +280,20 @@ export function writeVerdictArtifacts({
   qaDir,
   repoDir,
   lang,
+  baseResolution,
   verdictPayload,
   treeDigest,
   auditOut,
   gateKernelVersion,
 }) {
+  if (!verdictPayload.seamReview) {
+    verdictPayload.seamReview = buildSeamGatekeeperCard({
+      qaDir,
+      repoDir,
+      baseResolution: baseResolution || null,
+      verdictPayload,
+    });
+  }
   const reportsDir = path.join(qaDir, 'reports');
   fs.mkdirSync(reportsDir, { recursive: true });
   const mdSummary = buildPrVerdictMarkdown(verdictPayload, lang);
@@ -328,5 +343,6 @@ export function writeVerdictArtifacts({
     attestationPath,
     predicatePath,
     sigstoreBundlePath,
+    seamReview: verdictPayload.seamReview,
   };
 }

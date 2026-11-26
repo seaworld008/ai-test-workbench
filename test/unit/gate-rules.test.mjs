@@ -9,10 +9,10 @@ import {
   isRuleEnabled,
 } from '../../src/kernel/gate-kernel.mjs';
 
-test('Gate Rule Registry exposes all 17 canonical rules AITEST-G101..G117 with toggleable config', () => {
-  assert.equal(ALL_GATE_RULES.length, 17);
+test('Gate Rule Registry exposes all 18 canonical rules AITEST-G101..G118 with toggleable config', () => {
+  assert.equal(ALL_GATE_RULES.length, 18);
   const codes = ALL_GATE_RULES.map((r) => r.code);
-  for (let n = 101; n <= 117; n += 1) {
+  for (let n = 101; n <= 118; n += 1) {
     const code = `AITEST-G${n}`;
     assert.ok(codes.includes(code), `Missing rule ${code}`);
     const rule = getGateRuleByCode(code);

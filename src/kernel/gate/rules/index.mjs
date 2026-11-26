@@ -2,11 +2,12 @@ import { ruleG102, ruleG103, ruleG104, ruleG115 } from './assertion-rules.mjs';
 import { ruleG105, ruleG106, ruleG107, ruleG108, ruleG109, ruleG110 } from './control-flow-rules.mjs';
 import { ruleG116 } from './g116-status-literal.mjs';
 import { ruleG117 } from './g117-dieselgate.mjs';
+import { ruleG118 } from './g118-lockstep.mjs';
 import { ruleG101, ruleG113 } from './governance-rules.mjs';
 import { ruleG111, ruleG112, ruleG114 } from './locator-and-oracle-rules.mjs';
 
 /**
- * Canonical registry of all 17 pluggable anti-fake-green gate rules (`AITEST-G101` .. `AITEST-G117`).
+ * Canonical registry of all 18 pluggable anti-fake-green gate rules (`AITEST-G101` .. `AITEST-G118`).
  */
 export const ALL_GATE_RULES = Object.freeze([
   ruleG101,
@@ -26,13 +27,14 @@ export const ALL_GATE_RULES = Object.freeze([
   ruleG115,
   ruleG116,
   ruleG117,
+  ruleG118,
 ]);
 
 /** @type {Map<string, (typeof ALL_GATE_RULES)[number]>} */
 const RULES_BY_CODE = new Map(ALL_GATE_RULES.map((r) => [r.code, r]));
 
 /**
- * Looks up a gate rule definition by its code (`AITEST-G101`..`AITEST-G117`).
+ * Looks up a gate rule definition by its code (`AITEST-G101`..`AITEST-G118`).
  * @param {string} code
  */
 export function getGateRuleByCode(code) {

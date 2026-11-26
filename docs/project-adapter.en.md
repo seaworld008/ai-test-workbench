@@ -4,8 +4,8 @@
 
 ## 1. Next.js / Vue / React / Modern H5 (`<repo>/qa/`)
 - Keep Playwright dependencies isolated inside `<repo>/qa/package.json` without modifying host Vite/Next/Webpack builds.
-- Exclude `qa/**` from host root `tsconfig.json` or `eslint.config.*` if `npx ai-test-workbench@6.3.0 init` reports overlap advisories.
-- Run `npx ai-test-workbench@6.3.0 map` to auto-index routes into `impact-map.json` alongside manual mapping rules.
+- Exclude `qa/**` from host root `tsconfig.json` or `eslint.config.*` if `npx ai-test-workbench@6.4.0 init` reports overlap advisories.
+- Run `npx ai-test-workbench@6.4.0 map` to auto-index routes into `impact-map.json` alongside manual mapping rules.
 
 ## 2. Java / Spring Cloud (`<repo>/qa/`)
 - Playwright covers cross-service UI flows and HTTP API contracts alongside JUnit/MockMvc.

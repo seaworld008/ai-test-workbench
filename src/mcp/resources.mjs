@@ -298,6 +298,7 @@ export function readMcpResource(uri, ctx = {}) {
     diagnostics: { rel: path.join('reports', 'ai-diagnostics.md'), mime: 'text/markdown' },
     'perf-summary': { rel: path.join('reports', 'perf-summary.md'), mime: 'text/markdown' },
     'verdict-summary': { rel: path.join('reports', 'verdict-summary.md'), mime: 'text/markdown' },
+    'parity-summary': { rel: path.join('reports', 'parity-summary.md'), mime: 'text/markdown' },
   };
 
   let targetRoot = null;

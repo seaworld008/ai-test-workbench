@@ -105,3 +105,21 @@ export {
   countMutationSpecsInFiles,
   verifyLedgerBindingInQaDir,
 } from './gate/ledger-verify.mjs';
+
+export {
+  DEFAULT_NORMALIZE_PATHS,
+  compareParityCheckpoints,
+  computeByteDiffMetrics,
+  computeShapeFingerprint,
+} from './diff-oracle.mjs';
+
+export { evaluateLockstepRules } from './gate/rules/g118-lockstep.mjs';
+export {
+  PROJECT_RULES_REL_PATH,
+  compileDeclarativeRuleSpecs,
+  compileSafeDeclarativeRegex,
+  evaluateProductProjectRules,
+  loadVerifiedProjectGateRules,
+  matchesRuleFileGlobs,
+  toPluggableGateRule,
+} from './gate/project-rules.mjs';

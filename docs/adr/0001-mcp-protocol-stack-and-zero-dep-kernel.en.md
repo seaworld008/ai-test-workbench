@@ -31,7 +31,7 @@ Adopt **Option B**:
 
 1. **Zero Runtime Dependencies**: Root `package.json` omits `dependencies`. `src/mcp/` is decomposed into cohesive `<= 500`-line modules (`protocol.mjs`, `registry.mjs`, `tools/{shared,discovery,verification,stateful}.mjs`, `resources.mjs`, `security.mjs`, `transport-stdio.mjs`, `transport-http.mjs`) with zero circular imports.
 2. **Isolated Conformance & Reference SDK Verification**: The standalone `conformance/` directory runs upstream `@modelcontextprotocol/conformance` scenarios and `@modelcontextprotocol/sdk` client tests over `StdioClientTransport`, `StreamableHTTPClientTransport`, and `SSEClientTransport` in CI.
-3. **Privilege Isolation**: Human-only `npx ai-test-workbench@6.3.0 governance approve` is never registered in `src/mcp/registry.mjs` and is hard-blocked whenever `AITEST_MCP_CHILD=1`.
+3. **Privilege Isolation**: Human-only `npx ai-test-workbench@6.4.0 governance approve` is never registered in `src/mcp/registry.mjs` and is hard-blocked whenever `AITEST_MCP_CHILD=1`.
 
 ---
 

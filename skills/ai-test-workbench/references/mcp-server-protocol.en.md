@@ -1,4 +1,4 @@
-# Native Multi-Protocol MCP Server Reference (`mcp-serve` v6.3.0)
+# Native Multi-Protocol MCP Server Reference (`mcp-serve` v6.4.0)
 
 > [简体中文 (默认)](./mcp-server-protocol.md) · [SKILL.md](../SKILL.md) · [ADR-0001](../../../docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md) · [ADR-0005](../../../docs/adr/0005-mcp-surface-outcome-and-config.en.md)
 
@@ -6,7 +6,7 @@
 
 - **Protocol Versions**: `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05` (zero runtime npm dependencies).
 - **Transports**:
-  1. `stdio`: `node tools/aitest.mjs mcp-serve` (or pinned `npx --package=ai-test-workbench@6.3.0 ai-test-workbench mcp-serve`; NDJSON JSON-RPC with isolated child-process execution `AITEST_MCP_CHILD=1` and zero `globalThis.console` mutation).
+  1. `stdio`: `node tools/aitest.mjs mcp-serve` (or pinned `npx --package=ai-test-workbench@6.4.0 ai-test-workbench mcp-serve`; NDJSON JSON-RPC with isolated child-process execution `AITEST_MCP_CHILD=1` and zero `globalThis.console` mutation).
   2. `Streamable HTTP` (`POST/GET/DELETE /mcp`): `initialize`-only session creation, `404 Not Found` on unknown/expired `Mcp-Session-Id`, idle TTL + `maxSessions` eviction, and batch rejection on `>= 2025-06-18`.
   3. `Legacy HTTP+SSE` (`GET /sse` + `POST /messages`): `2024-11-05` compatible.
 - **Progress, Cancellation & Async Backgrounding (`src/jobs.mjs`)**:
@@ -15,7 +15,7 @@
   - Transitions calls exceeding `syncBudgetMs` into async background jobs queried via `aitest_job(action="status"|"result", jobId=...)`.
 - **Security**: `Host` (`421`/`403`), `Origin` (`403`), and `Content-Type: application/json` (`415`) validation, `crypto.timingSafeEqual` Bearer auth (`401`), fail-closed `--workspace-root` ceiling intersected with client roots, full path-argument traversal checks, live JSON Schema validation, and strict exclusion of all `governance` CLI commands from MCP.
 
-## 2. Registered Canonical MCP Tools (16 Tools, Auto-Generated)
+## 2. Registered Canonical MCP Tools (17 Tools, Auto-Generated)
 
 <!-- BEGIN:GENERATED_MCP_TOOLS lang="en" -->
 | Tool Name | Category | Read-Only Hint | Responsibility |
@@ -33,11 +33,12 @@
 | `aitest_audit` | Verification & Gates | Yes | Run 4-Layer Fail-Closed Anti-Fake-Green Quality Gate |
 | `aitest_diagnose` | Verification & Gates | No | Generate Redacted Evidence-First A/B/C/D Diagnostics Report |
 | `aitest_perf` | Verification & Gates | No | Run PerformanceObserver Web Vitals & Read-Only API SLO Benchmark |
-| `aitest_report` | Verification & Gates | Yes | Query Reports Index, Flaky Telemetry & Requirement Traceability |
+| `aitest_report` | Verification & Gates | Yes | Query Reports Index, Flaky Telemetry, Traceability & Lessons |
+| `aitest_parity` | Verification & Gates | No | Run Dual-Target 5-Checkpoint Differential Parity Oracle |
 | `aitest_heal` | Stateful Control | No | Stateful A/B/C/D Heal Governance State Machine (begin \| attempt \| conclude \| discard) |
 | `aitest_job` | Stateful Control | No | Inspect, Await, or Cancel Async Background MCP Jobs (status \| result \| cancel) |
 
-> Auto-generated from `src/mcp/registry.mjs` (`16` canonical tools; `governance approve` is human-CLI-only and never registered; 8 legacy v5/v6.1 tool names remain as deprecated forwarding aliases in `v6.x`, see `docs/upgrade.en.md`).
+> Auto-generated from `src/mcp/registry.mjs` (`17` canonical tools; `governance approve` is human-CLI-only and never registered; 8 legacy v5/v6.1 tool names remain as deprecated forwarding aliases in `v6.x`, see `docs/upgrade.en.md`).
 <!-- END:GENERATED_MCP_TOOLS -->
 
 ## 3. Resources & Prompts

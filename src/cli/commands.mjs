@@ -12,6 +12,7 @@ import { runTraceMatrixCommand } from '../traceability.mjs';
 import { runAttestCommand } from '../trust.mjs';
 import { runVerifyChangeCommand } from '../verdict.mjs';
 
+import { PARITY_CLI_COMMANDS } from './commands-parity.mjs';
 import { WORKSPACE_CLI_COMMANDS } from './commands-workspace.mjs';
 import { BOOL, STR, TARGET_OPTS, makeCommon } from './opts.mjs';
 
@@ -27,6 +28,7 @@ import { BOOL, STR, TARGET_OPTS, makeCommon } from './opts.mjs';
  */
 export const CLI_COMMANDS = {
   ...WORKSPACE_CLI_COMMANDS,
+  ...PARITY_CLI_COMMANDS,
   perf: {
     requireTarget: true,
     options: {
@@ -35,6 +37,7 @@ export const CLI_COMMANDS = {
       'base-url': STR,
       routes: STR,
       endpoint: STR,
+      'sse-endpoint': STR,
       concurrency: STR,
       iterations: STR,
       samples: STR,
@@ -49,6 +52,7 @@ export const CLI_COMMANDS = {
         baseUrl: v['base-url'],
         routes: v.routes,
         endpoint: v.endpoint,
+        sseEndpoint: v['sse-endpoint'],
         concurrency: v.concurrency ? Number(v.concurrency) : undefined,
         iterations: v.iterations ? Number(v.iterations) : undefined,
         samples: v.samples ? Number(v.samples) : undefined,
@@ -166,6 +170,10 @@ export const CLI_COMMANDS = {
     options: {
       ...TARGET_OPTS,
       'base-url': STR,
+      'baseline-url': STR,
+      corpus: STR,
+      'privacy-mode': STR,
+      'strict-byte-escape': BOOL,
       base: STR,
       mode: STR,
       suite: STR,
@@ -178,6 +186,10 @@ export const CLI_COMMANDS = {
       runVerifyChangeCommand({
         ...makeCommon(v, lang),
         baseUrl: v['base-url'],
+        baselineUrl: v['baseline-url'],
+        corpus: v.corpus,
+        privacyMode: v['privacy-mode'],
+        strictByteEscape: Boolean(v['strict-byte-escape']),
         base: v.base,
         mode: v.mode || v.suite,
         suite: v.suite,

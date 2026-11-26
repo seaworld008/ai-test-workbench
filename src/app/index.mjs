@@ -7,6 +7,7 @@
 export { loadWorkbenchConfig } from '../core/config.mjs';
 export { buildCommandResult, emitCommandResult, EXIT_CODES, outcomeToExitCode } from '../core/outcome.mjs';
 export { redactSecrets } from '../core/redact.mjs';
+export { measureSseEndpoint, parseSseStreamText } from '../core/stream-sse.mjs';
 export { REPO_ROOT, SCHEMA_VERSIONS, WORKBENCH_VERSION } from '../core/version.mjs';
 export { resolveQaDirectory, resolveWorkspace } from '../domains/workspace/resolve.mjs';
 export { analyzeHealerDiffText, runAuditCommand, runAuditForQaDir } from '../audit.mjs';
@@ -21,8 +22,28 @@ export {
   syncLivingCodeMap,
   unregisterCodeMapAdapter,
 } from '../codemap.mjs';
-export { generateDiagnosticsMarkdown, runDiagnoseCommand, suggestFailureCategory } from '../diagnose.mjs';
+export {
+  detectCorpusFormat,
+  extractFeatureCohort,
+  importTrafficCorpus,
+  runCorpusCommand,
+  stripExternalOriginToRelativePath,
+} from '../corpus.mjs';
+export {
+  clusterDiagnosedFailures,
+  computeDiagnosticFingerprint,
+  generateDiagnosticsMarkdown,
+  runDiagnoseCommand,
+  suggestFailureCategory,
+} from '../diagnose.mjs';
 export { collectDoctorReport, runDoctor } from '../doctor.mjs';
+export {
+  detectEncodingTraits,
+  inferJsonSchemaFromSample,
+  inferUnionSchemaFromSamples,
+  mergeInferredSchemas,
+  writeInferredApiSchemas,
+} from '../explore/schema-inferrer.mjs';
 export { computeFlakyReport, runFlakyCommand, syncQuarantineFromLedger } from '../flaky.mjs';
 export { ensureInitialGovernanceLock, runGovernanceCommand, writeGovernanceLock } from '../governance.mjs';
 export {
@@ -41,10 +62,27 @@ export {
   runInit,
   unregisterStackDescriptor,
 } from '../init.mjs';
+export {
+  annotateDiagnosedWithKnownBlockers,
+  collectLessonsReport,
+  distillMemoryProposals,
+  loadKnownBlockers,
+  matchKnownBlocker,
+  parseReviewCommentsFile,
+  runLearnCommand,
+  runRetroactiveSweep,
+} from '../learn.mjs';
 export { beginRunLedger, finalizeRunLedger, readJsonlTail, readLedgerHistory, resolveGitHeadSha } from '../ledger.mjs';
 export { TOOL_REGISTRY } from '../mcp/registry.mjs';
 export { handleMcpJsonRpcMessage } from '../mcp-server.mjs';
 export { evaluateTargetSafety, checkOutgoingRequestSafety, loadMergedQaEnv } from '../origin-guard.mjs';
+export { runParityCommand, runParityCore } from '../parity.mjs';
+export { evaluatePerfBudget, runPerfCommand, runSseStreamBenchmark } from '../perf.mjs';
+export {
+  computeRequestShapeHash,
+  loadVerifiedUpstreamCassette,
+  startCassetteReplayServer,
+} from '../replay/cassette.mjs';
 export { runReportCommand } from '../report.mjs';
 export { executeSuiteCore, runSuiteCommand } from '../runner.mjs';
 export { buildRequirementTraceMatrix, runTraceMatrixCommand } from '../traceability.mjs';
@@ -53,13 +91,20 @@ export { computeDssePae, GITHUB_ACTIONS_OIDC_ISSUER } from '../trust/der-x509.mj
 export { INTOTO_STATEMENT_TYPE, VERDICT_PREDICATE_TYPE } from '../trust/intoto.mjs';
 export { runUpgradeCommand, upgradeQaWorkspace } from '../upgrade.mjs';
 export { checkHealSessionConflicts, runVerifyChangeCommand, verifyChangeCore } from '../verdict.mjs';
+export { buildSeamGatekeeperCard, detectSuspectedShortcuts, extractS5LiteralShifts, renderSeamGatekeeperMarkdown } from '../verdict/seam-card.mjs';
 export {
+  DEFAULT_NORMALIZE_PATHS,
   GATE_KERNEL_VERSION,
   clearGitRootCache,
   compareChangesetAst,
+  compareParityCheckpoints,
   compareSpecSourcesAst,
+  computeByteDiffMetrics,
   computeDomainHmac,
+  computeShapeFingerprint,
   computeWorkspaceInputHash,
+  evaluateLockstepRules,
+  loadVerifiedProjectGateRules,
   openTrustContext,
   resolveDefaultDiffBase,
   resolveGitHeadAndTreeSha,

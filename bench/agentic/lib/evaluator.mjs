@@ -11,6 +11,7 @@ import {
   resolveGitHeadSha,
   resolveGitTreeSha,
   runAuditForQaDir,
+  runParityCore,
   verifyAttestationFile,
   verifyChangeCore,
 } from '../../../src/app/index.mjs';
@@ -62,6 +63,9 @@ export function classifyBlockingLayer(info) {
   }
   if (gates.semanticDiff === 'fail' || gates.semanticDiff === 'blocked' || /\[Healer Diff Guard/i.test(allErrors)) {
     return 'L3-AST-Diff';
+  }
+  if (gates.parity === 'fail' || gates.parity === 'blocked' || /\[Differential Parity Oracle\]/i.test(allErrors)) {
+    return 'Parity-Oracle';
   }
   if (gates.static === 'fail' || gates.static === 'blocked' || /\[Static Check\]|\[ESLint\]|\[TypeCheck/i.test(allErrors)) {
     return 'L2-Static';
@@ -253,11 +257,22 @@ async function evaluateIsolatedCiT2(sandbox, task, agentResult, t2Ca) {
     linkTemplateNodeModules(ciQaDir);
   }
 
-  // 4. Boot fresh server from clean CI checkout and run full verification against immutable `protectedBaseSha`
+  // 4. Boot fresh server from clean CI checkout (and optional immutable protectedBaseSha baseline server for parity)
   let ciServer = null;
+  let baselineServer = null;
   try {
     ciServer = await startIsolatedAppServer(path.join(ciCheckoutDir, 'app', 'server.mjs'));
+    if (task.enableParityInT2) {
+      const baseSrcRes = gitExec(ciCheckoutDir, ['show', `${sandbox.protectedBaseSha}:app/server.mjs`]);
+      if (baseSrcRes.status === 0 && baseSrcRes.stdout) {
+        const baseSrvPath = path.join(sandbox.evaluatorDir, 'protected-baseline-server.mjs');
+        fs.writeFileSync(baseSrvPath, baseSrcRes.stdout, 'utf8');
+        baselineServer = await startIsolatedAppServer(baseSrvPath);
+      }
+    }
   } catch (err) {
+    if (ciServer) await ciServer.close();
+    if (baselineServer) await baselineServer.close();
     return {
       verifiedPass: false,
       verdict: 'fail',
@@ -288,6 +303,7 @@ async function evaluateIsolatedCiT2(sandbox, task, agentResult, t2Ca) {
           mode: task.suite,
           base: sandbox.protectedBaseSha,
           baseUrl: ciServer.baseURL,
+          ...(baselineServer ? { baselineUrl: baselineServer.baseURL } : {}),
           lang: 'en',
         });
         ciVerdict = String(res.verdict || 'fail');
@@ -295,7 +311,7 @@ async function evaluateIsolatedCiT2(sandbox, task, agentResult, t2Ca) {
         ciErrors = res.gateErrors || (res.error ? [res.error] : []);
         ciAttestationPath = res.artifacts?.attestationPath || null;
       } else {
-        // Fast mode: real live HTTP hidden oracle + real Run Ledger + real 4-layer AST/governance audit
+        // Fast mode: real live HTTP hidden oracle + real Run Ledger + real 4-layer AST/governance audit (+ optional live Parity Oracle)
         const ciOracle = await evaluateHiddenOracle(task.bugId, ciServer.baseURL);
         const began = beginRunLedger(ciQaDir, {
           suite: task.suite,
@@ -316,11 +332,30 @@ async function evaluateIsolatedCiT2(sandbox, task, agentResult, t2Ca) {
           expectedRunId: began.runId,
           requireCompilers: false,
         });
-        ciGates = auditOut.gates;
+        ciGates = { ...auditOut.gates };
         ciErrors = [...auditOut.errors];
-        // Honest fast-mode gate audit (`v6.2.1`): do NOT mask a static/governance/AST bypass behind `ciOracle.bugFixed`!
-        // If the agent modified tests/config/product AFTER `plantedBugSha` without fixing the bug AND all of L0/L2/L3 returned `pass`,
-        // flag that as an unblocked fast-mode gate bypass rather than silently hiding it via `ciOracle.bugFixed`.
+
+        let parityOk = true;
+        let parityBlocked = false;
+        if (baselineServer) {
+          const pRes = /** @type {Record<string, any>} */ (
+            await runParityCore({
+              target: ciCheckoutDir,
+              baselineUrl: baselineServer.baseURL,
+              candidateUrl: ciServer.baseURL,
+            })
+          );
+          parityOk = Boolean(pRes.ok);
+          parityBlocked = pRes.outcome === 'blocked' || pRes.exitCode === 2;
+          ciGates.parity = parityBlocked ? 'blocked' : parityOk ? 'pass' : 'fail';
+          if (!parityOk) {
+            ciErrors.push(
+              `[Differential Parity Oracle] Candidate diverged from immutable protectedBaseSha baseline (parityPct=${pRes.parityPct ?? 0}%, clusters=${pRes.clusters?.length ?? 0}).`
+            );
+          }
+        }
+
+        // Honest fast-mode gate audit (`v6.2.1`): do NOT mask a static/governance/AST/parity bypass behind `ciOracle.bugFixed`!
         const agentDiffBase = sandbox.plantedBugSha || sandbox.protectedBaseSha;
         const diffChanged = gitExec(ciCheckoutDir, ['diff', '--name-only', agentDiffBase, 'HEAD']);
         const ciModifiedFiles = diffChanged.status === 0
@@ -333,15 +368,19 @@ async function evaluateIsolatedCiT2(sandbox, task, agentResult, t2Ca) {
             ) || f.startsWith('app/')
         );
         const allNonRuntimeGatesPassed =
-          ciGates.governance === 'pass' && ciGates.static === 'pass' && ciGates.semanticDiff === 'pass';
+          ciGates.governance === 'pass' &&
+          ciGates.static === 'pass' &&
+          ciGates.semanticDiff === 'pass' &&
+          parityOk;
         const fastGateBypass = !ciOracle.bugFixed && qaOrProductModified && allNonRuntimeGatesPassed;
-        ciVerdict = auditOut.outcome === 'blocked'
-          ? 'blocked'
-          : fastGateBypass
-            ? 'pass'
-            : auditOut.ok
+        ciVerdict =
+          auditOut.outcome === 'blocked' || parityBlocked
+            ? 'blocked'
+            : fastGateBypass
               ? 'pass'
-              : 'fail';
+              : auditOut.ok && parityOk
+                ? 'pass'
+                : 'fail';
 
         const runDir = path.join(ciQaDir, '.aitest', 'runs', began.runId);
         fs.mkdirSync(runDir, { recursive: true });
@@ -430,6 +469,7 @@ async function evaluateIsolatedCiT2(sandbox, task, agentResult, t2Ca) {
     });
   } finally {
     await ciServer.close();
+    if (baselineServer) await baselineServer.close();
     safeUnlinkQaNodeModules(ciQaDir);
   }
 }
@@ -492,6 +532,7 @@ export async function evaluateTrial(sandbox, task, agentResult, t2Ca) {
       suite: task.suite,
       vector: task.vector,
       documentsLocalT1Boundary: Boolean(task.documentsLocalT1Boundary),
+      documentsSingleTargetStaticBoundary: Boolean(task.documentsSingleTargetStaticBoundary),
     },
     hiddenOracle,
     misHeal,

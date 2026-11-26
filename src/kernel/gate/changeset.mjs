@@ -10,8 +10,8 @@ import {
 import { getFileAtGitRef, listChangedFilesUnderDir, resolveGitRoot } from './git-utils.mjs';
 import { analyzeSourceAst } from './parser.mjs';
 import { isCoveredByWaiver, isProtectedDiffPath, loadAitestConfig, validateAssertFunctionNames } from './policy.mjs';
-import { evaluateProductFileAst } from './rules/g117-dieselgate.mjs';
-import { evaluateDiffRules, isRuleEnabled } from './rules/index.mjs';
+import { runRepoLevelDiffGuards } from './repo-guards.mjs';
+import { evaluateDiffRules } from './rules/index.mjs';
 
 export { isExecutablePlaywrightSpecPath };
 
@@ -22,7 +22,7 @@ export { isExecutablePlaywrightSpecPath };
  * @param {string} filePath
  * @param {string} baseSource
  * @param {string} headSource
- * @param {{ assertFunctionNames?: string[], customMatchers?: Record<string, number>, activeWaivers?: any[], qaDir?: string, tsCompiler?: any, rulesConfig?: Record<string, any>, protectedGlobs?: string[], changesetContext?: any }} [options]
+ * @param {{ assertFunctionNames?: string[], customMatchers?: Record<string, number>, activeWaivers?: any[], qaDir?: string, tsCompiler?: any, rulesConfig?: Record<string, any>, protectedGlobs?: string[], replayAllowedUpstreamHosts?: string[], lockstepRules?: any[], repoChangedFiles?: string[], extraRules?: any[], changesetContext?: any }} [options]
  */
 export function compareSpecSourcesAst(filePath, baseSource, headSource, options = {}) {
   const {
@@ -32,6 +32,10 @@ export function compareSpecSourcesAst(filePath, baseSource, headSource, options 
     qaDir,
     rulesConfig = {},
     protectedGlobs,
+    replayAllowedUpstreamHosts,
+    lockstepRules,
+    repoChangedFiles,
+    extraRules,
     changesetContext = null,
   } = options;
 
@@ -66,9 +70,14 @@ export function compareSpecSourcesAst(filePath, baseSource, headSource, options 
     baseSource: baseSource || '',
     headSource: headSource || '',
     canWaive,
+    activeWaivers,
     assertFunctionNames,
     rulesConfig,
     protectedGlobs,
+    replayAllowedUpstreamHosts,
+    lockstepRules,
+    repoChangedFiles,
+    extraRules,
     changesetContext,
     isDiffTextMode: false,
   });
@@ -109,7 +118,7 @@ function meetsBranchNewAssertionFloor(headSum, baselineTestTitles, isBaselineNew
  * (e.g., tests split or moved across spec files in the same commit).
  *
  * @param {Array<{ filePath: string, baseSource: string, headSource: string, isBaselineNewSpec?: boolean, baselineTestTitles?: Set<string> | null }>} fileChanges
- * @param {{ assertFunctionNames?: string[], customMatchers?: Record<string, number>, activeWaivers?: any[], qaDir?: string, tsCompiler?: any, rulesConfig?: Record<string, any>, protectedGlobs?: string[], enforceProjectScopes?: boolean }} [options]
+ * @param {{ assertFunctionNames?: string[], customMatchers?: Record<string, number>, activeWaivers?: any[], qaDir?: string, tsCompiler?: any, rulesConfig?: Record<string, any>, protectedGlobs?: string[], replayAllowedUpstreamHosts?: string[], lockstepRules?: any[], repoChangedFiles?: string[], extraRules?: any[], enforceProjectScopes?: boolean }} [options]
  */
 export function compareChangesetAst(fileChanges, options = {}) {
   const {
@@ -119,6 +128,10 @@ export function compareChangesetAst(fileChanges, options = {}) {
     qaDir,
     rulesConfig = {},
     protectedGlobs,
+    replayAllowedUpstreamHosts,
+    lockstepRules,
+    repoChangedFiles,
+    extraRules,
     enforceProjectScopes = false,
   } = options;
 
@@ -189,9 +202,14 @@ export function compareChangesetAst(fileChanges, options = {}) {
       baseSource: entry.baseSource,
       headSource: entry.headSource,
       canWaive,
+      activeWaivers,
       assertFunctionNames,
       rulesConfig,
       protectedGlobs,
+      replayAllowedUpstreamHosts,
+      lockstepRules,
+      repoChangedFiles,
+      extraRules,
       changesetContext,
       isBaselineNewSpec: entry.isBaselineNewSpec,
       baselineTestTitles: entry.baselineTestTitles,
@@ -214,11 +232,11 @@ export function compareChangesetAst(fileChanges, options = {}) {
 }
 
 /**
- * Full-file + Git-diff Layer 3 Semantic Guard (`G-01..G-09`).
+ * Full-file + Git-diff Layer 3 Semantic Guard (`G-01..G-09`, `G116..G118`).
  * Compares FULL `git show <diffBase>:<file>` against live disk content across the entire changeset.
  * @param {string} qaDir
  * @param {string} diffBase
- * @param {{ activeWaivers?: Array<Record<string, any>>, tsCompiler?: any, baselineRef?: string | null, explicitBase?: boolean, trustContext?: import('./trust-context.mjs').TrustContext, env?: Record<string, string | undefined> }} [options]
+ * @param {{ activeWaivers?: Array<Record<string, any>>, tsCompiler?: any, baselineRef?: string | null, explicitBase?: boolean, extraRules?: Array<Record<string, any>>, productRuleSpecs?: import('./project-rules.mjs').CompiledProjectRuleSpec[], trustContext?: import('./trust-context.mjs').TrustContext, env?: Record<string, string | undefined> }} [options]
  * @returns {{ ok: boolean, status: 'pass' | 'fail' | 'blocked', findings: Array<Record<string, any>>, violations: string[] }}
  */
 export function runGitDiffGuard(qaDir, diffBase, options = {}) {
@@ -370,6 +388,8 @@ export function runGitDiffGuard(qaDir, diffBase, options = {}) {
       enforceProjectScopes: true,
       rulesConfig: cfg.rules || {},
       protectedGlobs: cfg.governance?.protected,
+      replayAllowedUpstreamHosts: cfg.replayAllowedUpstreamHosts || [],
+      extraRules: options.extraRules || [],
       ...('tsCompiler' in options ? { tsCompiler: options.tsCompiler } : {}),
     });
     if (cmp.blocked) blocked = true;
@@ -377,43 +397,19 @@ export function runGitDiffGuard(qaDir, diffBase, options = {}) {
     violations.push(...cmp.violations);
   }
 
-  // Layer 3 Product-Side Dieselgate Guard (`AITEST-G117`): block test-traffic special-casing outside `qa/`
-  if (isRuleEnabled('AITEST-G117', cfg.rules || {})) {
-    const repoChanged = listChangedFilesUnderDir(gitRoot, diffBase, gitRoot);
-    if (repoChanged.ok) {
-      const repoItems = [
-        ...repoChanged.changed.map((c) => ({ rel: c.path, status: c.status, oldRel: c.oldPath || c.path })),
-        ...repoChanged.untracked.map((p) => ({ rel: p, status: 'U', oldRel: null })),
-      ];
-      for (const item of repoItems) {
-        const normRel = item.rel.replace(/\\/g, '/');
-        if (!/\.(?:ts|tsx|js|jsx|mjs|cjs)$/i.test(normRel)) continue;
-        const absProd = path.join(gitRoot, item.rel);
-        const relFromQa = path.relative(realQaDir, absProd).replace(/\\/g, '/');
-        if (!relFromQa.startsWith('..')) continue;
-        if (
-          /^(?:qa|test|tests|bench|scripts|reports|knowledge|\.aitest|node_modules)\//i.test(normRel) ||
-          /\/(?:qa|test|tests|bench|reports|knowledge|\.aitest|node_modules)\//i.test(normRel)
-        ) {
-          continue;
-        }
-        if (/\.(?:spec|test)\.[jt]sx?$/i.test(normRel)) continue;
-        if (isCoveredByWaiver({ file: normRel, title: 'AITEST-G117' }, activeWaivers, 'diff')) continue;
-        const baseProd =
-          item.oldRel && item.status !== 'A' && item.status !== 'U'
-            ? getFileAtGitRef(gitRoot, diffBase, item.oldRel) || ''
-            : '';
-        const headProd =
-          fs.existsSync(absProd) && fs.statSync(absProd).isFile() ? fs.readFileSync(absProd, 'utf8') : '';
-        const dgRes = evaluateProductFileAst(normRel, baseProd, headProd, {
-          qaDir,
-          ...('tsCompiler' in options ? { tsCompiler: options.tsCompiler } : {}),
-        });
-        findings.push(...dgRes.findings);
-        violations.push(...dgRes.violations);
-      }
-    }
-  }
+  // Repository-wide Layer 3 guards: AITEST-G117 (Dieselgate), AITEST-G118 (Lockstep), and sealed project rules
+  const repoGuards = runRepoLevelDiffGuards({
+    gitRoot,
+    realQaDir,
+    qaDir,
+    diffBase,
+    cfg,
+    activeWaivers,
+    productRuleSpecs: options.productRuleSpecs || [],
+    ...('tsCompiler' in options ? { tsCompiler: options.tsCompiler } : {}),
+  });
+  findings.push(...repoGuards.findings);
+  violations.push(...repoGuards.violations);
 
   const unique = [...new Set(violations)];
   return {

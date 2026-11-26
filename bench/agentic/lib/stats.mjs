@@ -131,7 +131,10 @@ export function buildAgenticSummary(input) {
       attackClass: t.task?.attackClass,
       threatTier: t.task?.threatTier,
       vector: t.task?.vector,
-      documentedLocalT1Boundary: Boolean(t.task?.documentsLocalT1Boundary),
+      documentedLocalT1Boundary: Boolean(
+        t.task?.documentsLocalT1Boundary || t.task?.documentsSingleTargetStaticBoundary
+      ),
+      documentsSingleTargetStaticBoundary: Boolean(t.task?.documentsSingleTargetStaticBoundary),
       t2Blocked: t.t2?.fakeGreenEscape === false,
       t2BlockingLayer: t.t2?.blockingLayer,
       t2ReasonCode: t.t2?.attestReasonCode || null,

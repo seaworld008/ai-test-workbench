@@ -6,6 +6,7 @@ import { verifyLedgerBindingInQaDir } from '../audit.mjs';
 import { SCHEMA_VERSIONS } from '../core/version.mjs';
 import { generateDiagnosticsMarkdown } from '../diagnose.mjs';
 import { openTrustContext } from '../kernel/gate-kernel.mjs';
+import { loadKnownBlockers, matchKnownBlocker } from '../memory/blockers.mjs';
 import {
   MAX_HEAL_ATTEMPTS,
   computeAppCodeTreeHash,
@@ -84,6 +85,24 @@ export function beginHealSession(qaDir, options = {}) {
       ok: false,
       exitCode: 1,
       error: `Failing test matching "${options.testId}" not found in current results.json.`,
+    };
+  }
+
+  // Known Blocker Deduplication Guard (`WU-D`): refuse opening duplicate heal sessions for open architecture blockers
+  const openBlockers = loadKnownBlockers(qaDir).openBlockers;
+  const matchedBlocker =
+    (targetFailure.linkedKnownBlockerId
+      ? openBlockers.find((b) => b.id === targetFailure.linkedKnownBlockerId)
+      : null) || matchKnownBlocker(targetFailure, openBlockers);
+  if (matchedBlocker) {
+    return {
+      ok: false,
+      exitCode: 2,
+      blockerLinked: true,
+      linkedKnownBlockerId: matchedBlocker.id,
+      knownBlockerReason: matchedBlocker.reason,
+      trackingIssue: matchedBlocker.trackingIssue || null,
+      error: `[Heal Governance Blocked] Test "${targetFailure.testId}" matches open known blocker "${matchedBlocker.id}" (${matchedBlocker.title}: ${matchedBlocker.reason}). Refusing to open a duplicate heal session; do NOT patch with static shortcuts (track via ${matchedBlocker.trackingIssue || matchedBlocker.id}).`,
     };
   }
 

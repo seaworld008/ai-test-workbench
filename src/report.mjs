@@ -5,6 +5,7 @@ import { resolveQaDirectory } from './agents.mjs';
 import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import { summarizePlaywrightResults } from './core/playwright-results.mjs';
 import { runFlakyCommand } from './flaky.mjs';
+import { collectLessonsReport } from './learn.mjs';
 import { runTraceMatrixCommand } from './traceability.mjs';
 
 /**
@@ -166,8 +167,8 @@ export async function runReportCommand(options = {}) {
       { asJson, compatSpreadData: false }
     );
   };
-  if (view !== 'artifacts' && view !== 'summary') {
-    return failReport(64, `Invalid --view "${view}". Use: summary | artifacts | flaky | traceability`, 'usage');
+  if (view !== 'artifacts' && view !== 'summary' && view !== 'lessons') {
+    return failReport(64, `Invalid --view "${view}". Use: summary | artifacts | flaky | traceability | lessons`, 'usage');
   }
   if (!options.target) {
     return failReport(1, lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
@@ -176,6 +177,28 @@ export async function runReportCommand(options = {}) {
   const qaDir = resolveQaDirectory(options.target, options.qaDir);
   if (!qaDir) {
     return failReport(1, lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
+  }
+
+  if (view === 'lessons') {
+    const lessons = collectLessonsReport(qaDir);
+    if (!asJson) {
+      console.log(`\n=== ${lang === 'zh' ? '记忆循环经验与已知阻塞单视图 (lessons)' : 'Memory Loop Lessons & Known Blockers (lessons)'} ===`);
+      console.log(`Clusters        : ${lessons.clusters.length}`);
+      console.log(`Candidate Rules : ${lessons.candidateRuleSpecs.length} (sealed=${lessons.sealedProjectRules.length})`);
+      console.log(`Open Blockers   : ${lessons.openBlockerCount}`);
+      console.log('');
+    }
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'report',
+        outcome: 'pass',
+        ok: true,
+        exitCode: 0,
+        summary: `Lessons view: ${lessons.clusters.length} cluster(s), ${lessons.openBlockerCount} open blocker(s), ${lessons.sealedProjectRules.length} sealed rule(s)`,
+        data: lessons,
+      }),
+      { asJson }
+    );
   }
 
   const { payload, hasAny } = collectReportArtifacts(qaDir, { view });

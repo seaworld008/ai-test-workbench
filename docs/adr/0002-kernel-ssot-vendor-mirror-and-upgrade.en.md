@@ -29,7 +29,7 @@ In `v5.x`, the 4-layer gate kernel, target guard, and schema validator lived ins
 
 1. **Kernel SSoT in `src/kernel/`**: Home `gate-kernel.mjs`, `target-guard.mjs`, `schema-validator.mjs`, and `gate/**` under `src/kernel/` and export `.`, `./kernel`, `./target-guard`, and `./schema-validator` via `package.json#exports`.
 2. **Deterministic One-Way Mirror (`scripts/sync-template-vendor.mjs`)**: Mirror `src/kernel/**` and shared `src/core/{config,glob,outcome,playwright-results,version}.mjs` to `templates/playwright-qa/support/` stamped with `@generated`, `@source-sha256`, and `@workbench-version`. `test/unit/architecture-boundaries.test.mjs` and CI enforce `0` template inversions and byte identity.
-3. **Manifest & 3-Way Safe `upgrade`**: `init` writes `<repo>/qa/.aitest/template-manifest.json`; `npx ai-test-workbench@6.3.0 upgrade --target <repo>` updates unmodified managed files cleanly, writes `.aitest-new` on user conflicts, and **never** auto-approves `governance.lock`.
+3. **Manifest & 3-Way Safe `upgrade`**: `init` writes `<repo>/qa/.aitest/template-manifest.json`; `npx ai-test-workbench@6.4.0 upgrade --target <repo>` updates unmodified managed files cleanly, writes `.aitest-new` on user conflicts, and **never** auto-approves `governance.lock`.
 4. **Accurate Drift Detection**: `detectHostGateKernelVersion()` checks `.aitest/template-manifest.json`, `support/core/version.mjs`, `support/gate/engine.mjs`, and legacy single-file kernels.
 
 ---

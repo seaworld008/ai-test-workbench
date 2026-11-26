@@ -9,6 +9,33 @@ export interface AitestRuleConfig {
   severity?: RuleSeverity;
 }
 
+export interface AitestParityConfig {
+  normalizePaths?: string[];
+  strictByteEscape?: boolean;
+  maxLatencyRatio?: number;
+  maxTtftRatio?: number;
+  privacyMode?: 'redacted' | 'shape-only';
+}
+
+export interface LockstepRuleConfig {
+  id: string;
+  whenModified: string[];
+  requireModified: string[];
+  allowWaiver?: boolean;
+}
+
+export interface DeclarativeMemoryRuleSpec {
+  id?: string;
+  code?: string;
+  title?: string;
+  description?: string;
+  pattern: string;
+  flags?: string;
+  scope?: 'all' | 'product' | 'specs';
+  fileGlobs?: string[];
+  remediation?: string;
+}
+
 export interface AitestConfig {
   assertFunctionNames?: string[];
   criticalTags?: string[];
@@ -25,6 +52,10 @@ export interface AitestConfig {
   requireGovernanceLock?: boolean;
   rules?: Record<string, boolean | AitestRuleConfig>;
   customMatchers?: Record<string, number>;
+  parity?: AitestParityConfig;
+  replayAllowedUpstreamHosts?: string[];
+  lockstepRules?: LockstepRuleConfig[];
+  memoryPatterns?: DeclarativeMemoryRuleSpec[];
 }
 
 export interface TargetSafetyConfig {

@@ -1,6 +1,6 @@
 name: Release npm Package
 
-# Triggered ONLY when a human pushes a semver release tag (e.g., v6.3.0).
+# Triggered ONLY when a human pushes a semver release tag (e.g., v6.4.0).
 # Trusted Publishing (OIDC) is active on npmjs.com:
 #   - Package: ai-test-workbench
 #   - Repository: seaworld008/ai-test-workbench

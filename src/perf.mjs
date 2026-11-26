@@ -20,8 +20,9 @@ import {
   evaluatePerfBudget,
 } from './perf/budget.mjs';
 import { runBrowserPerfProfile, runReadOnlyApiBenchmark } from './perf/collectors.mjs';
+import { runSseStreamBenchmark } from './perf/streaming.mjs';
 
-export { computeLatencyPercentiles, evaluatePerfBudget, runBrowserPerfProfile };
+export { computeLatencyPercentiles, evaluatePerfBudget, runBrowserPerfProfile, runSseStreamBenchmark };
 
 /** @param {string} p */
 function readJsonSafe(p) {
@@ -98,8 +99,8 @@ export async function runPerfCommand(options = {}) {
   }
 
   const mode = (options.mode || 'all').toLowerCase();
-  if (!['all', 'browser', 'api'].includes(mode)) {
-    return failPerf(64, `Invalid --mode "${mode}". Use: all | browser | api`, 'usage');
+  if (!['all', 'browser', 'api', 'sse'].includes(mode)) {
+    return failPerf(64, `Invalid --mode "${mode}". Use: all | browser | api | sse`, 'usage');
   }
 
   const existingCm = readJsonSafe(path.join(qaDir, 'knowledge', 'code-map.json'));
@@ -136,7 +137,7 @@ export async function runPerfCommand(options = {}) {
   }
 
   const browserMetrics =
-    mode === 'api'
+    mode === 'api' || mode === 'sse'
       ? []
       : await runBrowserPerfProfile(qaDir, safety.baseURL, routes, {
           samples: options.samples,
@@ -145,7 +146,7 @@ export async function runPerfCommand(options = {}) {
         });
 
   let apiBenchmark = null;
-  if (mode !== 'browser') {
+  if (mode === 'all' || mode === 'api') {
     const concurrency = Math.min(20, Math.max(1, Number(options.concurrency || 4)));
     const iterations = Math.min(200, Math.max(1, Number(options.iterations || 12)));
     const ep = options.endpoint || mergedEnv.E2E_API_HEALTH_PATH || '/';
@@ -157,10 +158,22 @@ export async function runPerfCommand(options = {}) {
     apiBenchmark = await runReadOnlyApiBenchmark(epUrl, concurrency, iterations, perfGuardConfig);
   }
 
+  let sseBenchmark = null;
+  if (mode === 'sse' || (mode === 'all' && options.sseEndpoint)) {
+    const sseEp = options.sseEndpoint || options.endpoint || '/api/stream';
+    const sseUrl = new URL(sseEp, safety.baseURL).toString();
+    const sseCheck = checkOutgoingRequestSafety('GET', sseUrl, perfGuardConfig);
+    if (sseCheck.blocked) {
+      return failPerf(2, `[Target Guard Blocked] Perf SSE endpoint "${sseEp}" blocked: ${sseCheck.reason}`, 'blocked');
+    }
+    const sseIters = Math.min(100, Math.max(1, Number(options.iterations || 5)));
+    sseBenchmark = await runSseStreamBenchmark(sseUrl, sseIters, perfGuardConfig);
+  }
+
   const budgetCfg = readJsonSafe(path.join(qaDir, 'perf-budget.json')) || DEFAULT_BUDGET;
   const prevSnapshots = existingCm?.perfSnapshots || [];
   const lastBaseline = prevSnapshots.length > 0 ? prevSnapshots[prevSnapshots.length - 1] : null;
-  const evalOut = evaluatePerfBudget({ browserMetrics, apiBenchmark }, budgetCfg, options.checkRegression ? lastBaseline : null);
+  const evalOut = evaluatePerfBudget({ browserMetrics, apiBenchmark, sseBenchmark }, budgetCfg, options.checkRegression ? lastBaseline : null);
 
   const report = {
     baseURL: safety.baseURL,
@@ -171,6 +184,7 @@ export async function runPerfCommand(options = {}) {
     violations: evalOut.violations,
     browserMetrics,
     apiBenchmark,
+    sseBenchmark,
   };
 
   const exitCode = options.enforceBudget && !evalOut.ok ? 1 : 0;

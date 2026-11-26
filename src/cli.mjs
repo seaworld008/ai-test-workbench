@@ -140,16 +140,10 @@ export async function runCli(argv = process.argv.slice(2)) {
 
   if (located.versionRequested) {
     const verEnv = buildCommandResult({
-      tool: 'version',
-      outcome: 'pass',
-      ok: true,
-      exitCode: EXIT_CODES.PASS,
-      summary: `ai-test-workbench ${WORKBENCH_VERSION}`,
-      data: { name: 'ai-test-workbench', version: WORKBENCH_VERSION },
+      tool: 'version', outcome: 'pass', ok: true, exitCode: EXIT_CODES.PASS,
+      summary: `ai-test-workbench ${WORKBENCH_VERSION}`, data: { name: 'ai-test-workbench', version: WORKBENCH_VERSION },
     });
-    if (!asJson) {
-      console.log(WORKBENCH_VERSION);
-    }
+    if (!asJson) console.log(WORKBENCH_VERSION);
     return emitCommandResult(verEnv, { asJson });
   }
 
@@ -160,10 +154,7 @@ export async function runCli(argv = process.argv.slice(2)) {
     if (asJson) {
       return emitCommandResult(
         buildCommandResult({
-          tool: 'help',
-          outcome: 'pass',
-          ok: true,
-          exitCode: EXIT_CODES.PASS,
+          tool: 'help', outcome: 'pass', ok: true, exitCode: EXIT_CODES.PASS,
           summary: `ai-test-workbench v${WORKBENCH_VERSION} CLI commands`,
           data: { version: WORKBENCH_VERSION, commands: CLI_COMMAND_NAMES },
         }),

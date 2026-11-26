@@ -112,7 +112,7 @@
     },
     {
       "id": "CLAIM-18-fger-agentic-dual-tier-redteam",
-      "claim": "FGER-agentic dual-tier red-team harness isolates hidden oracles and ephemeral Fulcio T2 CA, exposes same-UID local T1 limits (AG-B4/AG-C4), detects Class E Dieselgate branching (AG-E1/AG-E2), and enforces 0.0% T2 escape rate across all 5 attack classes (A/B/C/D/E)",
+      "claim": "FGER-agentic dual-tier red-team harness isolates hidden oracles and ephemeral Fulcio T2 CA, exposes same-UID local T1 limits (AG-B4/AG-C4) and single-target static S5->S5 boundary (AG-F1), detects Class E Dieselgate branching (AG-E1/AG-E2) and Class F differential/cassette/lockstep vectors (AG-F1..AG-F4), and enforces 0.0% T2 escape rate across all 6 attack classes (22 tasks)",
       "corpusType": "red-team",
       "testFile": "test/adversarial/fger-agentic.test.mjs",
       "testTitleSubstring": "FGER-agentic Dual-Tier Red-Team Suite"
@@ -172,6 +172,20 @@
       "corpusType": "architecture-and-performance",
       "testFile": "test/unit/v630-architecture-and-extensibility.test.mjs",
       "testTitleSubstring": "v6.3.0 Round 2 WU-A"
+    },
+    {
+      "id": "CLAIM-27-v640-differential-parity-and-shape-fingerprints",
+      "claim": "v6.4.0 Dual-Target 5-Checkpoint Differential Parity Oracle (aitest_parity, CP1..CP5) compares 100 mixed JSON+SSE samples in < 1.0s with zero-plaintext shape-only fingerprints, non-loopback shared-staging strictReadonly write protection, offline sanitized corpus import, multi-sample union Schema inference, governance-locked upstream replay cassettes, and streaming SSE TTFT SLO gates",
+      "corpusType": "differential-and-streaming",
+      "testFile": "test/integration/parity-and-streaming.test.mjs",
+      "testTitleSubstring": "Dual-target parity executes 100 mixed JSON + SSE samples in < 1.0s"
+    },
+    {
+      "id": "CLAIM-28-v640-memory-loop-lockstep-and-seam-card",
+      "claim": "v6.4.0 Toolified Memory Loop (governance-locked qa/known-blockers.json blocking duplicate heal sessions, aitw learn staging-proposal distiller + whole-repo retroactive sweep, sealed declarative qa/support/project-rules.json, and read-only aitest_report view=lessons), AITEST-G118 cross-directory lockstep gate (0.0% FPR when unconfigured), and Human Seam Gatekeeper Card (S5->S5 literal shifts & static-copy shortcuts)",
+      "corpusType": "governance-and-memory",
+      "testFile": "test/unit/memory-lockstep-and-seam.test.mjs",
+      "testTitleSubstring": "v6.4.0 WU-D Known Blockers"
     }
   ]
 }

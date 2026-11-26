@@ -4,6 +4,7 @@ import {
   executeImpactReadOnlyFastPath,
   executeReportReadOnlyFastPath,
 } from './fast-paths.mjs';
+import { PARITY_TOOL } from './parity-tool.mjs';
 import { ASYNC_JOB_PROPS, pushBool, pushOpt } from './shared.mjs';
 
 /** @type {import('./shared.mjs').ToolRegistryEntry[]} */
@@ -26,8 +27,12 @@ export const VERIFICATION_TOOLS = [
       properties: {
         target: { type: 'string', description: 'Target repository or QA directory' },
         base: { type: 'string', description: 'Optional explicit Git base ref (default: merge-base or HEAD~1)' },
-        mode: { type: 'string', enum: ['impact', 'full', 'smoke', 'e2e', 'api'], description: 'Selection scope (default: impact)' },
+        mode: { type: 'string', enum: ['impact', 'full', 'smoke', 'e2e', 'api', 'parity'], description: 'Selection scope (default: impact; use parity with baselineUrl for dual-target oracle)' },
         baseUrl: { type: 'string', description: 'Target application base URL override' },
+        baselineUrl: { type: 'string', description: 'Optional allowlisted Baseline service URL to enforce differential parity oracle alongside tests' },
+        corpus: { type: 'string', description: 'Optional relative path to sanitized corpus file when parity oracle is enabled' },
+        privacyMode: { type: 'string', enum: ['redacted', 'shape-only'], description: 'Privacy mode for differential parity output (redacted | shape-only)' },
+        strictByteEscape: { type: 'boolean', description: 'Enable raw JSON byte-escape parity checks when baselineUrl is provided' },
         allowMutation: { type: 'boolean', description: 'Explicitly allow or forbid @mutation tests' },
         allowOfflineSmoke: { type: 'boolean', description: 'Explicitly permit offline smoke when no target server URL is reachable' },
         budgetMs: { type: 'integer', minimum: 5000, maximum: 2700000, description: 'Execution timeout budget in milliseconds' },
@@ -55,7 +60,11 @@ export const VERIFICATION_TOOLS = [
       pushOpt(a, '--base', args.base);
       pushOpt(a, '--mode', args.mode || 'impact');
       pushOpt(a, '--base-url', args.baseUrl);
+      pushOpt(a, '--baseline-url', args.baselineUrl);
+      pushOpt(a, '--corpus', args.corpus);
+      pushOpt(a, '--privacy-mode', args.privacyMode);
       pushOpt(a, '--budget-ms', args.budgetMs);
+      pushBool(a, '--strict-byte-escape', args.strictByteEscape);
       pushBool(a, '--allow-mutation', args.allowMutation);
       pushBool(a, '--allow-offline-smoke', args.allowOfflineSmoke);
       return a;
@@ -275,6 +284,8 @@ export const VERIFICATION_TOOLS = [
     },
     dataProps: {
       failureCount: { type: 'integer' },
+      clusterCount: { type: 'integer' },
+      clusters: { type: 'array' },
       failures: { type: 'array' },
     },
     resourceSuffix: 'diagnostics',
@@ -311,10 +322,11 @@ export const VERIFICATION_TOOLS = [
         baseUrl: { type: 'string', description: 'Allowlisted target application base URL' },
         routes: { type: 'string', description: 'Comma-separated browser route paths to sample' },
         endpoint: { type: 'string', description: 'Read-only GET endpoint path for load sampling' },
+        sseEndpoint: { type: 'string', description: 'Streaming SSE endpoint path for TTFT and stream SLO sampling' },
         concurrency: { type: 'integer', minimum: 1, maximum: 20, description: 'Concurrent API workers (1..20)' },
         iterations: { type: 'integer', minimum: 1, maximum: 200, description: 'Total GET requests across iterations (1..200)' },
         samples: { type: 'integer', minimum: 1, maximum: 7, description: 'Browser samples per route for median/P75 (1..7)' },
-        mode: { type: 'string', enum: ['all', 'browser', 'api'], description: 'Benchmark scope (all | browser | api)' },
+        mode: { type: 'string', enum: ['all', 'browser', 'api', 'sse'], description: 'Benchmark scope (all | browser | api | sse)' },
         throttle: { type: 'boolean', description: 'Apply CPU/network throttling during Chromium sampling' },
         checkRegression: { type: 'boolean', description: 'Compare current metrics against baseline snapshot' },
         enforceBudget: { type: 'boolean', description: 'Fail command when perf-budget.json thresholds are exceeded' },
@@ -330,6 +342,7 @@ export const VERIFICATION_TOOLS = [
       budgetPassed: { type: 'boolean' },
       violations: { type: 'array' },
       browserMetrics: { type: 'array' },
+      sseBenchmark: { type: ['object', 'null'] },
     },
     resourceSuffix: 'perf-summary',
     isReadOnly: (args) => Boolean(args.dryRun),
@@ -340,6 +353,7 @@ export const VERIFICATION_TOOLS = [
       pushOpt(a, '--base-url', args.baseUrl);
       pushOpt(a, '--routes', args.routes);
       pushOpt(a, '--endpoint', args.endpoint);
+      pushOpt(a, '--sse-endpoint', args.sseEndpoint);
       pushOpt(a, '--concurrency', args.concurrency);
       pushOpt(a, '--iterations', args.iterations);
       pushOpt(a, '--samples', args.samples);
@@ -358,11 +372,11 @@ export const VERIFICATION_TOOLS = [
   {
     name: 'aitest_report',
     category: 'verification',
-    title: 'Query Reports Index, Flaky Telemetry & Requirement Traceability',
+    title: 'Query Reports Index, Flaky Telemetry, Traceability & Lessons',
     description:
-      'Use when inspecting generated QA artifacts, latest run overview, historical flaky telemetry, or REQ-xxx requirement traceability coverage. Select view="summary", "artifacts" (default), "flaky", or "traceability" (read-only by default).',
+      'Use when inspecting generated QA artifacts, latest run overview, historical flaky telemetry, REQ-xxx requirement traceability, or distilled memory loop lessons. Select view="summary", "artifacts" (default), "flaky", "traceability", or "lessons" (read-only by default).',
     annotations: {
-      title: 'Inspect Reports, Flaky Telemetry & Trace Matrix',
+      title: 'Inspect Reports, Flaky Telemetry, Trace Matrix & Lessons',
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
@@ -374,8 +388,8 @@ export const VERIFICATION_TOOLS = [
         target: { type: 'string', description: 'Target repository or QA directory' },
         view: {
           type: 'string',
-          enum: ['summary', 'artifacts', 'flaky', 'traceability'],
-          description: 'Report view: summary (artifacts + latest run overview), artifacts (local files), flaky (Run Ledger telemetry), or traceability (REQ-xxx matrix)',
+          enum: ['summary', 'artifacts', 'flaky', 'traceability', 'lessons'],
+          description: 'Report view: summary, artifacts (local files), flaky (Run Ledger telemetry), traceability (REQ-xxx matrix), or lessons (distilled memory proposals & known blockers)',
         },
         syncQuarantine: {
           type: 'boolean',
@@ -407,4 +421,5 @@ export const VERIFICATION_TOOLS = [
     },
     nextActions: () => ['Read available system-map, verdict-summary, diagnostics, or perf-summary resources.'],
   },
+  PARITY_TOOL,
 ];

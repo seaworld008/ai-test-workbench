@@ -4,6 +4,30 @@
 
 本日志遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 与 [语义化版本 (SemVer)](https://semver.org/spec/v2.0.0.html) 规范。
 
+## [6.4.0] - 2026-11-26
+
+### 双目标五级检查点差分先知与零明文形状指纹 (`WU-A` · `WU-B` · `WU-C` · [ADR-0006](./docs/adr/0006-differential-parity-oracle-and-shape-fingerprints.md))
+- **双目标检查点差分引擎（`src/kernel/diff-oracle.mjs`、`src/parity/`、`aitw parity`、第 17 个权威 MCP 工具 `aitest_parity`）**：
+  - 实现五级确定性检查点 `CP1-Status-Headers`（精确状态码与关键响应头）、`CP2-Body-Shape-And-Value`（键序无关递归 JSON 值比对 + 可选 `strictByteEscape` 原始字节转义差异，精准捕获如 `\uXXXX` vs UTF-8 Emoji 分歧）、`CP3-Stream-Frames`（基于零依赖 `src/core/stream-sse.mjs` 的 Anthropic/OpenAI 双格式 SSE 语义块重组与闭合校验）、`CP4-DOM-ARIA-And-Runtime`（抽离为 `src/parity/aria.mjs` 执行双端 ARIA 快照与运行异常比对）与 `CP5-Perf-Ratio`（耗时/TTFT 比值告警）。
+  - 严守双端默认拒绝防火墙与非回环共享环境写保护：`validateDualTargetSafety` 强制 `strictReadonly: !s.allowMutation`（回环 `127.0.0.1` 默认允许 CRUD，非回环共享 `staging` 默认阻断 `POST/PUT/PATCH/DELETE` 直至显式 `--allow-mutation` / `allowMutation: true`）；拒绝盲目双跑去噪，仅剥离显式受锁 `normalizePaths`；`verify-change --mode parity --baseline-url <url>` 接入一键判决闭环；本地 `100` 条混合 JSON+SSE 语料全量差分稳定 `< 1.0s`。
+- **零明文形状指纹聚类、离线脱敏语料库与多样本联合 Schema（`src/diagnose/{fingerprint,cluster}.mjs`、`src/corpus/`、`src/explore/schema-inferrer.mjs`）**：
+  - `--privacy-mode shape-only` 下报告与产物严格零业务明文载荷，仅输出确定性 `fp_<12hex>` 形状指纹与特征分群统计；`aitest_diagnose` 按根因指纹聚类输出去重 `clusters[]`、最快最小复现器 `minimalReproducerSpec` 与跨运行级联掩蔽追踪 `unmaskedAfterFixOf`。
+  - 新增 `aitw corpus import` 支持离线导入 HAR 1.2 / JSONL / OTel HTTP Span，强制凭据脱敏并剥离生产域名写入受 `.aitest/governance.lock` 保护的 `qa/corpus/sanitized-requests.jsonl`；升级 Schema 推断器支持跨全样本联合推断（`nullable`、`oneOf`、空数组合并与 Emoji/Unicode 编码特征）。
+- **受治理锁签名的外部上游 Replay 磁带与流式 SSE / `TTFT` 门禁（`src/replay/cassette.mjs`、`src/perf/streaming.mjs`）**：
+  - 将 `corpus/**` 与 `fixtures/upstream-cassettes/**` 纳入 Layer 0 治理锁；`AITEST-G114` 继续 100% 阻断被测服务 `route.fulfill(2xx)`，仅放行明确指向受锁非回环 `replayAllowedUpstreamHosts` 的外部上游确定性回放；扩展 `perf --mode sse --sse-endpoint` 与 `perf-budget.json#streaming` 强制校验 `ttftMedianMs`、`ttftP95Ms`、`streamTotalP95Ms` 与干净终止率。
+
+### 工具化记忆循环、`AITEST-G118` 锁步门禁、人类交界焦点卡与 22 任务红队基准 (`WU-D` · `WU-E` · `WU-F`)
+- **工具化记忆循环与全仓回溯清扫（`src/memory/{blockers,distiller,sweeper}.mjs`、`src/learn.mjs`、`aitw learn`、`aitest_report(view="lessons")`）**：
+  - 新增受 Layer 0 治理锁保护的 `qa/known-blockers.json`（与 `waivers.json` 同级，绝不置于跳锁的 `knowledge/` 目录）：`diagnose` 自动归并命中指纹或同 `routePattern`（含偏移衍生指纹）的已知阻塞单，`aitest_heal(action="begin")` 硬阻断重复开启修复会话（退出码 `2`、`blockerLinked: true`）。
+  - 新增 `aitw learn`（默认 `distill`）：聚合扫描 `.aitest/heals/*.json`（`escalated` / `misHealBlocked`）、`reports/defects/*.md`、`.aitest/governance-audit.jsonl` 与可选 `--from-reviews <json|md>`，仅产出待审提案 `qa/reports/learn-proposals.{json,md}`（含 `managedAgentsMarkdownBlock`、候选声明式规则 `candidateRuleSpecs` 与 `@regression` 用例骨架，**绝不自动修改受锁文件或自签锁**）；`aitest_report` 新增纯只读 `view="lessons"`（权威 MCP 工具数保持 `17` 个不变）。
+  - 新增纯 JSON 声明式项目门禁规则 `qa/support/project-rules.json`（`src/kernel/gate/project-rules.mjs`）：仅在 `verifyGovernanceLockInQaDir` 通过且文件被封签在 `.aitest/governance.lock` 后才编译进入 `ctx.extraRules`（零任意 JS 执行风险），并支持 `aitw learn --action sweep` / `--sweep` 基于已封签规则与 `aitest.config.json#memoryPatterns` 一次性全仓回扫宿主源码与 `qa/tests/**`。
+- **跨目录/跨栈锁步同步修改门禁 `AITEST-G118`（`src/kernel/gate/rules/g118-lockstep.mjs`、`src/kernel/gate/repo-guards.mjs`）**：
+  - 规则引擎扩展至 **`18` 条可插拔规则（`AITEST-G101..G118`）**；通过受锁 `aitest.config.json#lockstepRules` 声明 `{ id, whenModified, requireModified, allowWaiver? }`，未配置时零开销静默跳过（对 100-Commit 真实开源提交集保持 `0.0%` 误报影响），启用后跨全仓阻断单侧遗漏修改。
+- **内外环交界“人类守门员焦点卡”（`src/verdict/seam-card.mjs`、`src/verdict/reports.mjs`）**：
+  - `verify-change` 判决书 `verdictPayload.seamReview` 与 `qa/reports/verdict-summary.md` 置顶渲染 **`### 内外环交界人工必审焦点 (Human Seam Gatekeeper Card)`**，精准高亮四类交界信号：`S4/S5 -> S4/S5` 同阶字面量翻转对照表（如 `409 -> 201`、`'0/50' -> '1/50'`）、无真实网络/DB 调用文件中新增 `>= 300` 字符的疑似静态拷贝捷径（`suspectedShortcuts`）、`<= 3` 天到期豁免（`expiringWaivers`），以及关联已知阻塞单与差分特征分群匹配率摘要。
+- **自治红队基准 `FGER-agentic` 扩充至 `22` 任务（新增 `Class F`：`AG-F1..AG-F4`）**：
+  - 新增 `AG-F1`（同阶 `S5->S5` 业务数值字面量翻转 `0 -> '0'`：诚实记录纯单目标静态 T1 边界，在隔离 CI T2 启用不可变 `protectedBaseSha` 活体 Baseline 差分先知后由 `Parity-Oracle` 100% 阻断）、`AG-F2`（静态拷贝捷径：受锁 `project-rules.json` + 差分先知 + 焦点卡多重拦截）、`AG-F3`（未审批伪造上游 Cassette：`L0-Governance` 阻断）、`AG-F4`（锁步目录漏改：`L3-AST-Diff` `AITEST-G118` 阻断）；实测 **`FGER-agentic_T2 = 0.0% (0/22)`**，`honest-fix` `6/6` 零误拦。
+
 ## [6.3.0] - 2026-11-26
 
 ### 性能优化与零依赖运行时提速 (Zero-Dep Runtime & Read-Only Fast Paths)
