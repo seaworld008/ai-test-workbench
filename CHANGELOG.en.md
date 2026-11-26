@@ -28,6 +28,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Run-Ledger Historical Regression Differential Diagnostics (`src/diagnose/history.mjs`, `src/diagnose.mjs`)**: Inspects prior `.aitest/runs/index.jsonl` and per-run `tests-summary.json` records (excluding the current run) to annotate every `DiagnosedFailure` with `regressionHistory` (`new-regression` | `persistent-failure` | `intermittent-flaky` | `first-observed`) in both JSON and `ai-diagnostics.md`.
 - **Linear-Time ReDoS Hardening (`src/core/redact.mjs`, `src/explore/safety.mjs`)**: Replaced polynomial PEM private-key regex with an O(N) block scanner and bounded/anchored JSON, URL credential, `KEY=VALUE`, `setItem`, Bearer/Basic, ANSI, email, and query-anomaly patterns; 11 pathological 100KB payloads complete combined in `< 40ms` (`< 10ms` each) while maintaining `100% (35/35)` redaction recall.
 
+### Full-Codebase O(N) Performance, Deep Modularity & Pluggable Registries (Round 2 Polish)
+- **Git Subprocess Elimination, Bounded Glob Cache & O(limit) JSONL Tail I/O (`src/kernel/gate/git-utils.mjs`, `src/core/glob.mjs`, `src/ledger.mjs`, `src/verdict.mjs`)**:
+  - Memoized positive `resolveGitRoot` hits (`MAX=128`, `5s` TTL, `.git` liveness validation, never caching `null`) with `clearGitRootCache`; replaced sequential candidate `rev-parse` loops in `resolveDefaultDiffBase` with a single batched `git for-each-ref`; added single-spawn `resolveGitHeadAndTreeSha` wired into `verify-change`;
+  - Added bounded `RegExp` memoization (`MAX=512`) in `compileGlob` and multi-byte UTF-8 safe 64KB backward-chunked `readJsonlTail` powering `readLedgerHistory` (`< 25ms` on 5,000-line `> 500KB` `index.jsonl`).
+- **Linear O(N) Living Code Map v4 & Pluggable Framework/ORM/Stack Registries (`src/codemap/`, `src/init/stack-registry.mjs`, `src/bootstrap.mjs`)**:
+  - Decomposed `src/codemap/adapters.mjs` into `route-matcher.mjs` (`createRoutePatternMatcher` + `WeakMap` cache), `registry.mjs` (`registerCodeMapAdapter` / `unregisterCodeMapAdapter` / `listCodeMapAdapters`), `backend-adapters.mjs`, and `correlator.mjs` (pre-compiled DB entity matchers), adding built-in SvelteKit, Nuxt/Astro, Go (Gin/Echo/Chi + Go 1.22 `net/http`), Hono, and Drizzle ORM support and upgrading `mergeLivingCodeMap` to linear O(N) inverted lookup (`500` routes × `200` specs × `200` endpoints in `< 150ms`);
+  - Added declarative `detectPackageManager` (`npm`/`pnpm`/`yarn`/`bun`) and `STACK_DESCRIPTORS` (`registerStackDescriptor`/`unregisterStackDescriptor`) powering both `detectProjectStack` and `inferRuntimeConfigForRepo`.
+- **Expanded Read-Only MCP Fast Paths, Deep Modularity (`<= 435` LOC) & Schema/Export Alignment**:
+  - Extracted side-effect-free `collectDoctorReport` and `runMcpDoctorReadOnly`, wiring `aitest_doctor`, read-only `aitest_mcp_hub(action="presets"|"doctor", lock=false)` (with clean `exitCode: 1` handling for malformed `.mcp.json`), and `aitest_diagnose(dryRun=true)` into boundary- and redaction-enforced in-process fast paths;
+  - Decomposed `constant-eval`, `protocol`, `transport-http`, `runner`, `mcp-hub`, `agents`, `governance`, `heal`, and `assertion-rules` so every `src/**/*.mjs` module stays `<= 435` lines (enforced `<= 450` in unit tests);
+  - Aligned `aitest.config.json` rule validation to `AITEST-G101..G117`, unified `TEST_EGRESS_EXTRA_HOSTS`/`TEST_EGRESS_ALLOW_HOSTS`, added programmatic `ctx.extraRules` to `evaluateDiffRules`, aligned MCP `makeOutputSchema` and `src/types/{mcp,config}.d.ts`, and exported `./app` in `package.json#exports`.
+
 ## [6.2.1] - 2026-11-25
 
 ### Security & Trust-Boundary Hardening

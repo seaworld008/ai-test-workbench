@@ -198,29 +198,81 @@ export function finalizeRunLedger(qaDir, runId, outcome) {
   return { manifest, tests: summary?.tests || [] };
 }
 
+const JSONL_TAIL_CHUNK_BYTES = 65_536;
+
+/**
+ * Reads the last `limit` valid JSON object lines from a JSONL file in O(limit) time/memory.
+ * Files `<= 64KB` are read directly; larger files are scanned backwards from EOF in 64KB chunks
+ * and concatenated as raw Buffers before UTF-8 decoding so multi-byte characters never split.
+ * @param {string} filePath
+ * @param {number} [limit]
+ * @returns {Array<Record<string, any>>}
+ */
+export function readJsonlTail(filePath, limit = 30) {
+  if (!filePath || limit <= 0 || !fs.existsSync(filePath)) return [];
+  const stat = fs.statSync(filePath);
+  if (!stat.isFile() || stat.size === 0) return [];
+
+  let rawText = '';
+  if (stat.size <= JSONL_TAIL_CHUNK_BYTES) {
+    rawText = fs.readFileSync(filePath, 'utf8');
+  } else {
+    const fd = fs.openSync(filePath, 'r');
+    try {
+      let position = stat.size;
+      let newlineCount = 0;
+      const targetNewlines = limit + 2;
+      /** @type {Buffer[]} */
+      const chunks = [];
+      while (position > 0 && newlineCount < targetNewlines) {
+        const readLen = Math.min(JSONL_TAIL_CHUNK_BYTES, position);
+        position -= readLen;
+        const buf = Buffer.allocUnsafe(readLen);
+        const bytesRead = fs.readSync(fd, buf, 0, readLen, position);
+        const slice = bytesRead === readLen ? buf : buf.subarray(0, bytesRead);
+        for (let i = 0; i < slice.length; i += 1) {
+          if (slice[i] === 0x0a) newlineCount += 1;
+        }
+        chunks.push(slice);
+      }
+      let combined = Buffer.concat(chunks.reverse());
+      if (position > 0) {
+        const firstNewline = combined.indexOf(0x0a);
+        if (firstNewline >= 0) {
+          combined = combined.subarray(firstNewline + 1);
+        }
+      }
+      rawText = combined.toString('utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+
+  const lines = rawText
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const tail = lines.slice(-limit);
+  /** @type {Array<Record<string, any>>} */
+  const out = [];
+  for (const line of tail) {
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed && typeof parsed === 'object') out.push(parsed);
+    } catch {
+      // skip malformed line
+    }
+  }
+  return out;
+}
+
 /**
  * Reads recent Run Ledger index entries (oldest to newest within `limit`).
  * @param {string} qaDir
  * @param {number} [limit]
  */
 export function readLedgerHistory(qaDir, limit = 30) {
-  const indexPath = path.join(qaDir, '.aitest', 'runs', 'index.jsonl');
-  if (!fs.existsSync(indexPath)) return [];
-  const lines = fs
-    .readFileSync(indexPath, 'utf8')
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-  const tail = lines.slice(-limit);
-  const out = [];
-  for (const line of tail) {
-    try {
-      out.push(JSON.parse(line));
-    } catch {
-      // skip malformed line
-    }
-  }
-  return out;
+  return readJsonlTail(path.join(qaDir, '.aitest', 'runs', 'index.jsonl'), limit);
 }
 
 /**

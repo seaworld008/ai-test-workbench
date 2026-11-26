@@ -1,5 +1,9 @@
 // @ts-check
-import { executeImpactReadOnlyFastPath, executeReportReadOnlyFastPath } from './fast-paths.mjs';
+import {
+  executeDiagnoseDryRunFastPath,
+  executeImpactReadOnlyFastPath,
+  executeReportReadOnlyFastPath,
+} from './fast-paths.mjs';
 import { ASYNC_JOB_PROPS, pushBool, pushOpt } from './shared.mjs';
 
 /** @type {import('./shared.mjs').ToolRegistryEntry[]} */
@@ -275,6 +279,7 @@ export const VERIFICATION_TOOLS = [
     },
     resourceSuffix: 'diagnostics',
     isReadOnly: (args) => Boolean(args.dryRun),
+    execute: executeDiagnoseDryRunFastPath,
     buildCliArgs: (args, target, lang) => {
       const a = ['diagnose', '--json', `--lang=${lang}`];
       pushOpt(a, '--target', target);

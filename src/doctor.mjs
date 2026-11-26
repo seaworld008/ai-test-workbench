@@ -132,17 +132,26 @@ export function detectHostGateKernelVersion(qaDir) {
 }
 
 /**
+ * Pure, side-effect-free environment & Gate Kernel readiness collector.
+ * Performs ZERO `console.log` or `process.exitCode` mutations so both CLI and in-process MCP
+ * fast paths can reuse it cleanly.
  * @param {{
  *   lang?: 'zh' | 'en' | string,
  *   target?: string,
  *   qaDir?: string,
- *   dryRun?: boolean,
- *   force?: boolean,
- *   json?: boolean,
  * }} [options]
- * @returns {Promise<number>}
+ * @returns {Promise<{
+ *   ok: boolean,
+ *   exitCode: number,
+ *   failCount: number,
+ *   warnCount: number,
+ *   okCount: number,
+ *   summary: string,
+ *   checks: Array<{ status: 'OK' | 'WARN' | 'FAIL', name: string, detail: string }>,
+ *   nextRecommendedActions: string[],
+ * }>}
  */
-export async function runDoctor(options = {}) {
+export async function collectDoctorReport(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   const targetDir = options.target ? path.resolve(options.target) : null;
   /** @type {Array<{ status: 'OK' | 'WARN' | 'FAIL', name: string, detail: string }>} */
@@ -354,30 +363,58 @@ export async function runDoctor(options = {}) {
   const okCount = checks.length - failCount - warnCount;
   const exitCode = failCount === 0 ? 0 : 1;
   const summary = `Doctor checked ${checks.length} items: OK=${okCount}, WARN=${warnCount}, FAIL=${failCount}`;
+  const nextRecommendedActions =
+    exitCode === 0
+      ? ['Call aitest_init(dryRun=true) or run "verify-change" on an initialized QA workspace.']
+      : checks.filter((c) => c.status === 'FAIL').map((c) => `Fix FAILED check "${c.name}": ${c.detail}`);
+
+  return {
+    ok: exitCode === 0,
+    exitCode,
+    failCount,
+    warnCount,
+    okCount,
+    summary,
+    checks,
+    nextRecommendedActions,
+  };
+}
+
+/**
+ * @param {{
+ *   lang?: 'zh' | 'en' | string,
+ *   target?: string,
+ *   qaDir?: string,
+ *   dryRun?: boolean,
+ *   force?: boolean,
+ *   json?: boolean,
+ * }} [options]
+ * @returns {Promise<number>}
+ */
+export async function runDoctor(options = {}) {
+  const lang = options.lang === 'zh' ? 'zh' : 'en';
+  const report = await collectDoctorReport(options);
 
   if (!options.json) {
     console.log(`\n=== ${lang === 'zh' ? 'AI Test Workbench 环境体检 (doctor)' : 'AI Test Workbench Environment Doctor'} ===`);
-    for (const c of checks) {
+    for (const c of report.checks) {
       const badge = c.status === 'OK' ? '[OK]  ' : c.status === 'WARN' ? '[WARN]' : '[FAIL]';
       console.log(`${badge} ${c.name}: ${c.detail}`);
     }
     console.log(
-      `\n${lang === 'zh' ? '汇总' : 'Summary'}: OK=${okCount}, WARN=${warnCount}, FAIL=${failCount}\n`
+      `\n${lang === 'zh' ? '汇总' : 'Summary'}: OK=${report.okCount}, WARN=${report.warnCount}, FAIL=${report.failCount}\n`
     );
   }
 
   return emitCommandResult(
     buildCommandResult({
       tool: 'doctor',
-      outcome: exitCode === 0 ? 'pass' : 'fail',
-      ok: exitCode === 0,
-      exitCode,
-      summary,
-      data: { ok: exitCode === 0, failCount, warnCount, checks },
-      nextRecommendedActions:
-        exitCode === 0
-          ? ['Call aitest_init(dryRun=true) or run "verify-change" on an initialized QA workspace.']
-          : checks.filter((c) => c.status === 'FAIL').map((c) => `Fix FAILED check "${c.name}": ${c.detail}`),
+      outcome: report.ok ? 'pass' : 'fail',
+      ok: report.ok,
+      exitCode: report.exitCode,
+      summary: report.summary,
+      data: { ok: report.ok, failCount: report.failCount, warnCount: report.warnCount, checks: report.checks },
+      nextRecommendedActions: report.nextRecommendedActions,
     }),
     { asJson: Boolean(options.json) }
   );

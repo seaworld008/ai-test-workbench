@@ -134,64 +134,39 @@ export async function runBrowserPerfProfile(qaDir, baseURL, routes, options = {}
         }
 
         const anyWin = /** @type {any} */ (window);
-        anyWin.__aitestWebVitals = {
-          lcpMs: null,
-          fcpMs: null,
-          cls: 0,
-          inpMs: null,
+        anyWin.__aitestWebVitals = { lcpMs: null, fcpMs: null, cls: 0, inpMs: null };
+        /** @param {Record<string, any>} opts @param {(entries: PerformanceEntry[]) => void} cb */
+        const observeSafe = (opts, cb) => {
+          try {
+            new PerformanceObserver((list) => cb(list.getEntries())).observe(/** @type {any} */ (opts));
+          } catch {
+            // ignore unsupported PerformanceObserver entry type
+          }
         };
-
-        try {
-          new PerformanceObserver((list) => {
-            for (const e of list.getEntries()) {
-              const anyEntry = /** @type {any} */ (e);
-              const ts = anyEntry.renderTime || anyEntry.loadTime || e.startTime;
-              if (typeof ts === 'number') {
-                anyWin.__aitestWebVitals.lcpMs = Math.round(ts);
-              }
+        observeSafe({ type: 'largest-contentful-paint', buffered: true }, (entries) => {
+          for (const e of entries) {
+            const ts = /** @type {any} */ (e).renderTime || /** @type {any} */ (e).loadTime || e.startTime;
+            if (typeof ts === 'number') anyWin.__aitestWebVitals.lcpMs = Math.round(ts);
+          }
+        });
+        observeSafe({ type: 'paint', buffered: true }, (entries) => {
+          for (const e of entries) {
+            if (e.name === 'first-contentful-paint') anyWin.__aitestWebVitals.fcpMs = Math.round(e.startTime);
+          }
+        });
+        observeSafe({ type: 'layout-shift', buffered: true }, (entries) => {
+          for (const e of entries) {
+            const s = /** @type {any} */ (e);
+            if (!s.hadRecentInput && typeof s.value === 'number') anyWin.__aitestWebVitals.cls += s.value;
+          }
+        });
+        observeSafe({ type: 'event', durationThreshold: 16, buffered: true }, (entries) => {
+          for (const e of entries) {
+            if (/** @type {any} */ (e).interactionId && typeof e.duration === 'number') {
+              anyWin.__aitestWebVitals.inpMs = Math.max(anyWin.__aitestWebVitals.inpMs ?? 0, Math.round(e.duration));
             }
-          }).observe({ type: 'largest-contentful-paint', buffered: true });
-        } catch {
-          // ignore if unsupported
-        }
-
-        try {
-          new PerformanceObserver((list) => {
-            for (const e of list.getEntries()) {
-              if (e.name === 'first-contentful-paint') {
-                anyWin.__aitestWebVitals.fcpMs = Math.round(e.startTime);
-              }
-            }
-          }).observe({ type: 'paint', buffered: true });
-        } catch {
-          // ignore
-        }
-
-        try {
-          new PerformanceObserver((list) => {
-            for (const e of list.getEntries()) {
-              const anyShift = /** @type {any} */ (e);
-              if (!anyShift.hadRecentInput && typeof anyShift.value === 'number') {
-                anyWin.__aitestWebVitals.cls += anyShift.value;
-              }
-            }
-          }).observe({ type: 'layout-shift', buffered: true });
-        } catch {
-          // ignore
-        }
-
-        try {
-          new PerformanceObserver((list) => {
-            for (const e of list.getEntries()) {
-              const anyEv = /** @type {any} */ (e);
-              if (anyEv.interactionId && typeof e.duration === 'number') {
-                anyWin.__aitestWebVitals.inpMs = Math.max(anyWin.__aitestWebVitals.inpMs ?? 0, Math.round(e.duration));
-              }
-            }
-          }).observe(/** @type {any} */ ({ type: 'event', durationThreshold: 16, buffered: true }));
-        } catch {
-          // ignore
-        }
+          }
+        });
       },
       { sessionPayload: sessionData }
     );

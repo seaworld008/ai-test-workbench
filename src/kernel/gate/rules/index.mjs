@@ -32,7 +32,7 @@ export const ALL_GATE_RULES = Object.freeze([
 const RULES_BY_CODE = new Map(ALL_GATE_RULES.map((r) => [r.code, r]));
 
 /**
- * Looks up a gate rule definition by its code (`AITEST-G101`..`AITEST-G115`).
+ * Looks up a gate rule definition by its code (`AITEST-G101`..`AITEST-G117`).
  * @param {string} code
  */
 export function getGateRuleByCode(code) {
@@ -45,10 +45,11 @@ export function getGateRuleByCode(code) {
  * human-approved governance configs may disable a rule.
  * @param {string} code
  * @param {Record<string, boolean | { enabled?: boolean, severity?: 'error' | 'off' }> | undefined} rulesConfig
+ * @param {boolean} [fallbackDefaultEnabled]
  */
-export function isRuleEnabled(code, rulesConfig) {
+export function isRuleEnabled(code, rulesConfig, fallbackDefaultEnabled = true) {
   const rule = RULES_BY_CODE.get(code);
-  const defaultOn = rule ? rule.defaultEnabled !== false : true;
+  const defaultOn = rule ? rule.defaultEnabled !== false : fallbackDefaultEnabled;
   if (!rulesConfig || !(code in rulesConfig)) return defaultOn;
   const entry = rulesConfig[code];
   if (typeof entry === 'boolean') return entry;
@@ -69,8 +70,8 @@ export function formatFinding(finding) {
 }
 
 /**
- * Executes all enabled pluggable gate rules over a base/head comparison context,
- * returning both structured `findings` and backward-compatible deduplicated `violations` strings.
+ * Executes all enabled pluggable gate rules (plus optional programmatic `ctx.extraRules`)
+ * over a base/head comparison context, returning both structured `findings` and deduplicated `violations` strings.
  * @param {Record<string, any>} ctx
  */
 export function evaluateDiffRules(ctx) {
@@ -79,9 +80,13 @@ export function evaluateDiffRules(ctx) {
   const seenKeys = new Set();
   /** @type {Set<string>} */
   const priorFindingCodes = new Set();
+  const extraRules = Array.isArray(ctx.extraRules)
+    ? ctx.extraRules.filter((/** @type {any} */ r) => r && typeof r.code === 'string' && typeof r.evaluate === 'function')
+    : [];
+  const activeRules = extraRules.length > 0 ? [...ALL_GATE_RULES, ...extraRules] : ALL_GATE_RULES;
 
-  for (const rule of ALL_GATE_RULES) {
-    if (!isRuleEnabled(rule.code, rulesConfig)) continue;
+  for (const rule of activeRules) {
+    if (!isRuleEnabled(rule.code, rulesConfig, rule.defaultEnabled !== false)) continue;
     const emitted = rule.evaluate({ ...ctx, priorFindingCodes }) || [];
     for (const f of emitted) {
       const formatted = formatFinding(f);

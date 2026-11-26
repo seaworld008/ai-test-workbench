@@ -1,15 +1,15 @@
-# 架构设计与可信安全边界 (`ai-test-workbench` v6.2)
+# 架构设计与可信安全边界 (`ai-test-workbench` v6.3)
 
 > [English Version](./ARCHITECTURE.en.md) · [四层门禁与治理指南](./docs/governance.md) · [ADR-0001..0005](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) · [升级指南](./docs/upgrade.md) · [简体中文主文档](./README.md)
 
 ## 1. 分层架构与单向依赖边界
 
-`ai-test-workbench v6.3` 采用严格无环的四层架构（由 `test/unit/architecture-boundaries.test.mjs` 自动化守卫：`0` 条 `src/scripts -> templates` 反向依赖、`0` 条 `src/**` 循环导入、全量 `src/**/*.mjs <= 500` 行、严格 `checkJs` 零错误）：
+`ai-test-workbench v6.3` 采用严格无环的四层架构（由 `test/unit/architecture-boundaries.test.mjs` 与 `test/unit/v630-architecture-and-extensibility.test.mjs` 自动化守卫：`0` 条 `src/scripts -> templates` 反向依赖、`0` 条 `src/**` 循环导入、全量 `src/**/*.mjs <= 450` 行且目标 `<= 435` 行、严格 `checkJs` 零错误）：
 
-1. **Layer 1 基础叶模块（`src/core/` + `src/types/`）**：零外部依赖的纯工具层，提供 `version`、`outcome`（`CommandResult v2`）、`config`（集中环境与 `aitest.config.json` Schema 校验）、`glob`、`redact`（Redaction v3 + VT ANSI 剥离）、`playwright-results`、`playwright-resolve`、`proc`、`i18n`。
-2. **Layer 2 权威验证内核（`src/kernel/`）**：唯一真源，通过 `package.json#exports` 暴露 `.`、`./kernel`、`./target-guard`、`./schema-validator`，包含不可变 `TrustContext`（`src/kernel/gate/trust-context.mjs`）、`SymbolTable` 与 `AITEST-G101..G117` 规则引擎，并通过 `scripts/sync-template-vendor.mjs` 传递闭包确定性镜像至 `templates/playwright-qa/support/`（CI 强检字节一致，详见 [ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.md)）。
-3. **Layer 3 应用门面与领域子系统（`src/app/index.mjs`、`src/{trust,explore,codemap,perf,mcp-hub}/` 及 `src/{init,upgrade,doctor,bootstrap,governance,ledger,runner,audit,verdict,heal,diagnose,impact,flaky,traceability,report,auth-login,jobs}.mjs`）**：稳定应用门面隔离 `scripts/` / `bench/` 与内部实现；单模块上限 `<= 500` 行；使用 `AITEST_RESULT_FILE` 帧化子进程 IPC 与原子硬链接磁盘写锁。
-4. **Layer 4 协议与交互层（`src/cli/` + `src/mcp/`）**：按命令严格参数校验的 CLI（含用法错误统一 `CommandResult v2 --json` 输出，退出码 `0/1/2/64`）与零运行时依赖多协议 MCP 服务端（16 个权威工具 + 8 个 `v6.x` 弃用转发别名；详见 [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) 与 [ADR-0005](./docs/adr/0005-mcp-surface-outcome-and-config.md)）。
+1. **Layer 1 基础叶模块（`src/core/` + `src/types/`）**：零外部依赖的纯工具层，提供 `version`、`outcome`（`CommandResult v2`）、`config`（集中环境、`AITEST-G101..G117` 规则校验与 `TEST_EGRESS_EXTRA_HOSTS`/`TEST_EGRESS_ALLOW_HOSTS` 统一解析）、`glob`（有界正则缓存）、`redact`（线性时间 Redaction v3 + VT ANSI 剥离）、`playwright-results`、`playwright-resolve`、`proc`、`i18n`。
+2. **Layer 2 权威验证内核（`src/kernel/`）**：唯一真源，通过 `package.json#exports` 暴露 `.`、`./kernel`、`./app`、`./target-guard`、`./schema-validator`，包含不可变 `TrustContext`（`src/kernel/gate/trust-context.mjs`）、正缓存无负陈旧 Git 探测（`src/kernel/gate/git-utils.mjs`）、`SymbolTable` 与支持 `extraRules` 编程扩展的 `AITEST-G101..G117` 规则引擎，并通过 `scripts/sync-template-vendor.mjs` 传递闭包确定性镜像至 `templates/playwright-qa/support/`（CI 强检字节一致，详见 [ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.md)）。
+3. **Layer 3 应用门面与领域子系统（`src/app/index.mjs`、`src/{trust,explore,codemap,perf,mcp-hub,init,runner,agents,governance,heal}/` 及根领域服务）**：稳定 `./app` 门面隔离 `scripts/` / `bench/` 与内部实现；提供 O(limit) 倒序分块 `readJsonlTail` 运行账本尾读、可插拔栈/包管理器注册表（`src/init/stack-registry.mjs`）、线性 O(N) 代码地图与框架/ORM 适配器注册表（`src/codemap/registry.mjs`、`src/codemap/route-matcher.mjs`）、`AITEST_RESULT_FILE` 帧化 IPC 与原子硬链接磁盘写锁。
+4. **Layer 4 协议与交互层（`src/cli/` + `src/mcp/`）**：按命令严格参数校验的 CLI（含用法错误统一 `CommandResult v2 --json` 输出，退出码 `0/1/2/64`）与零运行时依赖多协议 MCP 服务端（16 个权威工具 + 8 个 `v6.x` 弃用转发别名，拆分 `src/mcp/envelope.mjs` 与 `src/mcp/session-store.mjs`，并为 `aitest_impact`、`aitest_report`、`aitest_doctor`、`aitest_mcp_hub` 只读子动作与 `aitest_diagnose(dryRun=true)` 提供进程内只读快速通道；详见 [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) 与 [ADR-0005](./docs/adr/0005-mcp-surface-outcome-and-config.md)）。
 
 ## 2. 跨项目物理隔离 (`<repo>/qa/`) 与安全升级
 

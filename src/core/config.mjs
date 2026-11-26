@@ -117,6 +117,16 @@ export function parseEnvText(content) {
   return result;
 }
 
+/** @returns {NormalizedAitestConfig} */
+function createDefaultAitestConfig() {
+  return {
+    ...DEFAULT_AITEST_CONFIG,
+    governance: { protected: [...DEFAULT_CONFIG_PROTECTED_GLOBS] },
+    rules: {},
+    customMatchers: {},
+  };
+}
+
 /**
  * Strictly validates a parsed `aitest.config.json` object against the v6 config schema.
  * Rejects malformed types, negative bounds, or invalid rule overrides (fail-closed).
@@ -127,16 +137,7 @@ export function validateAitestConfigObject(raw) {
   /** @type {string[]} */
   const errors = [];
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return {
-      ok: false,
-      errors: ['aitest.config.json root must be a JSON object.'],
-      config: {
-        ...DEFAULT_AITEST_CONFIG,
-        governance: { protected: [...DEFAULT_CONFIG_PROTECTED_GLOBS] },
-        rules: {},
-        customMatchers: {},
-      },
-    };
+    return { ok: false, errors: ['aitest.config.json root must be a JSON object.'], config: createDefaultAitestConfig() };
   }
 
   const obj = /** @type {Record<string, unknown>} */ (raw);
@@ -190,8 +191,8 @@ export function validateAitestConfigObject(raw) {
       errors.push('aitest.config.json "rules" must be an object mapping rule codes (e.g. AITEST-G114) to boolean or { enabled, severity }.');
     } else {
       for (const [code, val] of Object.entries(/** @type {Record<string, unknown>} */ (obj.rules))) {
-        if (!/^AITEST-G\d{3}$/.test(code)) {
-          errors.push(`aitest.config.json "rules.${code}" is not a valid rule code (expected AITEST-G101..G115).`);
+        if (!/^(?:AITEST-G(?:10[1-9]|11[0-7]))$/.test(code)) {
+          errors.push(`aitest.config.json "rules.${code}" is not a valid rule code (expected AITEST-G101..G117).`);
           continue;
         }
         if (typeof val === 'boolean') continue;
@@ -298,18 +299,7 @@ export function validateAitestConfigObject(raw) {
 export function loadAndValidateAitestConfigFile(qaDir) {
   const configPath = path.join(qaDir, 'aitest.config.json');
   if (!fs.existsSync(configPath)) {
-    return {
-      ok: true,
-      exists: false,
-      configPath,
-      errors: [],
-      config: {
-        ...DEFAULT_AITEST_CONFIG,
-        governance: { protected: [...DEFAULT_CONFIG_PROTECTED_GLOBS] },
-        rules: {},
-        customMatchers: {},
-      },
-    };
+    return { ok: true, exists: false, configPath, errors: [], config: createDefaultAitestConfig() };
   }
 
   let parsed;
@@ -322,14 +312,7 @@ export function loadAndValidateAitestConfigFile(qaDir) {
       exists: true,
       configPath,
       errors: [msg],
-      config: {
-        ...DEFAULT_AITEST_CONFIG,
-        governance: { protected: [...DEFAULT_CONFIG_PROTECTED_GLOBS] },
-        rules: {},
-        customMatchers: {},
-        _configError: msg,
-        _configErrors: [msg],
-      },
+      config: { ...createDefaultAitestConfig(), _configError: msg, _configErrors: [msg] },
     };
   }
 
@@ -341,21 +324,11 @@ export function loadAndValidateAitestConfigFile(qaDir) {
       exists: true,
       configPath,
       errors: validated.errors,
-      config: {
-        ...validated.config,
-        _configError: msg,
-        _configErrors: validated.errors,
-      },
+      config: { ...validated.config, _configError: msg, _configErrors: validated.errors },
     };
   }
 
-  return {
-    ok: true,
-    exists: true,
-    configPath,
-    errors: [],
-    config: validated.config,
-  };
+  return { ok: true, exists: true, configPath, errors: [], config: validated.config };
 }
 
 /**
@@ -445,7 +418,7 @@ export function loadWorkbenchConfig(params) {
       allowedHosts: splitCsv(mergedEnv.TEST_ALLOWED_HOSTS),
       allowMutation,
       egressMode,
-      extraAllowedHosts: splitCsv(mergedEnv.TEST_EGRESS_ALLOW_HOSTS),
+      extraAllowedHosts: splitCsv(mergedEnv.TEST_EGRESS_EXTRA_HOSTS || mergedEnv.TEST_EGRESS_ALLOW_HOSTS),
     }),
     env: Object.freeze({ ...mergedEnv }),
   });

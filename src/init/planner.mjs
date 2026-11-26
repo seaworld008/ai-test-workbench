@@ -3,6 +3,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runProcess } from '../core/proc.mjs';
 import { REPO_ROOT as WORKBENCH_ROOT } from '../core/version.mjs';
+import {
+  STACK_DESCRIPTORS,
+  detectPackageManager,
+  detectStacksFromDescriptors,
+  inferStackRuntimeDefaults,
+  registerStackDescriptor,
+  unregisterStackDescriptor,
+} from './stack-registry.mjs';
+
+export {
+  STACK_DESCRIPTORS,
+  detectPackageManager,
+  detectStacksFromDescriptors,
+  inferStackRuntimeDefaults,
+  registerStackDescriptor,
+  unregisterStackDescriptor,
+};
 
 export const TEMPLATE_DIR = path.join(WORKBENCH_ROOT, 'templates', 'playwright-qa');
 export const DEMO_PRESET_DIR = path.join(WORKBENCH_ROOT, 'examples', 'demo-webapp', 'qa-preset');
@@ -22,37 +39,10 @@ const SKIP_COPY_NAMES = new Set([
  * @returns {string[]}
  */
 export function detectProjectStack(repoDir) {
-  const stacks = [];
-  const pkgPath = path.join(repoDir, 'package.json');
-  if (fs.existsSync(pkgPath)) {
-    try {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-      const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
-      if (deps.next) stacks.push('Next.js');
-      else if (deps.nuxt) stacks.push('Nuxt');
-      else if (deps.vue) stacks.push('Vue/H5');
-      else if (deps.react) stacks.push('React');
-      else stacks.push('Node.js');
-      if (deps.vitest) stacks.push('Vitest');
-      if (deps.jest) stacks.push('Jest');
-    } catch {
-      stacks.push('Node.js');
-    }
-  }
-  if (
-    fs.existsSync(path.join(repoDir, 'pom.xml')) ||
-    fs.existsSync(path.join(repoDir, 'build.gradle')) ||
-    fs.existsSync(path.join(repoDir, 'build.gradle.kts'))
-  ) {
-    stacks.push('Java/Spring');
-  }
-  if (fs.existsSync(path.join(repoDir, 'composer.json')) || fs.existsSync(path.join(repoDir, 'think'))) {
-    stacks.push('PHP/ThinkPHP');
-  }
-  if (fs.existsSync(path.join(repoDir, 'go.mod'))) stacks.push('Go');
-  if (fs.existsSync(path.join(repoDir, 'pyproject.toml')) || fs.existsSync(path.join(repoDir, 'requirements.txt'))) {
-    stacks.push('Python');
-  }
+  const { labels, ctx } = detectStacksFromDescriptors(repoDir);
+  const stacks = [...labels];
+  if (ctx.deps.vitest && !stacks.includes('Vitest')) stacks.push('Vitest');
+  if (ctx.deps.jest && !stacks.includes('Jest')) stacks.push('Jest');
   return stacks.length > 0 ? stacks : ['Generic Web'];
 }
 

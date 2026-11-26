@@ -165,6 +165,13 @@
       "corpusType": "performance-and-security",
       "testFile": "test/unit/v630-optimizations.test.mjs",
       "testTitleSubstring": "v6.3.0 WU-1"
+    },
+    {
+      "id": "CLAIM-26-v630-round2-architecture-and-extensibility",
+      "claim": "v6.3.0 Round 2 full-codebase polish delivers Git root positive memoization & batched for-each-ref, O(limit) multi-byte-safe JSONL tail I/O, linear O(N) Living Code Map v4 with pluggable framework/ORM adapter & stack/package-manager registries, expanded in-process read-only MCP fast paths, programmatic extraRules, ./app facade export, and <= 450 LOC modularity across every src/**/*.mjs module",
+      "corpusType": "architecture-and-performance",
+      "testFile": "test/unit/v630-architecture-and-extensibility.test.mjs",
+      "testTitleSubstring": "v6.3.0 Round 2 WU-A"
     }
   ]
 }

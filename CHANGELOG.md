@@ -28,6 +28,18 @@
 - **基于运行账本的历史差分回归诊断（`src/diagnose/history.mjs`、`src/diagnose.mjs`）**：按 `.aitest/runs/index.jsonl` 与历史 `tests-summary.json`（排除本次运行）对比每条失败用例的历史轨迹，为每条诊断标注 `regressionHistory`（`new-regression` / `persistent-failure` / `intermittent-flaky` / `first-observed`）并输出到 JSON 与 `ai-diagnostics.md`。
 - **正则线性化防 ReDoS 加固（`src/core/redact.mjs`、`src/explore/safety.mjs`）**：以线性 O(N) 扫描替换 PEM 私钥多项式正则，预编译并收紧 JSON/URL/KEY=VALUE/`setItem`/Bearer/Basic/ANSI/Email/Query 匹配量词与边界锚点；11 类 100KB 病态输入全量实测耗时 `< 40ms`（单条均 `< 10ms`），脱敏召回率保持 `100% (35/35)`。
 
+### 全仓 O(N) 深度优化、模块优雅解耦与可扩展注册表 (Round 2 Polish)
+- **内核 Git 子进程消除、Glob 缓存与 O(limit) JSONL 尾读（`src/kernel/gate/git-utils.mjs`、`src/core/glob.mjs`、`src/ledger.mjs`、`src/verdict.mjs`）**：
+  - `resolveGitRoot` 增加有界正缓存（`MAX=128`、TTL `5s`、验证 `.git` 存在、永不缓存 `null` 杜绝临时 `git init` 陈旧负缓存）并导出 `clearGitRootCache`；`resolveDefaultDiffBase` 用单次 `git for-each-ref` 批量替代多达 6 次串行 `rev-parse` 子进程；新增单次 `resolveGitHeadAndTreeSha` 消除 `verify-change` 冗余 `git` 进程派生；
+  - `compileGlob` 新增有界 `RegExp` 缓存（`MAX=512`）；`src/ledger.mjs` 新增 UTF-8 多字节边界安全的 64KB 倒序分块 `readJsonlTail` 并接入 `readLedgerHistory`，5,000 行（`> 500KB`）运行账本索引尾读稳定 `< 25ms`。
+- **线性 O(N) 活体代码地图 v4 与可插拔框架/ORM/技术栈注册表（`src/codemap/`、`src/init/stack-registry.mjs`、`src/bootstrap.mjs`）**：
+  - 将 `src/codemap/adapters.mjs` 拆分为 `route-matcher.mjs`（`createRoutePatternMatcher` + `WeakMap` 缓存）、`registry.mjs`（`registerCodeMapAdapter` / `unregisterCodeMapAdapter` / `listCodeMapAdapters`）、`backend-adapters.mjs` 与 `correlator.mjs`（预编译 DB 实体正则），原生新增 SvelteKit、Nuxt/Astro、Go（Gin/Echo/Chi + Go 1.22 `net/http`）、Hono 与 Drizzle ORM 提取，并将 `mergeLivingCodeMap` 升级为线性 O(N) 倒排映射（`500` 路由 × `200` Spec × `200` 端点 `< 150ms`）；
+  - 新增声明式 `detectPackageManager`（`npm`/`pnpm`/`yarn`/`bun`）与 `STACK_DESCRIPTORS`（支持 `registerStackDescriptor`/`unregisterStackDescriptor`）统一驱动 `detectProjectStack` 与 `inferRuntimeConfigForRepo`。
+- **进程内只读 MCP 快速通道扩展、深度模块拆解（全仓 `<= 435` LOC）与 Schema/导出收口**：
+  - 抽取无副作用 `collectDoctorReport` 与 `runMcpDoctorReadOnly`，将 `aitest_doctor`、`aitest_mcp_hub(action="presets"|"doctor", lock=false)`（含畸形 `.mcp.json` 优雅返回 `exitCode: 1`）与 `aitest_diagnose(dryRun=true)` 纳入边界与脱敏守卫后的进程内只读快速通道；
+  - 拆解 `constant-eval`（`constant-primitives` + `matcher-arg-eval`）、`protocol`（`envelope`）、`transport-http`（`session-store`）、`runner`（`env-and-failures`）、`mcp-hub`（`auditor`）、`agents`（`staging`）、`governance`（`helpers`）、`heal`（`begin`）与 `assertion-rules`（`assertion-helpers`），实现全仓所有 `src/**/*.mjs` 严格 `<= 435` 行（单元测试守卫 `<= 450` 行）；
+  - 补齐 `aitest.config.json` `AITEST-G101..G117` 校验、`TEST_EGRESS_EXTRA_HOSTS` / `TEST_EGRESS_ALLOW_HOSTS` 统一解析、`evaluateDiffRules` `ctx.extraRules` 扩展点、MCP `makeOutputSchema` 与 `src/types/{mcp,config}.d.ts` 字段对齐，并在 `package.json#exports` 新增 `./app` 稳定门面导出。
+
 ## [6.2.1] - 2026-11-25
 
 ### 安全加固与可信边界修复 (Security & Trust-Boundary Hardening)

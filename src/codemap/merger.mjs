@@ -1,119 +1,17 @@
 // @ts-check
-import crypto from 'node:crypto';
 import { groupOutcomesBySpecFile } from '../core/playwright-results.mjs';
 import { SCHEMA_VERSIONS } from '../core/version.mjs';
-import { matchRuntimeRouteToPattern, normalizeRoutePath } from './adapters.mjs';
+import { createRoutePatternMatcher, normalizeRoutePath } from './adapters.mjs';
+import {
+  compileDbEntityMatchers,
+  computeCodeMapContentFingerprint,
+  computeTopologySnapshotId,
+  correlateDbTablesForRoute,
+} from './correlator.mjs';
+
+export { compileDbEntityMatchers, correlateDbTablesForRoute };
 
 const STALE_RUNTIME_DAYS = 14;
-
-/** @param {any} topology @returns {string | null} */
-function computeTopologySnapshotId(topology) {
-  if (!topology || typeof topology !== 'object') return null;
-  if (topology.snapshotId) return String(topology.snapshotId);
-  if (!topology.exploredAt && (!Array.isArray(topology.pages) || topology.pages.length === 0)) return null;
-  const raw = JSON.stringify({
-    exploredAt: topology.exploredAt || '',
-    pages: (topology.pages || []).map((/** @type {any} */ p) => p.route),
-    consoleErrors: topology.consoleErrors || [],
-    queryAnomalies: topology.queryAnomalies || [],
-  });
-  return `snap_${crypto.createHash('sha256').update(raw).digest('hex').slice(0, 12)}`;
-}
-
-/** @param {string} s @returns {string} */
-function escapeRegExp(s) {
-  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * Precise controller/entity correlation (`K-04`): avoids naive substring pollution (`user` matching `/user-guide`).
- * @param {{ route: string, linkedApis?: string[], linkedBackendFiles?: string[] }} entry
- * @param {Array<{ table: string, file: string }>} dbEntities
- * @param {Record<string, string>} [backendFileTexts]
- * @returns {string[]}
- */
-export function correlateDbTablesForRoute(entry, dbEntities, backendFileTexts = {}) {
-  const matched = /** @type {Set<string>} */ (new Set());
-  const routeSegments = entry.route
-    .toLowerCase()
-    .split('/')
-    .filter((s) => s && !s.startsWith(':'));
-  const apiSegments = (entry.linkedApis || [])
-    .flatMap((a) => a.toLowerCase().split('/'))
-    .filter((s) => s && s !== 'api' && !/^v\d+$/.test(s) && !s.startsWith(':'));
-
-  for (const entity of dbEntities || []) {
-    const tbl = entity.table;
-    const tblLower = tbl.toLowerCase();
-    const singular = tblLower.endsWith('s') ? tblLower.slice(0, -1) : tblLower;
-    const plural = tblLower.endsWith('s') ? tblLower : `${tblLower}s`;
-
-    if ((entry.linkedBackendFiles || []).includes(entity.file)) {
-      matched.add(tbl);
-      continue;
-    }
-    const controllerRefsEntity = (entry.linkedBackendFiles || []).some((bf) => {
-      const src = backendFileTexts[bf];
-      return src ? new RegExp(`\\b${escapeRegExp(tbl)}\\b`, 'i').test(src) : false;
-    });
-    if (controllerRefsEntity) {
-      matched.add(tbl);
-      continue;
-    }
-
-    if (
-      routeSegments.includes(tblLower) ||
-      routeSegments.includes(singular) ||
-      routeSegments.includes(plural) ||
-      apiSegments.includes(tblLower) ||
-      apiSegments.includes(singular) ||
-      apiSegments.includes(plural)
-    ) {
-      matched.add(tbl);
-    }
-  }
-  return [...matched];
-}
-
-/** @param {any} mapCandidate @returns {string} */
-function computeCodeMapContentFingerprint(mapCandidate) {
-  const canonicalRoutes = Object.fromEntries(
-    Object.entries(mapCandidate.routes || {})
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([k, v]) => [
-        k,
-        {
-          route: v.route,
-          source: v.source,
-          archetype: v.archetype,
-          frontendFile: v.frontendFile,
-          linkedApis: v.linkedApis,
-          linkedBackendFiles: v.linkedBackendFiles,
-          linkedDbTables: v.linkedDbTables,
-          coveringSpecs: v.coveringSpecs,
-          lastResult: v.lastResult,
-          stale: v.stale,
-        },
-      ])
-  );
-  const canonicalDefects = (mapCandidate.defects || []).map((/** @type {any} */ d) => ({
-    key: d.key,
-    status: d.status,
-    seenCount: d.seenCount,
-  }));
-  return `sha256:${crypto
-    .createHash('sha256')
-    .update(
-      JSON.stringify({
-        routes: canonicalRoutes,
-        defects: canonicalDefects,
-        endpoints: mapCandidate.endpoints || [],
-        coverage: mapCandidate.coverage,
-        perfCount: (mapCandidate.perfSnapshots || []).length,
-      })
-    )
-    .digest('hex')}`;
-}
 
 /**
  * Migrates v3.0 code-map objects cleanly to `schemaVersion: 4` (`A-07`).
@@ -130,8 +28,8 @@ export function migrateCodeMapSchema(rawMap) {
 
 /**
  * Fuses static code index + runtime exploration topology + test results + perf snapshots into
- * Living Code Map v2 (`schemaVersion: 4`) with dynamic route matching, stale route/spec pruning,
- * snapshot-idempotent defect lifecycle (`open -> resolved-candidate -> closed`), and daily history aggregation (`K-01..K-06`).
+ * Living Code Map v2 (`schemaVersion: 4`) in linear O(N) time with compiled route pattern matchers,
+ * pre-grouped frontend API calls, pre-compiled DB entity regexes, and inverted spec coverage maps (`K-01..K-06`).
  * @param {any} existingMap
  * @param {{ nowIso?: string, sourceIndex?: any, topology?: any, specIndex?: Array<{ specFile: string, uiRoutes?: string[], apiPaths: string[] }>, resultsJson?: any, perfReport?: any }} [inputs]
  */
@@ -159,7 +57,8 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
   const outcomesBySpec = groupOutcomesBySpecFile(resultsJson);
 
   const staticPatterns = (sourceIndex.frontendRoutes || []).map((/** @type {any} */ r) => normalizeRoutePath(r.route));
-  const hasStaticIndex = (sourceIndex.frontendRoutes || []).length > 0;
+  const matchStatic = createRoutePatternMatcher(staticPatterns);
+  const hasStaticIndex = staticPatterns.length > 0;
 
   /** @type {Record<string, any>} */
   const routesObj = {};
@@ -192,7 +91,7 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
 
   const ensureRoute = (/** @type {string} */ rPath, source = 'static') => {
     const normalized = normalizeRoutePath(rPath);
-    const key = source === 'runtime' ? matchRuntimeRouteToPattern(normalized, staticPatterns) : normalized;
+    const key = source === 'runtime' ? matchStatic(normalized) : normalized;
     if (!routesObj[key]) {
       routesObj[key] = createBlankRoute(key, source);
     } else if (source === 'static') {
@@ -247,36 +146,86 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
     }
   }
 
+  /** @type {Map<string, string[]>} */
   const apiToBackend = new Map();
   for (const be of sourceIndex.backendEndpoints || []) {
     const list = apiToBackend.get(be.path) || [];
     if (!list.includes(be.file)) list.push(be.file);
     apiToBackend.set(be.path, list);
   }
+  const matchBackendApi = createRoutePatternMatcher([...apiToBackend.keys()]);
+
+  /** @type {Map<string, string[]>} */
+  const apiCallsByFile = new Map();
+  for (const c of sourceIndex.frontendApiCalls || []) {
+    if (!c?.file || !c?.path) continue;
+    let list = apiCallsByFile.get(c.file);
+    if (!list) {
+      list = [];
+      apiCallsByFile.set(c.file, list);
+    }
+    list.push(c.path);
+  }
+
+  const compiledEntities = compileDbEntityMatchers(sourceIndex.dbEntities || []);
+  const backendFileTexts = sourceIndex.backendFileTexts || {};
 
   for (const entry of Object.values(routesObj)) {
     if (entry.frontendFile) {
-      const calls = (sourceIndex.frontendApiCalls || []).filter((/** @type {any} */ c) => c.file === entry.frontendFile);
-      for (const c of calls) {
-        if (!entry.linkedApis.includes(c.path)) entry.linkedApis.push(c.path);
+      const calls = apiCallsByFile.get(entry.frontendFile);
+      if (calls) {
+        const apiSet = new Set(entry.linkedApis);
+        for (const p of calls) {
+          if (!apiSet.has(p)) {
+            apiSet.add(p);
+            entry.linkedApis.push(p);
+          }
+        }
       }
     }
     const beFiles = new Set();
     for (const apiPath of entry.linkedApis) {
-      const matchedBePattern = matchRuntimeRouteToPattern(apiPath, [...apiToBackend.keys()]);
+      const matchedBePattern = matchBackendApi(apiPath);
       for (const f of apiToBackend.get(matchedBePattern) || []) beFiles.add(f);
     }
     entry.linkedBackendFiles = [...beFiles];
-    entry.linkedDbTables = correlateDbTablesForRoute(entry, sourceIndex.dbEntities || [], sourceIndex.backendFileTexts || {});
+    entry.linkedDbTables = correlateDbTablesForRoute(entry, sourceIndex.dbEntities || [], backendFileTexts, compiledEntities);
   }
 
   const staticAndCurrentPatterns = Object.keys(routesObj);
+  const matchActive = createRoutePatternMatcher(staticAndCurrentPatterns);
+  /** @type {Map<string, Set<string>>} */
+  const routeToSpecs = new Map();
+  /** @type {Map<string, Set<string>>} */
+  const apiToSpecs = new Map();
+
+  for (const sp of specIndex) {
+    for (const u of sp.uiRoutes || []) {
+      const key = matchActive(u);
+      let set = routeToSpecs.get(key);
+      if (!set) {
+        set = new Set();
+        routeToSpecs.set(key, set);
+      }
+      set.add(sp.specFile);
+    }
+    for (const api of sp.apiPaths || []) {
+      let set = apiToSpecs.get(api);
+      if (!set) {
+        set = new Set();
+        apiToSpecs.set(api, set);
+      }
+      set.add(sp.specFile);
+    }
+  }
+
   for (const entry of Object.values(routesObj)) {
-    const matchedSpecs = new Set();
-    for (const sp of specIndex) {
-      const normalizedSpecRoutes = (sp.uiRoutes || []).map((u) => matchRuntimeRouteToPattern(u, staticAndCurrentPatterns));
-      if (normalizedSpecRoutes.includes(entry.route)) matchedSpecs.add(sp.specFile);
-      if (entry.linkedApis.some((/** @type {string} */ a) => sp.apiPaths.includes(a))) matchedSpecs.add(sp.specFile);
+    const matchedSpecs = new Set(routeToSpecs.get(entry.route) || []);
+    for (const api of entry.linkedApis) {
+      const linked = apiToSpecs.get(api);
+      if (linked) {
+        for (const sf of linked) matchedSpecs.add(sf);
+      }
     }
     entry.coveringSpecs = [...matchedSpecs];
 
@@ -374,12 +323,12 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
     };
 
     for (const ce of topology.consoleErrors || []) {
-      const route = matchRuntimeRouteToPattern(ce.route || '/', staticAndCurrentPatterns);
+      const route = matchActive(ce.route || '/');
       const msg = String(ce.message || ce).slice(0, 180);
       recordRuntimeDefect(`console:${route}:${msg.slice(0, 60)}`, 'P1', 'console-error', route, msg);
     }
     for (const qa of topology.queryAnomalies || []) {
-      const route = matchRuntimeRouteToPattern(qa.route || '/', staticAndCurrentPatterns);
+      const route = matchActive(qa.route || '/');
       recordRuntimeDefect(`query-anomaly:${route}:${qa.detail}`, 'P2', 'malformed-query-param', route, qa.detail);
     }
 

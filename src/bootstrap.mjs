@@ -6,42 +6,25 @@ import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import { isLoopbackHttpUrl, loadRuntimeConfig, validateRuntimeConfig } from './core/runtime-config.mjs';
 import { resolvePlaywrightCli } from './core/playwright-resolve.mjs';
 import { runNpm, runPlaywright } from './core/proc.mjs';
-import { detectProjectStack, runInit } from './init.mjs';
+import { detectProjectStack, inferStackRuntimeDefaults, runInit } from './init.mjs';
 import { openTrustContext, resolveDefaultDiffBase, resolveGitHeadSha, writeSignedBaselineRef } from './kernel/gate-kernel.mjs';
 import { loadMergedQaEnv } from './origin-guard.mjs';
 
 /**
- * Infers a loopback `aitest.runtime.json` specification from host repository files (`package.json`, Python, Go).
+ * Infers a loopback `aitest.runtime.json` specification from host repository files
+ * using the declarative `STACK_DESCRIPTORS` and `detectPackageManager` registries.
  * @param {string} repoDir
  * @param {{ baseUrl?: string, healthPath?: string, port?: number }} [options]
  */
 export function inferRuntimeConfigForRepo(repoDir, options = {}) {
-  const pkgPath = path.join(repoDir, 'package.json');
   const stacks = fs.existsSync(repoDir) ? detectProjectStack(repoDir) : ['Generic Web'];
-  let command = null;
-  let defaultPort = options.port || 3000;
-  let healthPath = options.healthPath || '/';
+  const defaults = fs.existsSync(repoDir)
+    ? inferStackRuntimeDefaults(repoDir)
+    : { stack: 'Generic Web', stacks: ['Generic Web'], packageManager: 'npm', defaultPort: 3000, healthPath: '/', command: null };
 
-  if (fs.existsSync(pkgPath)) {
-    try {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-      const scripts = pkg.scripts || {};
-      const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
-      if (deps.vite || deps['@vitejs/plugin-react']) defaultPort = options.port || 5173;
-      if (scripts.dev) command = 'npm run dev';
-      else if (scripts.start) command = 'npm start';
-    } catch {
-      // ignore invalid package.json
-    }
-  } else if (fs.existsSync(path.join(repoDir, 'pyproject.toml')) || fs.existsSync(path.join(repoDir, 'requirements.txt'))) {
-    defaultPort = options.port || 8000;
-    command = 'uvicorn main:app --host 127.0.0.1 --port 8000';
-    healthPath = options.healthPath || '/health';
-  } else if (fs.existsSync(path.join(repoDir, 'go.mod'))) {
-    defaultPort = options.port || 8080;
-    command = 'go run .';
-    healthPath = options.healthPath || '/healthz';
-  }
+  const command = defaults.command;
+  const defaultPort = options.port || defaults.defaultPort || 3000;
+  const healthPath = options.healthPath || defaults.healthPath || '/';
 
   const resolvedBaseUrl = options.baseUrl && isLoopbackHttpUrl(options.baseUrl)
     ? options.baseUrl.replace(/\/+$/, '')
@@ -51,7 +34,7 @@ export function inferRuntimeConfigForRepo(repoDir, options = {}) {
 
   return {
     schemaVersion: 1,
-    stack: stacks[0] || 'Generic Web',
+    stack: stacks[0] || defaults.stack || 'Generic Web',
     baseURL: resolvedBaseUrl,
     healthPath,
     ...(command && resolvedBaseUrl

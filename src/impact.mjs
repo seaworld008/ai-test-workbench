@@ -37,6 +37,26 @@ export { buildReverseImportGraph, evaluateImpactRecall, findTransitiveDependents
  */
 
 /**
+ * @param {string} reason
+ * @param {string[]} changedFiles
+ * @param {Array<{ spec: string, via: string }>} [why]
+ * @param {string} [baseRef]
+ * @returns {ImpactResult}
+ */
+function makeFullImpactResult(reason, changedFiles, why = [], baseRef = undefined) {
+  return {
+    mode: 'full',
+    reason,
+    specs: [],
+    why,
+    recallEstimate: null,
+    useOnlyChanged: false,
+    ...(baseRef !== undefined ? { baseRef } : {}),
+    changedFiles,
+  };
+}
+
+/**
  * Hardened Impact v2 selector (`I-01..I-04`):
  * @param {string[]} changedFiles
  * @param {string} qaDir
@@ -54,56 +74,32 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
   ];
 
   if (normalized.length === 0) {
-    return {
-      mode: 'full',
-      reason: 'No changed files detected or diff empty — falling back to full suite for safety.',
-      specs: [],
-      why: [],
-      recallEstimate: null,
-      useOnlyChanged: false,
-      changedFiles: [],
-    };
+    return makeFullImpactResult('No changed files detected or diff empty — falling back to full suite for safety.', []);
   }
 
   for (const file of normalized) {
     if (GLOBAL_INFRA_PATTERNS.some((re) => re.test(file))) {
-      return {
-        mode: 'full',
-        reason: `Shared/infrastructure or policy file changed ("${file}") — running full regression suite.`,
-        specs: [],
-        why: [{ spec: '*', via: `infra-guard: ${file}` }],
-        recallEstimate: null,
-        useOnlyChanged: false,
-        changedFiles: normalized,
-      };
+      return makeFullImpactResult(
+        `Shared/infrastructure or policy file changed ("${file}") — running full regression suite.`,
+        normalized,
+        [{ spec: '*', via: `infra-guard: ${file}` }]
+      );
     }
   }
 
   const qaRelPrefix = path.relative(repoDir, qaDir).replace(/\\/g, '/');
   const allSpecs = listAllSpecFiles(path.join(qaDir, 'tests'), qaDir);
   if (allSpecs.length === 0) {
-    return {
-      mode: 'full',
-      reason: 'No spec files found in QA directory — falling back to full suite.',
-      specs: [],
-      why: [],
-      recallEstimate: null,
-      useOnlyChanged: false,
-      changedFiles: normalized,
-    };
+    return makeFullImpactResult('No spec files found in QA directory — falling back to full suite.', normalized);
   }
 
   const loadedManual = loadAndValidateImpactRules(path.join(qaDir, 'impact-map.json'));
   if (!loadedManual.ok) {
-    return {
-      mode: 'full',
-      reason: loadedManual.errorReason || 'Invalid impact-map.json — falling back to full suite.',
-      specs: [],
-      why: loadedManual.via ? [{ spec: '*', via: loadedManual.via }] : [],
-      recallEstimate: null,
-      useOnlyChanged: false,
-      changedFiles: normalized,
-    };
+    return makeFullImpactResult(
+      loadedManual.errorReason || 'Invalid impact-map.json — falling back to full suite.',
+      normalized,
+      loadedManual.via ? [{ spec: '*', via: loadedManual.via }] : []
+    );
   }
   const autoRulesPath = path.join(qaDir, 'knowledge', 'impact-map.auto.json');
   const loadedAuto = fs.existsSync(autoRulesPath)
@@ -117,15 +113,11 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
 
   const reverseGraph = buildReverseImportGraph(repoDir, { includeQa: false });
   if (reverseGraph.truncated) {
-    return {
-      mode: 'full',
-      reason: `Import graph exceeded ${MAX_GRAPH_FILES}-file scan budget (truncated) — falling back to full suite for recall safety.`,
-      specs: [],
-      why: [{ spec: '*', via: `graph-truncated(${MAX_GRAPH_FILES})` }],
-      recallEstimate: null,
-      useOnlyChanged: false,
-      changedFiles: normalized,
-    };
+    return makeFullImpactResult(
+      `Import graph exceeded ${MAX_GRAPH_FILES}-file scan budget (truncated) — falling back to full suite for recall safety.`,
+      normalized,
+      [{ spec: '*', via: `graph-truncated(${MAX_GRAPH_FILES})` }]
+    );
   }
 
   /** @type {Map<string, string[]>} */
@@ -216,81 +208,53 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
 
     const direct = matchCandidateFileToSpecs(file, null);
     if (direct.forceFull) {
-      return {
-        mode: 'full',
-        reason: `Impact rule for "${file}" requires full suite.`,
-        specs: [],
-        why: [{ spec: '*', via: `fullSuite-rule: ${file}` }],
-        recallEstimate: null,
-        useOnlyChanged: false,
-        changedFiles: normalized,
-      };
+      return makeFullImpactResult(`Impact rule for "${file}" requires full suite.`, normalized, [{ spec: '*', via: `fullSuite-rule: ${file}` }]);
     }
 
     const dependents = findTransitiveDependents(file, reverseGraph);
     if (dependents.length >= 8) {
-      return {
-        mode: 'full',
-        reason: `High-fan-in module "${file}" is imported by ${dependents.length} files — running full suite.`,
-        specs: [],
-        why: [{ spec: '*', via: `high-fan-in(${dependents.length}): ${file}` }],
-        recallEstimate: null,
-        useOnlyChanged: false,
-        changedFiles: normalized,
-      };
+      return makeFullImpactResult(
+        `High-fan-in module "${file}" is imported by ${dependents.length} files — running full suite.`,
+        normalized,
+        [{ spec: '*', via: `high-fan-in(${dependents.length}): ${file}` }]
+      );
     }
 
     let transitiveMatched = false;
     for (const dep of dependents) {
       if (GLOBAL_INFRA_PATTERNS.some((re) => re.test(dep.file))) {
-        return {
-          mode: 'full',
-          reason: `Changed file "${file}" is imported by shared infrastructure "${dep.file}" — running full suite.`,
-          specs: [],
-          why: [{ spec: '*', via: `import-graph-infra: ${dep.chain.join(' -> ')}` }],
-          recallEstimate: null,
-          useOnlyChanged: false,
-          changedFiles: normalized,
-        };
+        return makeFullImpactResult(
+          `Changed file "${file}" is imported by shared infrastructure "${dep.file}" — running full suite.`,
+          normalized,
+          [{ spec: '*', via: `import-graph-infra: ${dep.chain.join(' -> ')}` }]
+        );
       }
       const depMatch = matchCandidateFileToSpecs(dep.file, dep.chain.join(' -> '));
       if (depMatch.forceFull) {
-        return {
-          mode: 'full',
-          reason: `Transitive dependent "${dep.file}" of "${file}" requires full suite.`,
-          specs: [],
-          why: [{ spec: '*', via: `import-graph: ${dep.chain.join(' -> ')}` }],
-          recallEstimate: null,
-          useOnlyChanged: false,
-          changedFiles: normalized,
-        };
+        return makeFullImpactResult(
+          `Transitive dependent "${dep.file}" of "${file}" requires full suite.`,
+          normalized,
+          [{ spec: '*', via: `import-graph: ${dep.chain.join(' -> ')}` }]
+        );
       }
       if (depMatch.matchedAny) {
         transitiveMatched = true;
       } else {
         // Every transitive dependent MUST map cleanly; any unmapped dependent forces full suite (`I-03`)!
-        return {
-          mode: 'full',
-          reason: `Transitive dependent "${dep.file}" of "${file}" is unmapped — falling back to full suite to prevent missed regressions.`,
-          specs: [],
-          why: [{ spec: '*', via: `unmapped-transitive: ${dep.chain.join(' -> ')}` }],
-          recallEstimate: null,
-          useOnlyChanged: false,
-          changedFiles: normalized,
-        };
+        return makeFullImpactResult(
+          `Transitive dependent "${dep.file}" of "${file}" is unmapped — falling back to full suite to prevent missed regressions.`,
+          normalized,
+          [{ spec: '*', via: `unmapped-transitive: ${dep.chain.join(' -> ')}` }]
+        );
       }
     }
 
     if (!direct.matchedAny && !transitiveMatched) {
-      return {
-        mode: 'full',
-        reason: `Unmapped source file "${file}" has unknown blast radius — falling back to full regression suite.`,
-        specs: [],
-        why: [{ spec: '*', via: `unmapped-fallback: ${file}` }],
-        recallEstimate: null,
-        useOnlyChanged: false,
-        changedFiles: normalized,
-      };
+      return makeFullImpactResult(
+        `Unmapped source file "${file}" has unknown blast radius — falling back to full regression suite.`,
+        normalized,
+        [{ spec: '*', via: `unmapped-fallback: ${file}` }]
+      );
     }
   }
 
@@ -314,15 +278,11 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
       const qaDeps = findTransitiveDependents(qaRel, qaGraph);
       const depSpecs = qaDeps.filter((d) => allSpecs.includes(d.file));
       if (depSpecs.length === 0) {
-        return {
-          mode: 'full',
-          reason: `QA helper/Page Object changed ("${qaRel}") with unresolved spec dependents — running full suite.`,
-          specs: [],
-          why: [{ spec: '*', via: `qa-helper-fallback: ${qaRel}` }],
-          recallEstimate: null,
-          useOnlyChanged: false,
-          changedFiles: normalized,
-        };
+        return makeFullImpactResult(
+          `QA helper/Page Object changed ("${qaRel}") with unresolved spec dependents — running full suite.`,
+          normalized,
+          [{ spec: '*', via: `qa-helper-fallback: ${qaRel}` }]
+        );
       }
       for (const ds of depSpecs) {
         addSpecReason(ds.file, `qa-import-graph: ${ds.chain.join(' -> ')}`);
@@ -342,15 +302,7 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
   }
 
   if (whyBySpec.size === 0) {
-    return {
-      mode: 'full',
-      reason: 'Zero specific specs resolved from diff — falling back to full regression suite.',
-      specs: [],
-      why: [],
-      recallEstimate: null,
-      useOnlyChanged: false,
-      changedFiles: normalized,
-    };
+    return makeFullImpactResult('Zero specific specs resolved from diff — falling back to full regression suite.', normalized);
   }
 
   const sortedSpecs = [...whyBySpec.keys()].sort();

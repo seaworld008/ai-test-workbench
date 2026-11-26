@@ -16,6 +16,7 @@
   "exports": {
     ".": "./src/kernel/index.mjs",
     "./kernel": "./src/kernel/index.mjs",
+    "./app": "./src/app/index.mjs",
     "./target-guard": "./src/kernel/target-guard.mjs",
     "./schema-validator": "./src/kernel/schema-validator.mjs"
   },

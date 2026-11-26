@@ -7,7 +7,12 @@ import {
   openTrustContext,
   verifyPayloadT1,
 } from '../kernel/gate-kernel.mjs';
-import { TRUST_LEVEL_DEFINITIONS, describeTrustLevel } from '../trust.mjs';
+import {
+  TRUST_LEVEL_DEFINITIONS,
+  buildInTotoVerdictAttestation,
+  describeTrustLevel,
+  tryCosignKeylessSign,
+} from '../trust.mjs';
 
 /**
  * @param {Record<string, any>} verdictObj
@@ -251,4 +256,77 @@ export function checkHealSessionConflicts(qaDir, baseResolution, trustContext = 
   }
 
   return { ok: errors.length === 0, errors };
+}
+
+/**
+ * Persists PR Markdown summary, SARIF 2.1.0 report, CI step summary, and in-toto attestation artifacts.
+ * @param {{
+ *   qaDir: string,
+ *   repoDir: string,
+ *   lang: string,
+ *   verdictPayload: Record<string, any>,
+ *   treeDigest: string | null,
+ *   auditOut: Record<string, any>,
+ *   gateKernelVersion: string,
+ * }} params
+ */
+export function writeVerdictArtifacts({
+  qaDir,
+  repoDir,
+  lang,
+  verdictPayload,
+  treeDigest,
+  auditOut,
+  gateKernelVersion,
+}) {
+  const reportsDir = path.join(qaDir, 'reports');
+  fs.mkdirSync(reportsDir, { recursive: true });
+  const mdSummary = buildPrVerdictMarkdown(verdictPayload, lang);
+  const sarifObj = buildSarifReport(verdictPayload);
+  const summaryMdPath = path.join(reportsDir, 'verdict-summary.md');
+  const sarifPath = path.join(reportsDir, 'verdict.sarif.json');
+  fs.writeFileSync(summaryMdPath, mdSummary, 'utf8');
+  fs.writeFileSync(sarifPath, JSON.stringify(sarifObj, null, 2) + '\n', 'utf8');
+
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    try {
+      fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n${mdSummary}\n`, 'utf8');
+    } catch {
+      // ignore CI step summary write failure
+    }
+  }
+
+  let attestationPath = null;
+  let predicatePath = null;
+  let sigstoreBundlePath = null;
+  if (verdictPayload.runId) {
+    const runDir = path.join(qaDir, '.aitest', 'runs', verdictPayload.runId);
+    fs.mkdirSync(runDir, { recursive: true });
+    attestationPath = path.join(runDir, 'attestation.json');
+    predicatePath = path.join(runDir, 'verdict-predicate.json');
+    const statement = buildInTotoVerdictAttestation({
+      verdictPayload,
+      qaDir,
+      repoDir,
+      treeDigest,
+      resultsDigest: auditOut.evidence?.resultsDigest,
+      lockDigest: auditOut.evidence?.lockDigest,
+      gateKernelVersion,
+    });
+    fs.writeFileSync(attestationPath, JSON.stringify(statement, null, 2) + '\n', 'utf8');
+    fs.writeFileSync(predicatePath, JSON.stringify(statement.predicate, null, 2) + '\n', 'utf8');
+
+    const cosignRes = tryCosignKeylessSign(attestationPath);
+    if (cosignRes.signed) {
+      sigstoreBundlePath = cosignRes.bundlePath;
+    }
+  }
+
+  return {
+    summaryMdPath,
+    sarifPath,
+    attestationPath,
+    predicatePath,
+    sigstoreBundlePath,
+  };
 }

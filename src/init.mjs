@@ -19,17 +19,32 @@ import {
 import { writeTemplateManifest } from './upgrade.mjs';
 import {
   DEMO_PRESET_DIR,
+  STACK_DESCRIPTORS,
   TEMPLATE_DIR,
   applyRootMcpBridge,
   collectFilesRecursive,
+  detectPackageManager,
   detectProjectStack,
+  detectStacksFromDescriptors,
+  inferStackRuntimeDefaults,
   inspectGitStatus,
   inspectHostIsolation,
   mergeGitignoreContent,
+  registerStackDescriptor,
   renderContent,
+  unregisterStackDescriptor,
 } from './init/planner.mjs';
 
-export { detectProjectStack, inspectHostIsolation };
+export {
+  STACK_DESCRIPTORS,
+  detectPackageManager,
+  detectProjectStack,
+  detectStacksFromDescriptors,
+  inferStackRuntimeDefaults,
+  inspectHostIsolation,
+  registerStackDescriptor,
+  unregisterStackDescriptor,
+};
 
 /**
  * @param {{
