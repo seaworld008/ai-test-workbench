@@ -1,10 +1,10 @@
-# CLAUDE.md — Claude Code 工作区指引 / Workspace Guidance (v6.3.0)
+# CLAUDE.md — Claude Code 工作区指引 / Workspace Guidance (v6.4.0)
 
 > 默认中文说明见 [AGENTS.md](./AGENTS.md)、[docs/governance.md](./docs/governance.md) 与 [README.md](./README.md) · English guide: [AGENTS.en.md](./AGENTS.en.md) · [docs/governance.en.md](./docs/governance.en.md) · [README.en.md](./README.en.md)
 
 当你在本仓库或通过 MCP 使用 `ai-test-workbench` 工作时，请遵循：
 
-1. **优先读取 [AGENTS.md](./AGENTS.md)**（或英文 [AGENTS.en.md](./AGENTS.en.md)）中的 16 个权威 MCP 工具清单、一键终审 `aitest_verify_change` 与四层防假绿治理锁边界。
+1. **优先读取 [AGENTS.md](./AGENTS.md)**（或英文 [AGENTS.en.md](./AGENTS.en.md)）中的 17 个权威 MCP 工具清单、一键终审 `aitest_verify_change`、双目标差分先知 `aitest_parity` 与四层防假绿治理锁边界。
 2. **加载标准技能规范**：[skills/ai-test-workbench/SKILL.md](./skills/ai-test-workbench/SKILL.md)（中文版：[SKILL.zh-CN.md](./skills/ai-test-workbench/SKILL.zh-CN.md)）。
 3. **启动原生 MCP 服务**（兼容 `stdio` / `Streamable HTTP` / `SSE`，内置子进程作业隔离、进度通知与进程树取消）：
    - `node tools/aitest.mjs mcp-serve`（`stdio`）

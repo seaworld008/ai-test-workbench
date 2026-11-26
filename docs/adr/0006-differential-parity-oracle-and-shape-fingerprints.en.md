@@ -2,7 +2,7 @@
 
 > [简体中文 (默认)](./0006-differential-parity-oracle-and-shape-fingerprints.md) · [English README](../../README.en.md) · [Architecture](../../ARCHITECTURE.en.md) · [Evolution Roadmap](../review/v6.4-differential-verification-and-memory-loop-roadmap.en.md)
 
-- **Status**: Accepted (Round 1 kernel, CLI, and MCP surface implemented)
+- **Status**: Accepted (`v6.4.0` Round 1 + Round 2 kernel, memory loop, `AITEST-G118`, and Seam Gatekeeper Card implemented)
 - **Date**: `2026-11-26`
 
 ---

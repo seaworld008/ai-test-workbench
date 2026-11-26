@@ -458,11 +458,11 @@ test('v6.3.0 Round 2 WU-D: programmatic extraRules, AITEST-G101..G117 config val
   });
   assert.equal(disabledCustom.ok, true);
 
-  // 2. Config validation accepts AITEST-G101..G117 and rejects G118+
-  assert.equal(validateAitestConfigObject({ rules: { 'AITEST-G101': true, 'AITEST-G116': false, 'AITEST-G117': { enabled: true } } }).ok, true);
-  const badRule = validateAitestConfigObject({ rules: { 'AITEST-G118': true } });
+  // 2. Config validation accepts AITEST-G101..G118 and rejects G119+
+  assert.equal(validateAitestConfigObject({ rules: { 'AITEST-G101': true, 'AITEST-G116': false, 'AITEST-G117': { enabled: true }, 'AITEST-G118': true } }).ok, true);
+  const badRule = validateAitestConfigObject({ rules: { 'AITEST-G119': true } });
   assert.equal(badRule.ok, false);
-  assert.match(badRule.errors[0], /AITEST-G101\.\.G117/);
+  assert.match(badRule.errors[0], /AITEST-G101\.\.G118/);
 
   // 3. TEST_EGRESS_EXTRA_HOSTS & TEST_EGRESS_ALLOW_HOSTS parity
   const tmpQa = makeTempDir('aitest-r2-egress-');

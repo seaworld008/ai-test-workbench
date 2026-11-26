@@ -6,7 +6,7 @@
 
 - **Protocol Versions**: `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05` (zero runtime npm dependencies).
 - **Transports**:
-  1. `stdio`: `node tools/aitest.mjs mcp-serve` (or pinned `npx --package=ai-test-workbench@6.3.0 ai-test-workbench mcp-serve`; NDJSON JSON-RPC with isolated child-process execution `AITEST_MCP_CHILD=1` and zero `globalThis.console` mutation).
+  1. `stdio`: `node tools/aitest.mjs mcp-serve` (or pinned `npx --package=ai-test-workbench@6.4.0 ai-test-workbench mcp-serve`; NDJSON JSON-RPC with isolated child-process execution `AITEST_MCP_CHILD=1` and zero `globalThis.console` mutation).
   2. `Streamable HTTP` (`POST/GET/DELETE /mcp`): `initialize`-only session creation, `404 Not Found` on unknown/expired `Mcp-Session-Id`, idle TTL + `maxSessions` eviction, and batch rejection on `>= 2025-06-18`.
   3. `Legacy HTTP+SSE` (`GET /sse` + `POST /messages`): `2024-11-05` compatible.
 - **Progress, Cancellation & Async Backgrounding (`src/jobs.mjs`)**:
@@ -33,7 +33,7 @@
 | `aitest_audit` | Verification & Gates | Yes | Run 4-Layer Fail-Closed Anti-Fake-Green Quality Gate |
 | `aitest_diagnose` | Verification & Gates | No | Generate Redacted Evidence-First A/B/C/D Diagnostics Report |
 | `aitest_perf` | Verification & Gates | No | Run PerformanceObserver Web Vitals & Read-Only API SLO Benchmark |
-| `aitest_report` | Verification & Gates | Yes | Query Reports Index, Flaky Telemetry & Requirement Traceability |
+| `aitest_report` | Verification & Gates | Yes | Query Reports Index, Flaky Telemetry, Traceability & Lessons |
 | `aitest_parity` | Verification & Gates | No | Run Dual-Target 5-Checkpoint Differential Parity Oracle |
 | `aitest_heal` | Stateful Control | No | Stateful A/B/C/D Heal Governance State Machine (begin \| attempt \| conclude \| discard) |
 | `aitest_job` | Stateful Control | No | Inspect, Await, or Cancel Async Background MCP Jobs (status \| result \| cancel) |

@@ -1,7 +1,5 @@
 // @ts-check
 import { performance } from 'node:perf_hooks';
-import { pathToFileURL } from 'node:url';
-import { resolvePlaywrightPackage } from '../core/playwright-resolve.mjs';
 import { redactSecrets } from '../core/redact.mjs';
 import { compareParityCheckpoints } from '../kernel/diff-oracle.mjs';
 import { computeNextRedirectRequest, MAX_REDIRECT_HOPS, REDIRECT_STATUSES } from '../kernel/target-redirect.mjs';
@@ -12,16 +10,25 @@ import {
   evaluateTargetSafety,
   loadMergedQaEnv,
 } from '../origin-guard.mjs';
+import { collectAriaSnapshotsForRoutes } from './aria.mjs';
 
 /**
  * Validates BOTH `baselineUrl` and `candidateUrl` against Target Safety Guard fail-closed.
+ * Enforces `strictReadonly: !s.allowMutation` so non-loopback shared targets default-deny
+ * write HTTP methods (`POST`/`PUT`/`PATCH`/`DELETE`) unless explicitly opted in via `allowMutation`.
  * @param {string} qaDir
  * @param {string} baselineUrl
  * @param {string} candidateUrl
+ * @param {{ allowMutation?: boolean }} [options]
  */
-export function validateDualTargetSafety(qaDir, baselineUrl, candidateUrl) {
-  const baseEnv = loadMergedQaEnv(qaDir, { ...process.env, TEST_BASE_URL: baselineUrl });
-  const candEnv = loadMergedQaEnv(qaDir, { ...process.env, TEST_BASE_URL: candidateUrl });
+export function validateDualTargetSafety(qaDir, baselineUrl, candidateUrl, options = {}) {
+  /** @type {Record<string, string>} */
+  const overrides = {};
+  if (options.allowMutation === true) overrides.TEST_ALLOW_MUTATION = '1';
+  else if (options.allowMutation === false) overrides.TEST_ALLOW_MUTATION = '0';
+
+  const baseEnv = loadMergedQaEnv(qaDir, { ...process.env, ...overrides, TEST_BASE_URL: baselineUrl });
+  const candEnv = loadMergedQaEnv(qaDir, { ...process.env, ...overrides, TEST_BASE_URL: candidateUrl });
   const baseSafety = evaluateTargetSafety(baseEnv);
   const candSafety = evaluateTargetSafety(candEnv);
   /** @type {string[]} */
@@ -44,7 +51,7 @@ export function validateDualTargetSafety(qaDir, baselineUrl, candidateUrl) {
     extraEgressHosts: s.extraEgressHosts,
     egressMode: s.egressMode || 'allowlist',
     blockedRules: compileBlockedEndpointRules(env.TEST_BLOCKED_ENDPOINTS ?? DEFAULT_BLOCKED_ENDPOINTS),
-    strictReadonly: false,
+    strictReadonly: !s.allowMutation,
   });
 
   return {
@@ -170,66 +177,6 @@ async function executeSampleRequest(baseUrl, reqItem, guardConfig, timeoutMs) {
   } finally {
     clearTimeout(tid);
   }
-}
-
-/**
- * Optionally collects dual-target browser ARIA snapshots & runtime errors (`CP4-DOM-ARIA-And-Runtime`).
- * @param {string} qaDir
- * @param {string} baseUrl
- * @param {string} candUrl
- * @param {string[]} routes
- * @param {Record<string, any>} baseGuard
- * @param {Record<string, any>} candGuard
- */
-async function collectAriaSnapshotsForRoutes(qaDir, baseUrl, candUrl, routes, baseGuard, candGuard) {
-  const pwPkg = resolvePlaywrightPackage(qaDir);
-  if (!pwPkg || routes.length === 0) return new Map();
-
-  const { chromium } = await import(pathToFileURL(pwPkg).href);
-  const browser = await chromium.launch({ headless: true });
-  /** @type {Map<string, { base: { ariaSnapshot: string, pageErrors: string[], serverErrors: string[] }, cand: { ariaSnapshot: string, pageErrors: string[], serverErrors: string[] } }>} */
-  const out = new Map();
-
-  /** @param {string} targetOrigin @param {string} rPath @param {Record<string, any>} guardCfg */
-  const sampleOne = async (targetOrigin, rPath, guardCfg) => {
-    const context = await browser.newContext({ serviceWorkers: 'block' });
-    /** @type {string[]} */ const pageErrors = [];
-    /** @type {string[]} */ const serverErrors = [];
-    await context.route('**/*', async (/** @type {any} */ route) => {
-      const req = route.request();
-      const chk = checkOutgoingRequestSafety(req.method(), req.url(), guardCfg);
-      if (chk.blocked) {
-        await route.abort('blockedbyclient');
-        return;
-      }
-      await route.continue();
-    });
-    const page = await context.newPage();
-    page.on('pageerror', (/** @type {any} */ e) => pageErrors.push(String(e?.message || e)));
-    page.on('response', (/** @type {any} */ r) => {
-      if (r.status() >= 500) serverErrors.push(`${r.status()} ${r.url()}`);
-    });
-    try {
-      await page.goto(new URL(rPath, targetOrigin).toString(), { waitUntil: 'load', timeout: 15_000 });
-      const ariaSnapshot = await page.locator('body').ariaSnapshot();
-      return { ariaSnapshot, pageErrors, serverErrors };
-    } finally {
-      await context.close();
-    }
-  };
-
-  try {
-    for (const rPath of routes.slice(0, 10)) {
-      const [base, cand] = await Promise.all([
-        sampleOne(baseUrl, rPath, baseGuard),
-        sampleOne(candUrl, rPath, candGuard),
-      ]);
-      out.set(rPath, { base, cand });
-    }
-  } finally {
-    await browser.close();
-  }
-  return out;
 }
 
 /**

@@ -40,6 +40,10 @@ export const PARITY_TOOL = {
         type: 'boolean',
         description: 'Launch headless Chromium to compare dual-target ARIA snapshots and runtime errors (CP4)',
       },
+      allowMutation: {
+        type: 'boolean',
+        description: 'Explicitly allow write HTTP methods (POST/PUT/PATCH/DELETE) against non-loopback shared targets',
+      },
       concurrency: { type: 'integer', minimum: 1, maximum: 32, description: 'Concurrent request workers (1..32, default: 8)' },
       maxLatencyRatio: { type: 'number', minimum: 0.01, description: 'Optional CP5 candidate/baseline latency ratio alert threshold' },
       maxTtftRatio: { type: 'number', minimum: 0.01, description: 'Optional CP5 candidate/baseline SSE TTFT ratio alert threshold' },
@@ -77,6 +81,7 @@ export const PARITY_TOOL = {
     pushOpt(a, '--max-ttft-ratio', args.maxTtftRatio);
     pushBool(a, '--strict-byte-escape', args.strictByteEscape);
     pushBool(a, '--check-aria', args.checkAria);
+    pushBool(a, '--allow-mutation', args.allowMutation);
     pushBool(a, '--dry-run', args.dryRun);
     return a;
   },

@@ -55,6 +55,7 @@ export async function runVerdictParityHook(params) {
       routes: options.routes,
       privacyMode: options.privacyMode,
       strictByteEscape: options.strictByteEscape,
+      allowMutation: options.allowMutation,
       checkAria: Boolean(options.checkAria),
       concurrency: options.concurrency,
       dryRun: false,

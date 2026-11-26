@@ -7,6 +7,7 @@ import { generateDiagnosticsMarkdown } from '../../diagnose.mjs';
 import { collectDoctorReport } from '../../doctor.mjs';
 import { computeFlakyReport } from '../../flaky.mjs';
 import { computeImpact } from '../../impact.mjs';
+import { collectLessonsReport } from '../../learn.mjs';
 import { runMcpDoctorReadOnly } from '../../mcp-hub/auditor.mjs';
 import { getMcpPresetsSummary } from '../../mcp-hub/catalog.mjs';
 import { collectReportArtifacts } from '../../report.mjs';
@@ -244,6 +245,20 @@ export async function executeReportReadOnlyFastPath(args, ctx) {
     };
   }
 
+  if (view === 'lessons') {
+    const lessons = collectLessonsReport(qaDir);
+    const data = redactStructuredValue(lessons);
+    return {
+      ok: true,
+      exitCode: 0,
+      outcome: 'pass',
+      summary: redactSecrets(
+        `Lessons view: ${lessons.clusters.length} cluster(s), ${lessons.openBlockerCount} open blocker(s), ${lessons.sealedProjectRules.length} sealed rule(s)`
+      ),
+      data,
+    };
+  }
+
   if (view === 'summary' || view === 'artifacts') {
     const { payload, hasAny } = collectReportArtifacts(qaDir, { view });
     const safeData = redactStructuredValue(payload);
@@ -258,6 +273,6 @@ export async function executeReportReadOnlyFastPath(args, ctx) {
     };
   }
 
-  const msg = `Invalid --view "${view}". Use: summary | artifacts | flaky | traceability`;
+  const msg = `Invalid --view "${view}". Use: summary | artifacts | flaky | traceability | lessons`;
   return { ok: false, exitCode: 64, outcome: 'usage', blockerKind: 'USAGE_ERROR', summary: msg, data: { error: msg } };
 }

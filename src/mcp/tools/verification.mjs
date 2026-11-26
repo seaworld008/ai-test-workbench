@@ -372,11 +372,11 @@ export const VERIFICATION_TOOLS = [
   {
     name: 'aitest_report',
     category: 'verification',
-    title: 'Query Reports Index, Flaky Telemetry & Requirement Traceability',
+    title: 'Query Reports Index, Flaky Telemetry, Traceability & Lessons',
     description:
-      'Use when inspecting generated QA artifacts, latest run overview, historical flaky telemetry, or REQ-xxx requirement traceability coverage. Select view="summary", "artifacts" (default), "flaky", or "traceability" (read-only by default).',
+      'Use when inspecting generated QA artifacts, latest run overview, historical flaky telemetry, REQ-xxx requirement traceability, or distilled memory loop lessons. Select view="summary", "artifacts" (default), "flaky", "traceability", or "lessons" (read-only by default).',
     annotations: {
-      title: 'Inspect Reports, Flaky Telemetry & Trace Matrix',
+      title: 'Inspect Reports, Flaky Telemetry, Trace Matrix & Lessons',
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
@@ -388,8 +388,8 @@ export const VERIFICATION_TOOLS = [
         target: { type: 'string', description: 'Target repository or QA directory' },
         view: {
           type: 'string',
-          enum: ['summary', 'artifacts', 'flaky', 'traceability'],
-          description: 'Report view: summary (artifacts + latest run overview), artifacts (local files), flaky (Run Ledger telemetry), or traceability (REQ-xxx matrix)',
+          enum: ['summary', 'artifacts', 'flaky', 'traceability', 'lessons'],
+          description: 'Report view: summary, artifacts (local files), flaky (Run Ledger telemetry), traceability (REQ-xxx matrix), or lessons (distilled memory proposals & known blockers)',
         },
         syncQuarantine: {
           type: 'boolean',

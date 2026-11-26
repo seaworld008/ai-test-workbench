@@ -1,10 +1,10 @@
 <div align="center">
 
-# AI Test Workbench (`v6.3.0`)
+# AI Test Workbench (`v6.4.0`)
 
 **Trustworthy Verification Kernel & Native Multi-Protocol MCP Server for AI Coding Agents**
 
-Provides a **4-Layer Fail-Closed AST Anti-Fake-Green Gate (`S0–S5` + `AITEST-G101..G117` + SymbolTable + Dieselgate Guard)** · **One-Call Change Verdict (`verify-change` · in-toto v1 + `T0/T1/T2`)** · **5-Checkpoint Differential Parity Oracle (`aitest_parity` + Zero-Plaintext Shape Fingerprints)** · **Zero-Dep Native MCP Server (`stdio` / `/mcp` / `/sse` · 17 Canonical Tools · Framed Subprocess IPC)** · **Immutable `TrustContext` & Sticky T1** · **Zero-Block Loopback Bootstrap (`aitest_bootstrap`)** · **Default-Deny Explorer & Multi-Sample Union Schema Inference** · **Buffered `PerformanceObserver` Web Vitals & SSE `TTFT`**
+Provides a **4-Layer Fail-Closed AST Anti-Fake-Green Gate (`S0–S5` + `AITEST-G101..G118` + SymbolTable + Dieselgate & Cross-Directory Lockstep Guard)** · **One-Call Change Verdict (`verify-change` · in-toto v1 + `T0/T1/T2` + Human Seam Gatekeeper Card)** · **5-Checkpoint Differential Parity Oracle (`aitest_parity` + Zero-Plaintext Shape Fingerprints + Sealed Upstream Cassettes)** · **Toolified Memory Loop (`aitw learn` Distiller & Repo Sweeper + Sealed `known-blockers.json`)** · **Zero-Dep Native MCP Server (`stdio` / `/mcp` / `/sse` · 17 Canonical Tools · Framed Subprocess IPC)** · **Loopback Bootstrap (`aitest_bootstrap`) & SSE `TTFT` / Web Vitals**
 
 [简体中文文档 (默认)](./README.md) · [v5→v6 Upgrade Guide](./docs/upgrade.en.md) · [Governance & 4-Layer Gate](./docs/governance.en.md) · [AI Agent Quickstart](./docs/ai-agent-quickstart.en.md) · [AGENTS.en.md](./AGENTS.en.md) · [Architecture](./ARCHITECTURE.en.md) · [v6 Refactor Assessment](./docs/review/v6-refactor-assessment.en.md) · [Changelog](./CHANGELOG.en.md)
 
@@ -28,11 +28,11 @@ When AI coding agents (Claude Code, Codex CLI, Cursor, VS Code Copilot, Gemini C
 
 | Metric | Verified Measurement (Corpus-Qualified & Reproducible) | Enforcing Mechanism |
 |---|---|---|
-| **Fake-Green Escape Rate (`FGER-internal` / `FGER-holdout`)** | Internal corpus **`0.0%` (`26/26`)** · Red-Team holdout **`0.0%` (`24/24`)** (`npm run bench`) | 4-Layer fail-closed AST Gate (`AITEST-G101..G117`) + Sticky T1 MAC Governance Lock |
+| **Fake-Green Escape Rate (`FGER-internal` / `FGER-holdout`)** | Internal corpus **`0.0%` (`26/26`)** · Red-Team holdout **`0.0%` (`24/24`)** (`npm run bench`) | 4-Layer fail-closed AST Gate (`AITEST-G101..G118`) + Sticky T1 MAC Governance Lock |
 | **Benign Refactoring FPR (Internal Corpus)** | **`0.0%` (`12/12`)** (Prettier wraps, locator renames, ARIA consolidation; `npm run bench`) | Full-file TypeScript Compiler API semantic AST comparison |
 | **Gate FPR (Real-World Unseen Holdout, `v6.0` Frozen Blind Eval, `n=50`, `seed=20261125`)** | **`6.1%` (`3/49` normal commits, Wilson 95% CI `[2.1%, 16.5%]`)**; raw alert rate `8.0%` (`4/50`, `1/1` TP retained); down 50% from v5.1.1's `12.2%` (`6/49`, CI `[5.7%, 24.2%]`) | Frozen first-run blind evaluation across 5 permissive OSS repos (preserved unmodified); see [v6 Holdout Summary](./bench/real-world/results/SUMMARY-v6-holdout.en.md) |
-| **Gate FPR (100-Commit Real-World Regression Corpus, `v6.3.0` Post-Hoc Re-Evaluation, `n=100`)** | Pilot **`4.2%` (`2/48`, CI `[1.2%, 14.0%]`)** · Holdout corpus post-hoc **`4.1%` (`2/49`, CI `[1.1%, 13.7%]`)** · Combined **`4.1%` (`4/97`, Wilson 95% CI `[1.6%, 10.1%]`, `3/3` TP retained)** (down from `5.2% (5/97)` in `v6.0..v6.2.1`); **`>=200` formal eval: `pending` (no extrapolation)** | AST Gate v2.2: cross-file title pooling + lexical scope stack + pre-existing `if`-block conservation (`G110`) + governance-locked `customMatchers` / structured domain matchers + fault-injection awareness ([ADR-0004](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.en.md)) |
-| **Agentic Red-Team Escape Rate (`FGER-agentic`)** | Scripted multi-step baseline (`n=18`, incl. Class E Dieselgate, `npm run bench:agentic`): **Local T1 `11.1%` (`2/18`, CI `[3.1%, 32.8%]` — only documented same-UID probes `AG-B4`/`AG-C4`)** · **CI T2 Merge-Grade `0.0%` (`0/18`, CI `[0.0%, 17.6%]`)** · `honest-fix` control `4/4` T2 pass; **live LLM runs (`claude`/`codex`/`gemini`): `pending` (adapters ready, no extrapolation)** | Isolated sandbox + hidden business oracles + Ephemeral Fulcio T2 CA; see [Red-Team Design](./bench/agentic/DESIGN.en.md) & [Baseline Summary](./bench/agentic/results/SUMMARY.en.md) |
+| **Gate FPR (100-Commit Real-World Regression Corpus, `v6.4.0` Post-Hoc Re-Evaluation, `n=100`)** | Pilot **`4.2%` (`2/48`, CI `[1.2%, 14.0%]`)** · Holdout corpus post-hoc **`4.1%` (`2/49`, CI `[1.1%, 13.7%]`)** · Combined **`4.1%` (`4/97`, Wilson 95% CI `[1.6%, 10.1%]`, `3/3` TP retained)** (down from `5.2% (5/97)` in `v6.0..v6.2.1`; `AITEST-G118` is zero-overhead when unconfigured); **`>=200` formal eval: `pending` (no extrapolation)** | AST Gate v2.2: cross-file title pooling + lexical scope stack + pre-existing `if`-block conservation (`G110`) + governance-locked `customMatchers` / structured domain matchers + fault-injection awareness ([ADR-0004](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.en.md)) |
+| **Agentic Red-Team Escape Rate (`FGER-agentic`)** | Scripted multi-step baseline (`n=22`, incl. Class E Dieselgate & Class F Parity/Copy/Cassette/Lockstep, `npm run bench:agentic`): **Local T1 `13.6%` (`3/22`, CI `[4.7%, 33.3%]` — only documented boundary probes `AG-B4`/`AG-C4`/`AG-F1`)** · **CI T2 Merge-Grade `0.0%` (`0/22`, CI `[0.0%, 14.9%]`)** · `honest-fix` control `4/4` T2 pass; **live LLM runs (`claude`/`codex`/`gemini`): `pending` (adapters ready, no extrapolation)** | Isolated sandbox + hidden business oracles + live Baseline `Parity-Oracle` + Ephemeral Fulcio T2 CA; see [Red-Team Design](./bench/agentic/DESIGN.en.md) & [Baseline Summary](./bench/agentic/results/SUMMARY.en.md) |
 | **Seeded-Defect Detection Rate (`SDDR`)** | Single demo target `demo-campus` **`100.0%` (`7/7`)** (`npm run bench`) | Zero-dep JSON Schema validator + RBAC/concurrency + WCAG 2.0/2.1/2.2 |
 | **Triage Accuracy / C→A Misclassification / Mis-Heal** | `45/45` internal + `12/12` real Playwright stacks: **`100%` · C→A `0.0%` · Mis-Heal `0.0%`** | Structured runtime guard signals + C-before-A precedence + tamper-evident healer |
 | **Secret Redaction Recall** | Internal adversarial corpus **`100.0%` (`35/35`)** (`npm run bench`) | Redaction v3 (structured parse-before-redact preserving `heal_*`/`job_*` IDs and boolean/number fields) |
@@ -49,7 +49,7 @@ Adopt T2 verification via [examples/workflows/use-aitest-verify.yml](./examples/
 ```yaml
 jobs:
   aitest-t2-verdict:
-    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.3.0
+    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.4.0
     permissions:
       id-token: write
       attestations: write
@@ -65,7 +65,7 @@ jobs:
 Verify a T2 attestation bundle offline (fail-closed by default: missing signature, T1-only MAC, digest tampering, or workflow identity mismatch exits non-zero with `trustLevel <= T1`):
 
 ```bash
-npx ai-test-workbench@6.3.0 attest verify \
+npx ai-test-workbench@6.4.0 attest verify \
   --file attestation.json \
   --bundle attestation.sigstore.json \
   --expect-repo owner/repo \
@@ -77,16 +77,16 @@ npx ai-test-workbench@6.3.0 attest verify \
 
 ---
 
-## 2. v6.3.0 Layered Architecture
+## 2. v6.4.0 Layered Architecture
 
-v6.3.0 builds on the acyclic four-layer core with a public `src/app/index.mjs` application facade, immutable `TrustContext`, and strict `<= 500` LOC module discipline across all `src/**/*.mjs` (see [ARCHITECTURE.en.md](./ARCHITECTURE.en.md) and [ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.en.md)):
+v6.4.0 builds on the acyclic four-layer core with the 5-checkpoint differential parity oracle (`src/kernel/diff-oracle.mjs` + `src/parity/`), zero-plaintext shape-fingerprint clustering, toolified memory loop (`src/memory/` + `src/learn.mjs`), `AITEST-G118` cross-directory lockstep gate, and Human Seam Gatekeeper Card, keeping every `src/**/*.mjs` strictly `<= 435` LOC (see [ARCHITECTURE.en.md](./ARCHITECTURE.en.md) and [ADR-0006](./docs/adr/0006-differential-parity-oracle-and-shape-fingerprints.en.md)):
 
 ```mermaid
 flowchart TB
     L4["Layer 4: Protocol & CLI — src/cli/ (CommandResult v2) · src/mcp/ (17 canonical tools + framed IPC jobs)"]
-    L3["Layer 3: App Facade & Domains — src/app/ · trust · explore · codemap · perf · verdict · heal · diagnose · impact · bootstrap"]
-    L2["Layer 2: Authoritative Kernel SSoT — src/kernel/ (target-guard · schema-validator · gate/ SymbolTable + G101..G117)"]
-    L1["Layer 1: Zero-Dep Core Leaves — src/core/ (version · outcome · config · redact v3 · glob · proc) · src/types/*.d.ts"]
+    L3["Layer 3: App Facade & Domains — src/app/ · parity · corpus · replay · memory · verdict/seam · heal · diagnose · impact · bootstrap"]
+    L2["Layer 2: Authoritative Kernel SSoT — src/kernel/ (target-guard · schema-validator · diff-oracle · gate/ SymbolTable + G101..G118)"]
+    L1["Layer 1: Zero-Dep Core Leaves — src/core/ (version · outcome · config · stream-sse · redact v3 · glob · proc) · src/types/*.d.ts"]
     TPL["Scaffold Distribution Mirror (one-way) — templates/playwright-qa/support/ (@generated + sha256 stamp)"]
 
     L4 --> L3 --> L2 --> L1
@@ -101,19 +101,19 @@ flowchart TB
 ### Requirements & Supply-Chain Security
 
 - **Node.js**: `>= 22.12.0` (`24 LTS` or `26 LTS` recommended) on Windows PowerShell (`pwsh`), macOS, or Linux.
-- **Zero Runtime Dependencies**: Root `package.json` carries zero runtime `dependencies`. Always invoke pinned `npx ai-test-workbench@6.3.0 <cmd>`, global short alias `aitw <cmd>` (`npm i -g ai-test-workbench@6.3.0`), or local source `node tools/aitest.mjs <cmd>`.
+- **Zero Runtime Dependencies**: Root `package.json` carries zero runtime `dependencies`. Always invoke pinned `npx ai-test-workbench@6.4.0 <cmd>`, global short alias `aitw <cmd>` (`npm i -g ai-test-workbench@6.4.0`), or local source `node tools/aitest.mjs <cmd>`.
 
 ### Register Native MCP Server (`stdio` / `/mcp` / `/sse`)
 
 - **Claude Code**:
   ```bash
-  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.3.0 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
+  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.4.0 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
   ```
 - **Codex CLI** (`.codex/config.toml`):
   ```toml
   [mcp_servers.ai-test-workbench]
   command = "npx"
-  args = ["--package=ai-test-workbench@6.3.0", "ai-test-workbench", "mcp-serve"]
+  args = ["--package=ai-test-workbench@6.4.0", "ai-test-workbench", "mcp-serve"]
   ```
 - **Cursor / Windsurf / Antigravity / Gemini CLI** (`.mcp.json`):
   ```json
@@ -121,14 +121,14 @@ flowchart TB
     "mcpServers": {
       "ai-test-workbench": {
         "command": "npx",
-        "args": ["--package=ai-test-workbench@6.3.0", "ai-test-workbench", "mcp-serve"]
+        "args": ["--package=ai-test-workbench@6.4.0", "ai-test-workbench", "mcp-serve"]
       }
     }
   }
   ```
 - **Streamable HTTP (`/mcp`) & Legacy SSE (`/sse`)**:
   ```bash
-  npx ai-test-workbench@6.3.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
+  npx ai-test-workbench@6.4.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
   ```
 
 ### Official MCP Conformance & 3-Transport Interoperability
@@ -142,19 +142,21 @@ flowchart TB
 
 ```bash
 # 1. Readiness check, initialization, and hash-safe template upgrades
-npx ai-test-workbench@6.3.0 doctor
-npx ai-test-workbench@6.3.0 init --name my-app --target "/path/to/your-repo" --loop codex
-npx ai-test-workbench@6.3.0 upgrade --target "/path/to/your-repo" --dry-run
+npx ai-test-workbench@6.4.0 doctor
+npx ai-test-workbench@6.4.0 init --name my-app --target "/path/to/your-repo" --loop codex
+npx ai-test-workbench@6.4.0 upgrade --target "/path/to/your-repo" --dry-run
 
 # 2. Session capture -> read-only exploration -> living code map -> pinned external MCPs
-npx ai-test-workbench@6.3.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
-npx ai-test-workbench@6.3.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
-npx ai-test-workbench@6.3.0 map --target "/path/to/your-repo"
-npx ai-test-workbench@6.3.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.3.0 mcp doctor --target "/path/to/your-repo" --lock
+npx ai-test-workbench@6.4.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
+npx ai-test-workbench@6.4.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
+npx ai-test-workbench@6.4.0 map --target "/path/to/your-repo"
+npx ai-test-workbench@6.4.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.4.0 mcp doctor --target "/path/to/your-repo" --lock
 
-# 3. Performance SLOs and one-call pre-merge verdict
-npx ai-test-workbench@6.3.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
-npx ai-test-workbench@6.3.0 verify-change --target "/path/to/your-repo" --base origin/main
+# 3. Performance SLOs, dual-target parity, memory distiller/sweeper, and one-call pre-merge verdict
+npx ai-test-workbench@6.4.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
+npx ai-test-workbench@6.4.0 parity --target "/path/to/your-repo" --baseline-url http://127.0.0.1:4100 --candidate-url http://127.0.0.1:4200 --privacy-mode shape-only
+npx ai-test-workbench@6.4.0 learn --target "/path/to/your-repo" --action distill --json
+npx ai-test-workbench@6.4.0 verify-change --target "/path/to/your-repo" --base origin/main
 ```
 
 Reproduce the full repository gate locally (zero external servers):
@@ -188,7 +190,7 @@ The table below is auto-generated from `src/mcp/registry.mjs` by `scripts/genera
 | `aitest_audit` | Verification & Gates | Yes | Run 4-Layer Fail-Closed Anti-Fake-Green Quality Gate |
 | `aitest_diagnose` | Verification & Gates | No | Generate Redacted Evidence-First A/B/C/D Diagnostics Report |
 | `aitest_perf` | Verification & Gates | No | Run PerformanceObserver Web Vitals & Read-Only API SLO Benchmark |
-| `aitest_report` | Verification & Gates | Yes | Query Reports Index, Flaky Telemetry & Requirement Traceability |
+| `aitest_report` | Verification & Gates | Yes | Query Reports Index, Flaky Telemetry, Traceability & Lessons |
 | `aitest_parity` | Verification & Gates | No | Run Dual-Target 5-Checkpoint Differential Parity Oracle |
 | `aitest_heal` | Stateful Control | No | Stateful A/B/C/D Heal Governance State Machine (begin \| attempt \| conclude \| discard) |
 | `aitest_job` | Stateful Control | No | Inspect, Await, or Cancel Async Background MCP Jobs (status \| result \| cancel) |

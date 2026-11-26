@@ -16,6 +16,8 @@ import { computeDiagnosticFingerprint } from './fingerprint.mjs';
  *   minimalDurationMs: number;
  *   testIds: string[];
  *   unmaskedAfterFixOf: string | null;
+ *   linkedKnownBlockerId?: string | null;
+ *   knownBlockerReason?: string | null;
  * }} DiagnosticCluster
  */
 
@@ -164,7 +166,8 @@ export function formatClustersMarkdown(clusters) {
     '|---|---|---:|---|---:|---|---|',
   ];
   for (const c of clusters) {
-    const sig = c.summarySignature.replace(/\|/g, '\\|').slice(0, 80);
+    const blockerTag = c.linkedKnownBlockerId ? `[Known Blocker: ${c.linkedKnownBlockerId}] ` : '';
+    const sig = `${blockerTag}${c.summarySignature}`.replace(/\|/g, '\\|').slice(0, 96);
     lines.push(
       `| \`${c.fingerprintId}\` | **${c.categoryCode}** | ${c.count} | \`${c.routePattern}\` | \`${c.minimalReproducerSpec}\` (${c.minimalDurationMs}ms) | ${c.unmaskedAfterFixOf ? `\`${c.unmaskedAfterFixOf}\`` : '-'} | ${sig} |`
     );

@@ -20,6 +20,7 @@ import {
 import { correlateFailureWithFrontendDiff } from './diagnose/diff-correlator.mjs';
 import { computeDiagnosticFingerprint } from './diagnose/fingerprint.mjs';
 import { classifyFailureRegressionHistory, createRegressionHistoryClassifier } from './diagnose/history.mjs';
+import { annotateDiagnosedWithKnownBlockers } from './memory/blockers.mjs';
 
 export {
   classifyFailureRegressionHistory,
@@ -43,6 +44,8 @@ export {
  *   status: string,
  *   durationMs?: number,
  *   fingerprintId?: string,
+ *   linkedKnownBlockerId?: string | null,
+ *   knownBlockerReason?: string | null,
  *   regressionHistory: import('./diagnose/history.mjs').RegressionHistoryKind,
  *   categoryCode: string,
  *   subCategory?: string | null,
@@ -344,6 +347,7 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath, options = {}) {
     qaDir,
     previousClusters: options.previousClusters,
   });
+  annotateDiagnosedWithKnownBlockers(qaDir, diagnosedFailures, clusters);
   lines.push(...formatClustersMarkdown(clusters), ...detailLines);
 
   return { failureCount: failures.length, failures: diagnosedFailures, clusters, markdown: lines.join('\n') + '\n' };

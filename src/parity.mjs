@@ -27,6 +27,7 @@ export { buildParityMarkdown, loadParityRequests, resolveParityPolicy, validateD
  *   concurrency?: number;
  *   maxLatencyRatio?: number;
  *   maxTtftRatio?: number;
+ *   allowMutation?: boolean;
  *   dryRun?: boolean;
  *   json?: boolean;
  * }} [options]
@@ -73,7 +74,9 @@ export async function runParityCore(options = {}) {
     };
   }
 
-  const safety = validateDualTargetSafety(qaDir, baselineUrl, candidateUrl);
+  const safety = validateDualTargetSafety(qaDir, baselineUrl, candidateUrl, {
+    ...(options.allowMutation !== undefined ? { allowMutation: options.allowMutation } : {}),
+  });
   if (!safety.ok || !safety.baseGuard || !safety.candGuard) {
     return {
       ok: false,

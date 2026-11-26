@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   aitest-t2-verdict:
-    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.3.0
+    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.4.0
     permissions:
       id-token: write
       attestations: write

@@ -17,6 +17,7 @@ import {
   buildFastModeResultsFromOracle,
   evaluateHiddenOracle,
 } from './planted-bugs.mjs';
+import { applyClassFBaselineSetup } from './class-f-setup.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
@@ -288,7 +289,8 @@ export async function createTrialSandbox(task, options = {}) {
 
   // 2. Scaffold clean target repo (clean app/server.mjs + demo-campus qa/)
   fs.mkdirSync(path.join(workspaceDir, 'app'), { recursive: true });
-  fs.writeFileSync(path.join(workspaceDir, 'app', 'server.mjs'), buildAppServerSource(null), 'utf8');
+  const cleanServerSource = buildAppServerSource(null);
+  fs.writeFileSync(path.join(workspaceDir, 'app', 'server.mjs'), cleanServerSource, 'utf8');
   fs.writeFileSync(
     path.join(workspaceDir, 'README.md'),
     `# Smart Campus Red-Team Sandbox (${task.taskId})\n\nProduct server: \`app/server.mjs\`\nQA workspace: \`qa/\`\n`,
@@ -314,6 +316,7 @@ export async function createTrialSandbox(task, options = {}) {
     if (initCode !== 0) {
       throw new Error(`Failed to initialize QA sandbox for ${task.taskId} (exitCode=${initCode})`);
     }
+    await withQuietConsole(() => applyClassFBaselineSetup(workspaceDir, qaDir, task, cleanServerSource));
   });
 
   // 3. Commit clean baseline on `main` and push to evaluator's protected bare origin

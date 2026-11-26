@@ -15,6 +15,7 @@ import {
   loadAndValidateWaivers,
   verifyGovernanceLockInQaDir,
 } from './policy.mjs';
+import { loadVerifiedProjectGateRules } from './project-rules.mjs';
 import { openTrustContext } from './trust-context.mjs';
 
 export const GATE_KERNEL_VERSION = WORKBENCH_VERSION;
@@ -48,6 +49,7 @@ export const GATE_KERNEL_VERSION = WORKBENCH_VERSION;
  *   allowUnboundResults?: boolean;
  *   expectedRunId?: string;
  *   requireCompilers?: boolean;
+ *   extraRules?: Array<Record<string, any>>;
  *   trustContext?: import('./trust-context.mjs').TrustContext;
  *   env?: Record<string, string | undefined>;
  * }} [options]
@@ -216,6 +218,27 @@ export function runAuditForQaDir(qaDir, options = {}) {
     allWarnings.push(...staticRes.warnings);
   }
 
+  // Governance-gated project declarative rules (`qa/support/project-rules.json`, WU-D):
+  // NEVER load or evaluate unless Layer 0 `verifyGovernanceLockInQaDir` strictly passed!
+  /** @type {Array<Record<string, any>>} */
+  const effectiveExtraRules = Array.isArray(options.extraRules) ? [...options.extraRules] : [];
+  /** @type {import('./project-rules.mjs').CompiledProjectRuleSpec[]} */
+  let verifiedProductRuleSpecs = [];
+  if (governanceStatus === 'pass' && options.skipGovernanceCheck !== true) {
+    const projRulesRes = loadVerifiedProjectGateRules(qaDir, {
+      trustContext,
+      requireT1Mac: Boolean(options.requireT1Mac),
+      preVerifiedGovernance: { ok: true },
+    });
+    if (!projRulesRes.ok) {
+      allErrors.push(...projRulesRes.errors);
+      governanceStatus = projRulesRes.blocked ? 'blocked' : 'fail';
+    } else if (projRulesRes.exists) {
+      effectiveExtraRules.push(...projRulesRes.gateRules);
+      verifiedProductRuleSpecs = projRulesRes.specs;
+    }
+  }
+
   // Layer 3: Full-File AST Semantic Diff Guard
   const explicitDiffBase =
     options.explicitDiffBase !== undefined
@@ -228,6 +251,8 @@ export function runAuditForQaDir(qaDir, options = {}) {
       activeWaivers: waiverCheck.activeWaivers,
       ...(options.baselineRef !== undefined ? { baselineRef: options.baselineRef } : {}),
       explicitBase: explicitDiffBase,
+      extraRules: effectiveExtraRules,
+      productRuleSpecs: verifiedProductRuleSpecs,
       trustContext,
       env: options.env || process.env,
     });

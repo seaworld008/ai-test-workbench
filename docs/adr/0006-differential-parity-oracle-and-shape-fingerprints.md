@@ -2,7 +2,7 @@
 
 > [English Version](./0006-differential-parity-oracle-and-shape-fingerprints.en.md) · [简体中文主文档](../../README.md) · [系统架构](../../ARCHITECTURE.md) · [演进路线图](../review/v6.4-differential-verification-and-memory-loop-roadmap.md)
 
-- **状态**：已采纳（Accepted，Round 1 内核与工具面已落地）
+- **状态**：已采纳（Accepted，`v6.4.0` Round 1 + Round 2 全量内核、记忆循环、`AITEST-G118` 与人类守门员焦点卡已落地）
 - **决策日期**：`2026-11-26`
 
 ---

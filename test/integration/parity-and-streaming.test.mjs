@@ -8,7 +8,8 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { runCli } from '../../src/cli.mjs';
 import { handleMcpJsonRpcMessage } from '../../src/mcp-server.mjs';
-import { loadParityRequests, runParityCommand, runParityCore } from '../../src/parity.mjs';
+import { loadParityRequests, runParityCommand, runParityCore, validateDualTargetSafety } from '../../src/parity.mjs';
+import { checkOutgoingRequestSafety } from '../../src/origin-guard.mjs';
 import { runPerfCommand } from '../../src/perf.mjs';
 import {
   computeRequestShapeHash,
@@ -284,6 +285,50 @@ test('Dual-target parity executes 100 mixed JSON + SSE samples in < 1.0s, catche
     assert.equal(prodBlocked.ok, false);
     assert.equal(prodBlocked.outcome, 'blocked');
     assert.equal(prodBlocked.exitCode, 2);
+
+    // 3b. Non-loopback shared staging environment defaults to strictReadonly=true (blocks POST),
+    //     while explicit allowMutation=true unlocks POST on both baseline & candidate guards!
+    const stagingQa = makeTempDir('aitest-parity-staging-');
+    try {
+      fs.writeFileSync(
+        path.join(stagingQa, '.env'),
+        'TEST_ENV=staging\nTEST_ALLOWED_HOSTS=baseline.staging.internal,candidate.staging.internal\n',
+        'utf8'
+      );
+      const defaultSafety = validateDualTargetSafety(
+        stagingQa,
+        'https://baseline.staging.internal',
+        'https://candidate.staging.internal'
+      );
+      assert.equal(defaultSafety.ok, true);
+      assert.equal(defaultSafety.baseGuard?.strictReadonly, true, 'Non-loopback shared staging must default strictReadonly=true');
+      assert.equal(defaultSafety.candGuard?.strictReadonly, true);
+      assert.equal(
+        checkOutgoingRequestSafety('POST', 'https://candidate.staging.internal/api/orders', defaultSafety.candGuard).blocked,
+        true,
+        'POST write request against shared staging must be blocked when allowMutation is omitted'
+      );
+      assert.equal(
+        checkOutgoingRequestSafety('GET', 'https://candidate.staging.internal/api/courses', defaultSafety.candGuard).blocked,
+        false
+      );
+
+      const mutSafety = validateDualTargetSafety(
+        stagingQa,
+        'https://baseline.staging.internal',
+        'https://candidate.staging.internal',
+        { allowMutation: true }
+      );
+      assert.equal(mutSafety.ok, true);
+      assert.equal(mutSafety.baseGuard?.strictReadonly, false, 'Explicit allowMutation=true unlocks write requests');
+      assert.equal(mutSafety.candGuard?.strictReadonly, false);
+      assert.equal(
+        checkOutgoingRequestSafety('POST', 'https://candidate.staging.internal/api/orders', mutSafety.candGuard).blocked,
+        false
+      );
+    } finally {
+      fs.rmSync(stagingQa, { recursive: true, force: true });
+    }
 
     // 4. MCP tool `aitest_parity` end-to-end call (with explicit config normalizePaths for `$.requestId`) & path boundary block
     const cfgPath = path.join(qaDir, 'aitest.config.json');

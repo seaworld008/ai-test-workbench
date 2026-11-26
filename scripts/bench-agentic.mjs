@@ -55,8 +55,8 @@ function printHelp() {
 
 Options:
   --adapter <name>      scripted (default) | honest-fix | honest-report | claude | codex | gemini | custom
-  --tasks <ids>         Comma-separated task IDs (e.g. AG-A1,AG-B4,AG-C4)
-  --class <A|B|C|D|E>   Filter by attack class
+  --tasks <ids>         Comma-separated task IDs (e.g. AG-A1,AG-B4,AG-C4,AG-F1)
+  --class <A|B|C|D|E|F> Filter by attack class
   --prompt-tier <tier>  benign-pressure | adversarial-redteam
   --threat-tier <tier>  L1 | L2 | L3
   --trials <n>          Trials per task (default: 1)

@@ -234,7 +234,7 @@ export async function verifyChangeCore(options = {}) {
 
   // Step 5: Structured Diagnostics on Failures
   const resultsPath = path.join(qaDir, 'reports', 'results.json');
-  /** @type {Array<{ testId: string, title: string, file: string, line: number, categoryCode: string, category: string, confidence: string, candidates: string[], traceId: string | null, traceIds: string[], errorSnippet: string, evidence: string | null }>} */
+  /** @type {Array<{ testId: string, title: string, file: string, line: number, categoryCode: string, category: string, confidence: string, candidates: string[], traceId: string | null, traceIds: string[], errorSnippet: string, evidence: string | null, linkedKnownBlockerId?: string | null, knownBlockerReason?: string | null }>} */
   let diagFailures = [];
   if (fs.existsSync(resultsPath)) {
     const diag = generateDiagnosticsMarkdown(qaDir, resultsPath);
@@ -244,6 +244,7 @@ export async function verifyChangeCore(options = {}) {
       categoryCode: f.categoryCode, category: f.category, confidence: f.confidence,
       candidates: f.candidates, traceId: f.traceId, traceIds: f.traceIds,
       errorSnippet: f.errorSnippet, evidence: evUri,
+      ...(f.linkedKnownBlockerId ? { linkedKnownBlockerId: f.linkedKnownBlockerId, knownBlockerReason: f.knownBlockerReason || null } : {}),
     }));
     fs.writeFileSync(path.join(qaDir, 'reports', 'ai-diagnostics.md'), diag.markdown, 'utf8');
   }
@@ -320,10 +321,7 @@ export async function verifyChangeCore(options = {}) {
     trustTier,
     trustLevel: trustTier,
     mergeGradeGreen: trustDef.mergeGradeGreen && verdictStatus === 'pass',
-    trustLevelDefinition: {
-      zh: trustDef.zh,
-      en: trustDef.en,
-    },
+    trustLevelDefinition: { zh: trustDef.zh, en: trustDef.en },
     confidence: {
       level: trustTier === 'T2' ? 'high' : trustTier === 'T1' && runOut.acceptanceScope === 'business-e2e' ? 'medium-high' : 'medium',
       reasons: confidenceReasons,
@@ -357,11 +355,7 @@ export async function verifyChangeCore(options = {}) {
       lockDigest: auditOut.evidence?.lockDigest || null,
       ledgerMac: auditOut.evidence?.ledgerMac || null,
     },
-    ai: {
-      llmCalls: 0,
-      models: [],
-      promptHashes: [],
-    },
+    ai: { llmCalls: 0, models: [], promptHashes: [] },
     failures: diagFailures,
     traceability: {
       coveredRequirements: traceMatrix.coveredRequirements,
@@ -371,21 +365,12 @@ export async function verifyChangeCore(options = {}) {
     nextActions,
   };
 
-  // Step 8: Write in-toto Statement v1 Attestation, PR Markdown Summary & SARIF 2.1.0
-  const artifacts = writeVerdictArtifacts({
-    qaDir,
-    repoDir,
-    lang,
-    verdictPayload,
-    treeDigest,
-    auditOut,
-    gateKernelVersion: GATE_KERNEL_VERSION,
+  // Step 8: Write Human Seam Gatekeeper Card, in-toto Statement v1 Attestation, PR Markdown Summary & SARIF 2.1.0
+  const { seamReview, ...artifactPaths } = writeVerdictArtifacts({
+    qaDir, repoDir, lang, baseResolution, verdictPayload, treeDigest, auditOut, gateKernelVersion: GATE_KERNEL_VERSION,
   });
 
-  return {
-    ...verdictPayload,
-    artifacts,
-  };
+  return { ...verdictPayload, seamReview, artifacts: artifactPaths };
 }
 
 /**

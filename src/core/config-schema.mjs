@@ -23,6 +23,7 @@ export const DEFAULT_CONFIG_PROTECTED_GLOBS = Object.freeze([
   'tests/fixtures/base.ts',
   'corpus/**',
   'fixtures/upstream-cassettes/**',
+  'known-blockers.json',
 ]);
 
 export const RESERVED_WEAK_MATCHERS = Object.freeze(
@@ -48,6 +49,24 @@ const FORBIDDEN_UPSTREAM_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1
 
 /**
  * @typedef {{
+ *   id: string;
+ *   whenModified: string[];
+ *   requireModified: string[];
+ *   allowWaiver?: boolean;
+ * }} LockstepRuleConfig
+ *
+ * @typedef {{
+ *   id: string;
+ *   code?: string;
+ *   title?: string;
+ *   pattern: string;
+ *   flags?: string;
+ *   scope?: 'all' | 'product' | 'specs';
+ *   fileGlobs?: string[];
+ *   remediation?: string;
+ * }} MemoryPatternConfig
+ *
+ * @typedef {{
  *   normalizePaths?: string[];
  *   strictByteEscape?: boolean;
  *   maxLatencyRatio?: number;
@@ -67,6 +86,8 @@ const FORBIDDEN_UPSTREAM_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1
  *   customMatchers: Record<string, number>;
  *   parity?: ParityConfig;
  *   replayAllowedUpstreamHosts: string[];
+ *   lockstepRules: LockstepRuleConfig[];
+ *   memoryPatterns: MemoryPatternConfig[];
  *   _configError?: string;
  *   _configErrors?: string[];
  *   [key: string]: unknown;
@@ -90,6 +111,8 @@ export const DEFAULT_AITEST_CONFIG = Object.freeze({
   rules: {},
   customMatchers: {},
   replayAllowedUpstreamHosts: [],
+  lockstepRules: [],
+  memoryPatterns: [],
 });
 
 /** @returns {NormalizedAitestConfig} */
@@ -100,6 +123,8 @@ export function createDefaultAitestConfig() {
     rules: {},
     customMatchers: {},
     replayAllowedUpstreamHosts: [],
+    lockstepRules: [],
+    memoryPatterns: [],
   };
 }
 
@@ -184,8 +209,8 @@ export function validateAitestConfigObject(raw) {
       errors.push('aitest.config.json "rules" must be an object mapping rule codes (e.g. AITEST-G114) to boolean or { enabled, severity }.');
     } else {
       for (const [code, val] of Object.entries(/** @type {Record<string, unknown>} */ (obj.rules))) {
-        if (!/^(?:AITEST-G(?:10[1-9]|11[0-7]))$/.test(code)) {
-          errors.push(`aitest.config.json "rules.${code}" is not a valid rule code (expected AITEST-G101..G117).`);
+        if (!/^(?:AITEST-G(?:10[1-9]|11[0-8]))$/.test(code)) {
+          errors.push(`aitest.config.json "rules.${code}" is not a valid rule code (expected AITEST-G101..G118).`);
           continue;
         }
         if (typeof val === 'boolean') continue;
@@ -264,6 +289,79 @@ export function validateAitestConfigObject(raw) {
     }
   }
 
+  /** @type {LockstepRuleConfig[]} */
+  const lockstepRules = [];
+  if (obj.lockstepRules !== undefined) {
+    if (!Array.isArray(obj.lockstepRules)) {
+      errors.push('aitest.config.json "lockstepRules" must be an array of { id, whenModified, requireModified, allowWaiver? }.');
+    } else {
+      obj.lockstepRules.forEach((rawRule, idx) => {
+        const label = `aitest.config.json "lockstepRules[${idx}]"`;
+        if (!rawRule || typeof rawRule !== 'object' || Array.isArray(rawRule)) {
+          errors.push(`${label} must be an object.`);
+          return;
+        }
+        const lr = /** @type {Record<string, unknown>} */ (rawRule);
+        const idOk = typeof lr.id === 'string' && lr.id.trim().length > 0;
+        const whenOk = Array.isArray(lr.whenModified) && lr.whenModified.length > 0 && lr.whenModified.every((g) => typeof g === 'string' && g.trim().length > 0);
+        const reqOk = Array.isArray(lr.requireModified) && lr.requireModified.length > 0 && lr.requireModified.every((g) => typeof g === 'string' && g.trim().length > 0);
+        if (!idOk) errors.push(`${label}.id must be a non-empty string.`);
+        if (!whenOk) errors.push(`${label}.whenModified must be a non-empty array of glob strings.`);
+        if (!reqOk) errors.push(`${label}.requireModified must be a non-empty array of glob strings.`);
+        if (lr.allowWaiver !== undefined && typeof lr.allowWaiver !== 'boolean') {
+          errors.push(`${label}.allowWaiver must be a boolean.`);
+        }
+        if (idOk && whenOk && reqOk && (lr.allowWaiver === undefined || typeof lr.allowWaiver === 'boolean')) {
+          lockstepRules.push({
+            id: /** @type {string} */ (lr.id).trim(),
+            whenModified: /** @type {string[]} */ (lr.whenModified).map((s) => s.trim()),
+            requireModified: /** @type {string[]} */ (lr.requireModified).map((s) => s.trim()),
+            ...(lr.allowWaiver !== undefined ? { allowWaiver: lr.allowWaiver } : {}),
+          });
+        }
+      });
+    }
+  }
+
+  /** @type {MemoryPatternConfig[]} */
+  const memoryPatterns = [];
+  if (obj.memoryPatterns !== undefined) {
+    if (!Array.isArray(obj.memoryPatterns)) {
+      errors.push('aitest.config.json "memoryPatterns" must be an array of { id, pattern, ... }.');
+    } else {
+      obj.memoryPatterns.forEach((rawPat, idx) => {
+        const label = `aitest.config.json "memoryPatterns[${idx}]"`;
+        if (!rawPat || typeof rawPat !== 'object' || Array.isArray(rawPat)) {
+          errors.push(`${label} must be an object.`);
+          return;
+        }
+        const mp = /** @type {Record<string, unknown>} */ (rawPat);
+        const idOk = typeof mp.id === 'string' && mp.id.trim().length > 0;
+        const patOk = typeof mp.pattern === 'string' && mp.pattern.trim().length > 0;
+        if (!idOk) errors.push(`${label}.id must be a non-empty string.`);
+        if (!patOk) errors.push(`${label}.pattern must be a non-empty regex string.`);
+        if (mp.scope !== undefined && !['all', 'product', 'specs'].includes(String(mp.scope))) {
+          errors.push(`${label}.scope must be "all", "product", or "specs".`);
+        }
+        if (mp.fileGlobs !== undefined && (!Array.isArray(mp.fileGlobs) || !mp.fileGlobs.every((g) => typeof g === 'string' && g.trim().length > 0))) {
+          errors.push(`${label}.fileGlobs must be an array of non-empty strings.`);
+        }
+        if (idOk && patOk) {
+          memoryPatterns.push({
+            id: /** @type {string} */ (mp.id).trim(),
+            ...(typeof mp.code === 'string' ? { code: mp.code.trim() } : {}),
+            ...(typeof mp.title === 'string' ? { title: mp.title.trim() } : {}),
+            pattern: /** @type {string} */ (mp.pattern),
+            ...(typeof mp.flags === 'string' ? { flags: mp.flags } : {}),
+            ...(mp.scope === 'all' || mp.scope === 'product' || mp.scope === 'specs' ? { scope: mp.scope } : {}),
+            ...(Array.isArray(mp.fileGlobs) ? { fileGlobs: /** @type {string[]} */ (mp.fileGlobs) } : {}),
+            ...(typeof mp.remediation === 'string' ? { remediation: mp.remediation } : {}),
+          });
+        }
+      });
+    }
+  }
+
   const rawNames = Array.isArray(obj.assertFunctionNames) ? /** @type {string[]} */ (obj.assertFunctionNames) : [...DEFAULT_AITEST_CONFIG.assertFunctionNames];
   const rawCriticalTags = Array.isArray(obj.criticalTags) ? /** @type {string[]} */ (obj.criticalTags) : [...DEFAULT_AITEST_CONFIG.criticalTags];
   const govObj = obj.governance && typeof obj.governance === 'object' && !Array.isArray(obj.governance) ? /** @type {Record<string, unknown>} */ (obj.governance) : {};
@@ -298,6 +396,8 @@ export function validateAitestConfigObject(raw) {
       customMatchers: customMatchersObj,
       ...(parityCfg ? { parity: parityCfg } : {}),
       replayAllowedUpstreamHosts: replayHosts,
+      lockstepRules,
+      memoryPatterns,
     },
   };
 }

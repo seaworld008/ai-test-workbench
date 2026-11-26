@@ -62,6 +62,16 @@ export {
   runInit,
   unregisterStackDescriptor,
 } from '../init.mjs';
+export {
+  annotateDiagnosedWithKnownBlockers,
+  collectLessonsReport,
+  distillMemoryProposals,
+  loadKnownBlockers,
+  matchKnownBlocker,
+  parseReviewCommentsFile,
+  runLearnCommand,
+  runRetroactiveSweep,
+} from '../learn.mjs';
 export { beginRunLedger, finalizeRunLedger, readJsonlTail, readLedgerHistory, resolveGitHeadSha } from '../ledger.mjs';
 export { TOOL_REGISTRY } from '../mcp/registry.mjs';
 export { handleMcpJsonRpcMessage } from '../mcp-server.mjs';
@@ -81,6 +91,7 @@ export { computeDssePae, GITHUB_ACTIONS_OIDC_ISSUER } from '../trust/der-x509.mj
 export { INTOTO_STATEMENT_TYPE, VERDICT_PREDICATE_TYPE } from '../trust/intoto.mjs';
 export { runUpgradeCommand, upgradeQaWorkspace } from '../upgrade.mjs';
 export { checkHealSessionConflicts, runVerifyChangeCommand, verifyChangeCore } from '../verdict.mjs';
+export { buildSeamGatekeeperCard, detectSuspectedShortcuts, extractS5LiteralShifts, renderSeamGatekeeperMarkdown } from '../verdict/seam-card.mjs';
 export {
   DEFAULT_NORMALIZE_PATHS,
   GATE_KERNEL_VERSION,
@@ -92,6 +103,8 @@ export {
   computeDomainHmac,
   computeShapeFingerprint,
   computeWorkspaceInputHash,
+  evaluateLockstepRules,
+  loadVerifiedProjectGateRules,
   openTrustContext,
   resolveDefaultDiffBase,
   resolveGitHeadAndTreeSha,
