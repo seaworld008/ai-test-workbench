@@ -24,6 +24,7 @@ import {
   resolveVerdictTrustTier,
 } from './trust.mjs';
 import { buildBlockedVerdict } from './verdict/blocked.mjs';
+import { runVerdictParityHook } from './verdict/parity-hook.mjs';
 import {
   buildPrVerdictMarkdown,
   buildSarifReport,
@@ -55,10 +56,8 @@ export async function verifyChangeCore(options = {}) {
 
   const repoDir = target === qaDir ? path.dirname(qaDir) : target;
   const rawMode = String(options.mode || options.suite || 'impact').toLowerCase();
-  const requestedMode = ['full', 'all', 'smoke', 'impact', 'e2e', 'api', 'a11y', 'critical'].includes(rawMode)
-    ? rawMode === 'all'
-      ? 'full'
-      : rawMode
+  const requestedMode = ['full', 'all', 'smoke', 'impact', 'e2e', 'api', 'a11y', 'critical', 'parity'].includes(rawMode)
+    ? rawMode === 'all' ? 'full' : rawMode
     : 'impact';
 
   const workbenchConfig = loadWorkbenchConfig({ qaDir, repoDir });
@@ -221,9 +220,17 @@ export async function verifyChangeCore(options = {}) {
     trustContext: auditTrustContext,
   });
 
-  // Step 4b: Check Heal Session Conflicts (`T-07`)
+  // Step 4b: Check Heal Session Conflicts (`T-07`) & optional Differential Parity Oracle (`WU-A`)
   const healCheck = checkHealSessionConflicts(qaDir, baseResolution, auditTrustContext);
-  const combinedGateErrors = [...auditOut.errors, ...healCheck.errors];
+  const parityCheck = await runVerdictParityHook({
+    target,
+    qaDir: options.qaDir,
+    lang,
+    requestedMode,
+    effectiveBaseUrl,
+    options,
+  });
+  const combinedGateErrors = [...auditOut.errors, ...healCheck.errors, ...(parityCheck?.errors || [])];
 
   // Step 5: Structured Diagnostics on Failures
   const resultsPath = path.join(qaDir, 'reports', 'results.json');
@@ -231,19 +238,12 @@ export async function verifyChangeCore(options = {}) {
   let diagFailures = [];
   if (fs.existsSync(resultsPath)) {
     const diag = generateDiagnosticsMarkdown(qaDir, resultsPath);
+    const evUri = runOut.runId ? `aitest://project/${encodeURIComponent(target)}/diagnostics` : null;
     diagFailures = diag.failures.map((f) => ({
-      testId: f.testId,
-      title: f.title,
-      file: f.file,
-      line: f.line,
-      categoryCode: f.categoryCode,
-      category: f.category,
-      confidence: f.confidence,
-      candidates: f.candidates,
-      traceId: f.traceId,
-      traceIds: f.traceIds,
-      errorSnippet: f.errorSnippet,
-      evidence: runOut.runId ? `aitest://project/${encodeURIComponent(target)}/diagnostics` : null,
+      testId: f.testId, title: f.title, file: f.file, line: f.line,
+      categoryCode: f.categoryCode, category: f.category, confidence: f.confidence,
+      candidates: f.candidates, traceId: f.traceId, traceIds: f.traceIds,
+      errorSnippet: f.errorSnippet, evidence: evUri,
     }));
     fs.writeFileSync(path.join(qaDir, 'reports', 'ai-diagnostics.md'), diag.markdown, 'utf8');
   }
@@ -252,13 +252,15 @@ export async function verifyChangeCore(options = {}) {
   const traceMatrix = buildRequirementTraceMatrix(qaDir);
 
   // Step 7: Strict 3-State Verdict (`pass | fail | blocked`) — NEVER turn `skipped`/`blocked` into `pass`!
-  const gateValues = Object.values(auditOut.gates || {});
-  const hasBlockedGate = auditOut.outcome === 'blocked' || gateValues.includes('blocked') || !healCheck.ok;
+  const effectiveGates = parityCheck ? { ...auditOut.gates, parity: parityCheck.gateStatus } : auditOut.gates;
+  const gateValues = Object.values(effectiveGates || {});
+  const hasBlockedGate = auditOut.outcome === 'blocked' || gateValues.includes('blocked') || !healCheck.ok || Boolean(parityCheck?.blocked);
   const hasRequiredSkippedGate = !allowNonGit && gateValues.includes('skipped');
   const allPassed =
     runOut.exitCode === 0 &&
     auditOut.ok &&
     healCheck.ok &&
+    (!parityCheck || parityCheck.ok) &&
     !hasBlockedGate &&
     !hasRequiredSkippedGate;
 
@@ -346,8 +348,9 @@ export async function verifyChangeCore(options = {}) {
       total: impact.totalSpecsCount ?? impact.specs.length,
       why: impact.why || [],
     },
-    gates: auditOut.gates,
+    gates: effectiveGates,
     gateErrors: combinedGateErrors,
+    ...(parityCheck?.paritySummary ? { paritySummary: parityCheck.paritySummary } : {}),
     evidence: {
       treeDigest,
       resultsDigest: auditOut.evidence?.resultsDigest || null,

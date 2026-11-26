@@ -45,10 +45,11 @@ When connected via `node tools/aitest.mjs mcp-serve` (or pinned `npx --package=a
 | `aitest_diagnose` | Verification & Gates | No | Generate Redacted Evidence-First A/B/C/D Diagnostics Report |
 | `aitest_perf` | Verification & Gates | No | Run PerformanceObserver Web Vitals & Read-Only API SLO Benchmark |
 | `aitest_report` | Verification & Gates | Yes | Query Reports Index, Flaky Telemetry & Requirement Traceability |
+| `aitest_parity` | Verification & Gates | No | Run Dual-Target 5-Checkpoint Differential Parity Oracle |
 | `aitest_heal` | Stateful Control | No | Stateful A/B/C/D Heal Governance State Machine (begin \| attempt \| conclude \| discard) |
 | `aitest_job` | Stateful Control | No | Inspect, Await, or Cancel Async Background MCP Jobs (status \| result \| cancel) |
 
-> Auto-generated from `src/mcp/registry.mjs` (`16` canonical tools; `governance approve` is human-CLI-only and never registered; 8 legacy v5/v6.1 tool names remain as deprecated forwarding aliases in `v6.x`, see `docs/upgrade.en.md`).
+> Auto-generated from `src/mcp/registry.mjs` (`17` canonical tools; `governance approve` is human-CLI-only and never registered; 8 legacy v5/v6.1 tool names remain as deprecated forwarding aliases in `v6.x`, see `docs/upgrade.en.md`).
 <!-- END:GENERATED_MCP_TOOLS -->
 
 ## 3. Tool-Enforced Stateful Healer (`aitest_heal`)

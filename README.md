@@ -4,7 +4,7 @@
 
 **面向 AI 编码 Agent 的独立可信验证内核与原生多协议 MCP 服务端**
 
-提供 **四层 fail-closed AST 防假绿门禁 (`S0–S5` + `AITEST-G101..G117` + 跨文件符号表 + Dieselgate 防护)** · **一键变更判决 (`verify-change` · in-toto v1 + `T0/T1/T2`)** · **原生零依赖 MCP 服务端 (`stdio` / `/mcp` / `/sse` · 16 权威工具 · 帧化子进程 IPC)** · **不可变 `TrustContext` 与粘性 T1** · **全自动零阻塞回环自举 (`aitest_bootstrap`)** · **只读站点探索与接口 Schema 推断** · **真实 `PerformanceObserver` Web Vitals**
+提供 **四层 fail-closed AST 防假绿门禁 (`S0–S5` + `AITEST-G101..G117` + 跨文件符号表 + Dieselgate 防护)** · **一键变更判决 (`verify-change` · in-toto v1 + `T0/T1/T2`)** · **双目标五级检查点差分先知 (`aitest_parity` + 零明文形状指纹)** · **原生零依赖 MCP 服务端 (`stdio` / `/mcp` / `/sse` · 17 权威工具 · 帧化子进程 IPC)** · **不可变 `TrustContext` 与粘性 T1** · **全自动零阻塞回环自举 (`aitest_bootstrap`)** · **只读站点探索与联合 Schema 推断** · **真实 `PerformanceObserver` Web Vitals 与 SSE `TTFT`**
 
 [English README](./README.en.md) · [v5→v6 升级指南](./docs/upgrade.md) · [治理与四层门禁](./docs/governance.md) · [AI Agent 快速上手](./docs/ai-agent-quickstart.md) · [AGENTS.md](./AGENTS.md) · [系统架构](./ARCHITECTURE.md) · [v6 重构评估报告](./docs/review/v6-refactor-assessment.md) · [更新日志](./CHANGELOG.md)
 
@@ -83,7 +83,7 @@ v6.3.0 在零循环四层单向依赖基础上引入稳定应用门面 (`src/app
 
 ```mermaid
 flowchart TB
-    L4["Layer 4: 协议与交互层 — src/cli/ (CommandResult v2) · src/mcp/ (16 权威工具 + 帧化 IPC 作业)"]
+    L4["Layer 4: 协议与交互层 — src/cli/ (CommandResult v2) · src/mcp/ (17 权威工具 + 帧化 IPC 作业)"]
     L3["Layer 3: 应用门面与领域子系统层 — src/app/ · trust · explore · codemap · perf · verdict · heal · diagnose · impact · bootstrap"]
     L2["Layer 2: 权威验证内核 SSoT — src/kernel/ (target-guard · schema-validator · gate/ SymbolTable + G101..G117)"]
     L1["Layer 1: 零依赖基础叶模块 — src/core/ (version · outcome · config · redact v3 · glob · proc) · src/types/*.d.ts"]
@@ -136,7 +136,7 @@ flowchart TB
 - 零运行时依赖架构决策与重审触发条件见 [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md)。
 - 隔离在 `conformance/` 下的官方回归套件（不随 npm 包发布，由 CI `mcp-conformance` 执行）：
   - **`@modelcontextprotocol/conformance@0.1.16`**（Streamable HTTP `/mcp`，`active` 套件 30 场景）：`8/8` 协议通用场景全部通过，`22` 项预期未适用场景登记在 [`conformance/expected-failures.json`](./conformance/expected-failures.json)，`0` 项未登记失败。
-  - **`@modelcontextprotocol/sdk@1.32.2` 参考 `Client`**（`5/5` 通过）：覆盖 `stdio`、Streamable HTTP (`/mcp`) 与 Legacy SSE (`/sse` + `/messages`)，验证 `2024-11-05`..`2025-11-25` 版本协商、`tools/list` 精确 16 个工具与合法 Schema、`structuredContent`、`notifications/progress` 与 `AbortController` 取消请求。
+  - **`@modelcontextprotocol/sdk@1.32.2` 参考 `Client`**（`5/5` 通过）：覆盖 `stdio`、Streamable HTTP (`/mcp`) 与 Legacy SSE (`/sse` + `/messages`)，验证 `2024-11-05`..`2025-11-25` 版本协商、`tools/list` 精确 17 个工具与合法 Schema、`structuredContent`、`notifications/progress` 与 `AbortController` 取消请求。
 
 ### 标准 CLI 工作流与本地复现
 
@@ -189,10 +189,11 @@ npm run check:vendor && npm run lint:docs && npm run typecheck && npm test && np
 | `aitest_diagnose` | 执行与门禁验证 | 否 | Generate Redacted Evidence-First A/B/C/D Diagnostics Report |
 | `aitest_perf` | 执行与门禁验证 | 否 | Run PerformanceObserver Web Vitals & Read-Only API SLO Benchmark |
 | `aitest_report` | 执行与门禁验证 | 是 | Query Reports Index, Flaky Telemetry & Requirement Traceability |
+| `aitest_parity` | 执行与门禁验证 | 否 | Run Dual-Target 5-Checkpoint Differential Parity Oracle |
 | `aitest_heal` | 有状态治理与作业 | 否 | Stateful A/B/C/D Heal Governance State Machine (begin \| attempt \| conclude \| discard) |
 | `aitest_job` | 有状态治理与作业 | 否 | Inspect, Await, or Cancel Async Background MCP Jobs (status \| result \| cancel) |
 
-> 自动生成自 `src/mcp/registry.mjs`（共 `16` 个权威工具；`governance approve` 仅限人类本地 CLI，永不注册为 MCP 工具；`v5`/`v6.1` 共 8 个旧工具名在 `v6.x` 中作为弃用转发别名保留，详见 `docs/upgrade.md`）。
+> 自动生成自 `src/mcp/registry.mjs`（共 `17` 个权威工具；`governance approve` 仅限人类本地 CLI，永不注册为 MCP 工具；`v5`/`v6.1` 共 8 个旧工具名在 `v6.x` 中作为弃用转发别名保留，详见 `docs/upgrade.md`）。
 <!-- END:GENERATED_MCP_TOOLS -->
 
 以下高权限或交互式操作**仅限本地 CLI 执行，永不暴露为 MCP 工具**：
@@ -214,7 +215,7 @@ npm run check:vendor && npm run lint:docs && npm run typecheck && npm test && np
 | **v5 → v6 升级与迁移指南** | [docs/upgrade.md](./docs/upgrade.md) | [docs/upgrade.en.md](./docs/upgrade.en.md) |
 | **四层防假绿门禁与治理指南** | [docs/governance.md](./docs/governance.md) | [docs/governance.en.md](./docs/governance.en.md) |
 | **v6 重构评估与交付报告** | [v6-refactor-assessment.md](./docs/review/v6-refactor-assessment.md) · [v6 留出集报告](./bench/real-world/results/SUMMARY-v6-holdout.md) · [试跑报告](./bench/real-world/results/SUMMARY.md) · [预登记方案](./bench/real-world/PREREGISTRATION.md) | [v6-refactor-assessment.en.md](./docs/review/v6-refactor-assessment.en.md) · [Holdout Summary (EN)](./bench/real-world/results/SUMMARY-v6-holdout.en.md) · [Pilot Summary (EN)](./bench/real-world/results/SUMMARY.en.md) · [Pre-Reg (EN)](./bench/real-world/PREREGISTRATION.en.md) |
-| **架构决策记录 (ADR-0001..0005)** | [ADR-0001 MCP 零依赖](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) · [ADR-0002 内核单源与升级](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.md) · [ADR-0003 严格类型安全](./docs/adr/0003-strict-checkjs-type-safety.md) · [ADR-0004 AST 门禁与降误报](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.md) · [ADR-0005 工具面/结果/配置](./docs/adr/0005-mcp-surface-outcome-and-config.md) | [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md) · [ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.en.md) · [ADR-0003](./docs/adr/0003-strict-checkjs-type-safety.en.md) · [ADR-0004](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.en.md) · [ADR-0005](./docs/adr/0005-mcp-surface-outcome-and-config.en.md) |
+| **架构决策记录 (ADR-0001..0006)** | [ADR-0001 MCP 零依赖](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) · [ADR-0002 内核单源与升级](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.md) · [ADR-0003 严格类型安全](./docs/adr/0003-strict-checkjs-type-safety.md) · [ADR-0004 AST 门禁与降误报](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.md) · [ADR-0005 工具面/结果/配置](./docs/adr/0005-mcp-surface-outcome-and-config.md) · [ADR-0006 差分先知与形状指纹](./docs/adr/0006-differential-parity-oracle-and-shape-fingerprints.md) | [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md) · [ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.en.md) · [ADR-0003](./docs/adr/0003-strict-checkjs-type-safety.en.md) · [ADR-0004](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.en.md) · [ADR-0005](./docs/adr/0005-mcp-surface-outcome-and-config.en.md) · [ADR-0006](./docs/adr/0006-differential-parity-oracle-and-shape-fingerprints.en.md) |
 | **AI Agent 接入与协议参考** | [quickstart](./docs/ai-agent-quickstart.md) · [AGENTS.md](./AGENTS.md) · [CLAUDE.md](./CLAUDE.md) · [MCP 协议](./skills/ai-test-workbench/references/mcp-server-protocol.md) · [llms.txt](./llms.txt) | [quickstart.en](./docs/ai-agent-quickstart.en.md) · [AGENTS.en.md](./AGENTS.en.md) · [MCP Protocol](./skills/ai-test-workbench/references/mcp-server-protocol.en.md) |
 | **架构、版本矩阵与历史归档** | [ARCHITECTURE.md](./ARCHITECTURE.md) · [VERSION.md](./VERSION.md) · [v5 历史评分卡](./docs/history/v5-verification-scorecard.md) · [红队设计](./bench/agentic/DESIGN.md) | [ARCHITECTURE.en.md](./ARCHITECTURE.en.md) · [VERSION.en.md](./VERSION.en.md) · [v5 Historical Scorecard](./docs/history/v5-verification-scorecard.en.md) · [Agentic Design](./bench/agentic/DESIGN.en.md) |
 | **适配 / 安全 / 排查 / 靶场 / 社区** | [adapter](./docs/project-adapter.md) · [security](./docs/security.md) · [troubleshooting](./docs/troubleshooting.md) · [demo](./examples/demo-webapp/README.md) · [CONTRIBUTING](./CONTRIBUTING.md) · [SECURITY](./SECURITY.md) | [adapter.en](./docs/project-adapter.en.md) · [security.en](./docs/security.en.md) · [troubleshooting.en](./docs/troubleshooting.en.md) · [demo.en](./examples/demo-webapp/README.en.md) · [CONTRIBUTING.en](./CONTRIBUTING.en.md) · [SECURITY.en](./SECURITY.en.md) |

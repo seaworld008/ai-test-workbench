@@ -15,13 +15,14 @@ import {
 } from '../../src/mcp-server.mjs';
 import { upgradeQaWorkspace } from '../../src/upgrade.mjs';
 
-test('MCP v6.2 tool surface exposes 16 canonical tools with 100% parameter descriptions and forwards all 8 deprecated aliases', async () => {
+test('MCP tool surface exposes 17 canonical tools with 100% parameter descriptions and forwards all 8 deprecated aliases', async () => {
   const defs = getMcpToolDefinitions('2025-11-25');
-  assert.equal(defs.length, 16);
-  assert.equal(TOOL_REGISTRY.length, 16);
+  assert.equal(defs.length, 17);
+  assert.equal(TOOL_REGISTRY.length, 17);
 
   const names = new Set(defs.map((d) => d.name));
   assert.equal(names.has('aitest_bootstrap'), true);
+  assert.equal(names.has('aitest_parity'), true);
   assert.equal(names.has('aitest_report'), true);
   assert.equal(names.has('aitest_heal'), true);
   assert.equal(names.has('aitest_job'), true);

@@ -105,3 +105,10 @@ export {
   countMutationSpecsInFiles,
   verifyLedgerBindingInQaDir,
 } from './gate/ledger-verify.mjs';
+
+export {
+  DEFAULT_NORMALIZE_PATHS,
+  compareParityCheckpoints,
+  computeByteDiffMetrics,
+  computeShapeFingerprint,
+} from './diff-oracle.mjs';

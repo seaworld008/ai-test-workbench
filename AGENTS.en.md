@@ -8,7 +8,7 @@
 
 ## 1. AI Agent Decision Tree (MCP Tool First, CLI `--json` Fallback)
 
-- **When connected via MCP (recommended)**: Invoke the **16 canonical typed MCP tools** and read `structuredContent` (`{ schemaVersion, ok, exitCode, outcome, tool, summary, recoverable, blockerKind, recoverySteps, data, nextRecommendedActions }`). Use `aitest_bootstrap` for zero-to-one loopback onboarding; prefer `aitest_verify_change` after code changes; manage failures with `aitest_heal(action="begin"|"attempt"|"conclude"|"discard")`; query reports/flaky/traceability via `aitest_report(view=...)`; control async jobs with `aitest_job(action="status"|"result"|"cancel")`.
+- **When connected via MCP (recommended)**: Invoke the **17 canonical typed MCP tools** and read `structuredContent` (`{ schemaVersion, ok, exitCode, outcome, tool, summary, recoverable, blockerKind, recoverySteps, data, nextRecommendedActions }`). Use `aitest_bootstrap` for zero-to-one loopback onboarding; prefer `aitest_verify_change` after code changes; use `aitest_parity` for dual-target differential verification; manage failures with `aitest_heal(action="begin"|"attempt"|"conclude"|"discard")`; query reports/flaky/traceability via `aitest_report(view=...)`; control async jobs with `aitest_job(action="status"|"result"|"cancel")`.
 
 <!-- BEGIN:GENERATED_MCP_TOOLS lang="en" -->
 | Tool Name | Category | Read-Only Hint | Responsibility |
@@ -27,10 +27,11 @@
 | `aitest_diagnose` | Verification & Gates | No | Generate Redacted Evidence-First A/B/C/D Diagnostics Report |
 | `aitest_perf` | Verification & Gates | No | Run PerformanceObserver Web Vitals & Read-Only API SLO Benchmark |
 | `aitest_report` | Verification & Gates | Yes | Query Reports Index, Flaky Telemetry & Requirement Traceability |
+| `aitest_parity` | Verification & Gates | No | Run Dual-Target 5-Checkpoint Differential Parity Oracle |
 | `aitest_heal` | Stateful Control | No | Stateful A/B/C/D Heal Governance State Machine (begin \| attempt \| conclude \| discard) |
 | `aitest_job` | Stateful Control | No | Inspect, Await, or Cancel Async Background MCP Jobs (status \| result \| cancel) |
 
-> Auto-generated from `src/mcp/registry.mjs` (`16` canonical tools; `governance approve` is human-CLI-only and never registered; 8 legacy v5/v6.1 tool names remain as deprecated forwarding aliases in `v6.x`, see `docs/upgrade.en.md`).
+> Auto-generated from `src/mcp/registry.mjs` (`17` canonical tools; `governance approve` is human-CLI-only and never registered; 8 legacy v5/v6.1 tool names remain as deprecated forwarding aliases in `v6.x`, see `docs/upgrade.en.md`).
 <!-- END:GENERATED_MCP_TOOLS -->
 
 - **When invoking the CLI**: Always use version-pinned `npx ai-test-workbench@6.3.0 <cmd> --json`, global `aitw <cmd> --json`, or local `node tools/aitest.mjs <cmd> --json` (strict per-command flag validation; offline attestation verification via `attest verify`; host `qa/` kernel upgrades via `upgrade`).

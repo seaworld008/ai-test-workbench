@@ -71,6 +71,7 @@ const BILINGUAL_STRUCTURE_PAIRS = [
   'docs/adr/0003-strict-checkjs-type-safety.md',
   'docs/adr/0004-pluggable-ast-gate-and-fp-governance.md',
   'docs/adr/0005-mcp-surface-outcome-and-config.md',
+  'docs/adr/0006-differential-parity-oracle-and-shape-fingerprints.md',
   'docs/review/v6-refactor-assessment.md',
   'bench/agentic/DESIGN.md',
   'bench/agentic/results/SUMMARY.md',

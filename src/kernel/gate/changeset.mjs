@@ -22,7 +22,7 @@ export { isExecutablePlaywrightSpecPath };
  * @param {string} filePath
  * @param {string} baseSource
  * @param {string} headSource
- * @param {{ assertFunctionNames?: string[], customMatchers?: Record<string, number>, activeWaivers?: any[], qaDir?: string, tsCompiler?: any, rulesConfig?: Record<string, any>, protectedGlobs?: string[], changesetContext?: any }} [options]
+ * @param {{ assertFunctionNames?: string[], customMatchers?: Record<string, number>, activeWaivers?: any[], qaDir?: string, tsCompiler?: any, rulesConfig?: Record<string, any>, protectedGlobs?: string[], replayAllowedUpstreamHosts?: string[], changesetContext?: any }} [options]
  */
 export function compareSpecSourcesAst(filePath, baseSource, headSource, options = {}) {
   const {
@@ -32,6 +32,7 @@ export function compareSpecSourcesAst(filePath, baseSource, headSource, options 
     qaDir,
     rulesConfig = {},
     protectedGlobs,
+    replayAllowedUpstreamHosts,
     changesetContext = null,
   } = options;
 
@@ -69,6 +70,7 @@ export function compareSpecSourcesAst(filePath, baseSource, headSource, options 
     assertFunctionNames,
     rulesConfig,
     protectedGlobs,
+    replayAllowedUpstreamHosts,
     changesetContext,
     isDiffTextMode: false,
   });
@@ -109,7 +111,7 @@ function meetsBranchNewAssertionFloor(headSum, baselineTestTitles, isBaselineNew
  * (e.g., tests split or moved across spec files in the same commit).
  *
  * @param {Array<{ filePath: string, baseSource: string, headSource: string, isBaselineNewSpec?: boolean, baselineTestTitles?: Set<string> | null }>} fileChanges
- * @param {{ assertFunctionNames?: string[], customMatchers?: Record<string, number>, activeWaivers?: any[], qaDir?: string, tsCompiler?: any, rulesConfig?: Record<string, any>, protectedGlobs?: string[], enforceProjectScopes?: boolean }} [options]
+ * @param {{ assertFunctionNames?: string[], customMatchers?: Record<string, number>, activeWaivers?: any[], qaDir?: string, tsCompiler?: any, rulesConfig?: Record<string, any>, protectedGlobs?: string[], replayAllowedUpstreamHosts?: string[], enforceProjectScopes?: boolean }} [options]
  */
 export function compareChangesetAst(fileChanges, options = {}) {
   const {
@@ -119,6 +121,7 @@ export function compareChangesetAst(fileChanges, options = {}) {
     qaDir,
     rulesConfig = {},
     protectedGlobs,
+    replayAllowedUpstreamHosts,
     enforceProjectScopes = false,
   } = options;
 
@@ -192,6 +195,7 @@ export function compareChangesetAst(fileChanges, options = {}) {
       assertFunctionNames,
       rulesConfig,
       protectedGlobs,
+      replayAllowedUpstreamHosts,
       changesetContext,
       isBaselineNewSpec: entry.isBaselineNewSpec,
       baselineTestTitles: entry.baselineTestTitles,
@@ -370,6 +374,7 @@ export function runGitDiffGuard(qaDir, diffBase, options = {}) {
       enforceProjectScopes: true,
       rulesConfig: cfg.rules || {},
       protectedGlobs: cfg.governance?.protected,
+      replayAllowedUpstreamHosts: cfg.replayAllowedUpstreamHosts || [],
       ...('tsCompiler' in options ? { tsCompiler: options.tsCompiler } : {}),
     });
     if (cmp.blocked) blocked = true;

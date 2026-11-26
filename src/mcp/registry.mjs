@@ -6,11 +6,11 @@ import { DEPRECATED_TOOL_ALIASES, STATEFUL_TOOLS } from './tools/stateful.mjs';
 import { VERIFICATION_TOOLS } from './tools/verification.mjs';
 
 /**
- * Single Declarative MCP Tool Registry (`v6.2`, 16 canonical tools + 8 deprecated aliases).
+ * Single Declarative MCP Tool Registry (`v6.4` preview, 17 canonical tools + 8 deprecated aliases).
  *
  * Composed from cohesive domain tool lists (`tools/discovery.mjs`, `tools/verification.mjs`,
- * `tools/stateful.mjs`) where each tool owns its schema, annotations, CLI argument builder,
- * optional in-memory `execute` hook, and recommended next actions.
+ * `tools/parity-tool.mjs`, `tools/stateful.mjs`) where each tool owns its schema, annotations,
+ * CLI argument builder, optional in-memory `execute` hook, and recommended next actions.
  */
 
 /** @type {import('./tools/shared.mjs').ToolRegistryEntry[]} */

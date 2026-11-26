@@ -146,7 +146,7 @@ export function validateToolPathArgs(args, target, allowedRoots) {
   }
 
   // Relative sub-path parameters MUST NOT be absolute paths or escape via `..` (`M-03`)
-  for (const field of ['qaDir', 'output', 'results', 'waivers']) {
+  for (const field of ['qaDir', 'output', 'results', 'waivers', 'corpus']) {
     const val = args[field];
     if (val === undefined || val === null || val === '') continue;
     const raw = String(val);

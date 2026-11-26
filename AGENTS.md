@@ -8,7 +8,7 @@
 
 ## 1. AI Agent 优先决策树（先 MCP Tool，其次 CLI `--json`）
 
-- **通过 MCP 连接本工作台时（推荐）**：直接调用 **16 个强类型权威 MCP 工具**并读取 `structuredContent`（`{ schemaVersion, ok, exitCode, outcome, tool, summary, recoverable, blockerKind, recoverySteps, data, nextRecommendedActions }`）。陌生本地回环项目从 0 到 1 优先 `aitest_bootstrap`；代码变更后首选 `aitest_verify_change`；失败定责与修复通过 `aitest_heal(action="begin"|"attempt"|"conclude"|"discard")` 推进；报告、抖动与需求追溯通过 `aitest_report(view=...)` 查询；异步长任务通过 `aitest_job(action="status"|"result"|"cancel")` 控制。
+- **通过 MCP 连接本工作台时（推荐）**：直接调用 **17 个强类型权威 MCP 工具**并读取 `structuredContent`（`{ schemaVersion, ok, exitCode, outcome, tool, summary, recoverable, blockerKind, recoverySteps, data, nextRecommendedActions }`）。陌生本地回环项目从 0 到 1 优先 `aitest_bootstrap`；代码变更后首选 `aitest_verify_change`；双目标差分回归比对调用 `aitest_parity`；失败定责与修复通过 `aitest_heal(action="begin"|"attempt"|"conclude"|"discard")` 推进；报告、抖动与需求追溯通过 `aitest_report(view=...)` 查询；异步长任务通过 `aitest_job(action="status"|"result"|"cancel")` 控制。
 
 <!-- BEGIN:GENERATED_MCP_TOOLS lang="zh" -->
 | 工具名称 | 类别 | 只读提示 | 职责摘要 |
@@ -27,10 +27,11 @@
 | `aitest_diagnose` | 执行与门禁验证 | 否 | Generate Redacted Evidence-First A/B/C/D Diagnostics Report |
 | `aitest_perf` | 执行与门禁验证 | 否 | Run PerformanceObserver Web Vitals & Read-Only API SLO Benchmark |
 | `aitest_report` | 执行与门禁验证 | 是 | Query Reports Index, Flaky Telemetry & Requirement Traceability |
+| `aitest_parity` | 执行与门禁验证 | 否 | Run Dual-Target 5-Checkpoint Differential Parity Oracle |
 | `aitest_heal` | 有状态治理与作业 | 否 | Stateful A/B/C/D Heal Governance State Machine (begin \| attempt \| conclude \| discard) |
 | `aitest_job` | 有状态治理与作业 | 否 | Inspect, Await, or Cancel Async Background MCP Jobs (status \| result \| cancel) |
 
-> 自动生成自 `src/mcp/registry.mjs`（共 `16` 个权威工具；`governance approve` 仅限人类本地 CLI，永不注册为 MCP 工具；`v5`/`v6.1` 共 8 个旧工具名在 `v6.x` 中作为弃用转发别名保留，详见 `docs/upgrade.md`）。
+> 自动生成自 `src/mcp/registry.mjs`（共 `17` 个权威工具；`governance approve` 仅限人类本地 CLI，永不注册为 MCP 工具；`v5`/`v6.1` 共 8 个旧工具名在 `v6.x` 中作为弃用转发别名保留，详见 `docs/upgrade.md`）。
 <!-- END:GENERATED_MCP_TOOLS -->
 
 - **在终端执行 CLI 时**：统一使用锁版本 `npx ai-test-workbench@6.3.0 <cmd> --json`、全局安装后的 `aitw <cmd> --json`，或本仓库开发态 `node tools/aitest.mjs <cmd> --json`（按子命令启用严格参数校验；离线验签执行 `attest verify`；升级宿主 `qa/` 内核执行 `upgrade`）。

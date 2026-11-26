@@ -4,7 +4,7 @@
 
 **Trustworthy Verification Kernel & Native Multi-Protocol MCP Server for AI Coding Agents**
 
-Provides a **4-Layer Fail-Closed AST Anti-Fake-Green Gate (`S0–S5` + `AITEST-G101..G117` + SymbolTable + Dieselgate Guard)** · **One-Call Change Verdict (`verify-change` · in-toto v1 + `T0/T1/T2`)** · **Zero-Dep Native MCP Server (`stdio` / `/mcp` / `/sse` · 16 Canonical Tools · Framed Subprocess IPC)** · **Immutable `TrustContext` & Sticky T1** · **Zero-Block Loopback Bootstrap (`aitest_bootstrap`)** · **Default-Deny Explorer & API Schema Inference** · **Buffered `PerformanceObserver` Web Vitals**
+Provides a **4-Layer Fail-Closed AST Anti-Fake-Green Gate (`S0–S5` + `AITEST-G101..G117` + SymbolTable + Dieselgate Guard)** · **One-Call Change Verdict (`verify-change` · in-toto v1 + `T0/T1/T2`)** · **5-Checkpoint Differential Parity Oracle (`aitest_parity` + Zero-Plaintext Shape Fingerprints)** · **Zero-Dep Native MCP Server (`stdio` / `/mcp` / `/sse` · 17 Canonical Tools · Framed Subprocess IPC)** · **Immutable `TrustContext` & Sticky T1** · **Zero-Block Loopback Bootstrap (`aitest_bootstrap`)** · **Default-Deny Explorer & Multi-Sample Union Schema Inference** · **Buffered `PerformanceObserver` Web Vitals & SSE `TTFT`**
 
 [简体中文文档 (默认)](./README.md) · [v5→v6 Upgrade Guide](./docs/upgrade.en.md) · [Governance & 4-Layer Gate](./docs/governance.en.md) · [AI Agent Quickstart](./docs/ai-agent-quickstart.en.md) · [AGENTS.en.md](./AGENTS.en.md) · [Architecture](./ARCHITECTURE.en.md) · [v6 Refactor Assessment](./docs/review/v6-refactor-assessment.en.md) · [Changelog](./CHANGELOG.en.md)
 
@@ -83,7 +83,7 @@ v6.3.0 builds on the acyclic four-layer core with a public `src/app/index.mjs` a
 
 ```mermaid
 flowchart TB
-    L4["Layer 4: Protocol & CLI — src/cli/ (CommandResult v2) · src/mcp/ (16 canonical tools + framed IPC jobs)"]
+    L4["Layer 4: Protocol & CLI — src/cli/ (CommandResult v2) · src/mcp/ (17 canonical tools + framed IPC jobs)"]
     L3["Layer 3: App Facade & Domains — src/app/ · trust · explore · codemap · perf · verdict · heal · diagnose · impact · bootstrap"]
     L2["Layer 2: Authoritative Kernel SSoT — src/kernel/ (target-guard · schema-validator · gate/ SymbolTable + G101..G117)"]
     L1["Layer 1: Zero-Dep Core Leaves — src/core/ (version · outcome · config · redact v3 · glob · proc) · src/types/*.d.ts"]
@@ -136,7 +136,7 @@ flowchart TB
 - Rationale and re-evaluation triggers for the zero-dependency MCP protocol layer live in [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md).
 - Isolated under `conformance/` (excluded from the npm tarball, enforced by CI `mcp-conformance`):
   - **`@modelcontextprotocol/conformance@0.1.16`** (Streamable HTTP `/mcp`, `active` suite — 30 scenarios): `8/8` protocol-level scenarios pass; `22` inapplicable/deferred scenarios are recorded in [`conformance/expected-failures.json`](./conformance/expected-failures.json) with `0` unlisted failures.
-  - **`@modelcontextprotocol/sdk@1.32.2` Reference `Client`** (`5/5` suites pass): covers `stdio`, Streamable HTTP (`/mcp`), and Legacy SSE (`/sse` + `/messages`), verifying `2024-11-05`..`2025-11-25` version negotiation, exact 16 canonical tools with valid JSON Schemas, `structuredContent`, `notifications/progress`, and `AbortController` cancellation.
+  - **`@modelcontextprotocol/sdk@1.32.2` Reference `Client`** (`5/5` suites pass): covers `stdio`, Streamable HTTP (`/mcp`), and Legacy SSE (`/sse` + `/messages`), verifying `2024-11-05`..`2025-11-25` version negotiation, exact 17 canonical tools with valid JSON Schemas, `structuredContent`, `notifications/progress`, and `AbortController` cancellation.
 
 ### Standard CLI Workflow & Local Verification
 
@@ -189,10 +189,11 @@ The table below is auto-generated from `src/mcp/registry.mjs` by `scripts/genera
 | `aitest_diagnose` | Verification & Gates | No | Generate Redacted Evidence-First A/B/C/D Diagnostics Report |
 | `aitest_perf` | Verification & Gates | No | Run PerformanceObserver Web Vitals & Read-Only API SLO Benchmark |
 | `aitest_report` | Verification & Gates | Yes | Query Reports Index, Flaky Telemetry & Requirement Traceability |
+| `aitest_parity` | Verification & Gates | No | Run Dual-Target 5-Checkpoint Differential Parity Oracle |
 | `aitest_heal` | Stateful Control | No | Stateful A/B/C/D Heal Governance State Machine (begin \| attempt \| conclude \| discard) |
 | `aitest_job` | Stateful Control | No | Inspect, Await, or Cancel Async Background MCP Jobs (status \| result \| cancel) |
 
-> Auto-generated from `src/mcp/registry.mjs` (`16` canonical tools; `governance approve` is human-CLI-only and never registered; 8 legacy v5/v6.1 tool names remain as deprecated forwarding aliases in `v6.x`, see `docs/upgrade.en.md`).
+> Auto-generated from `src/mcp/registry.mjs` (`17` canonical tools; `governance approve` is human-CLI-only and never registered; 8 legacy v5/v6.1 tool names remain as deprecated forwarding aliases in `v6.x`, see `docs/upgrade.en.md`).
 <!-- END:GENERATED_MCP_TOOLS -->
 
 The following privileged or interactive commands are **local CLI only and never registered as MCP tools**:
@@ -214,7 +215,7 @@ The following privileged or interactive commands are **local CLI only and never 
 | **v5 → v6 Upgrade & Migration Guide** | [docs/upgrade.md](./docs/upgrade.md) | [docs/upgrade.en.md](./docs/upgrade.en.md) |
 | **Governance & 4-Layer Gate Kernel** | [docs/governance.md](./docs/governance.md) | [docs/governance.en.md](./docs/governance.en.md) |
 | **v6 Refactor Assessment & Benchmarks** | [v6-refactor-assessment.md](./docs/review/v6-refactor-assessment.md) · [v6 Holdout (ZH)](./bench/real-world/results/SUMMARY-v6-holdout.md) · [Pilot (ZH)](./bench/real-world/results/SUMMARY.md) · [Pre-Reg (ZH)](./bench/real-world/PREREGISTRATION.md) | [v6-refactor-assessment.en.md](./docs/review/v6-refactor-assessment.en.md) · [v6 Holdout Summary](./bench/real-world/results/SUMMARY-v6-holdout.en.md) · [Pilot Summary](./bench/real-world/results/SUMMARY.en.md) · [Pre-Registration](./bench/real-world/PREREGISTRATION.en.md) |
-| **Architecture Decision Records (ADR-0001..0005)** | [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) · [ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.md) · [ADR-0003](./docs/adr/0003-strict-checkjs-type-safety.md) · [ADR-0004](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.md) · [ADR-0005](./docs/adr/0005-mcp-surface-outcome-and-config.md) | [ADR-0001 Zero-Dep MCP](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md) · [ADR-0002 Kernel SSoT & Upgrade](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.en.md) · [ADR-0003 Strict checkJs](./docs/adr/0003-strict-checkjs-type-safety.en.md) · [ADR-0004 AST Gate & FPR](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.en.md) · [ADR-0005 MCP/Outcome/Config](./docs/adr/0005-mcp-surface-outcome-and-config.en.md) |
+| **Architecture Decision Records (ADR-0001..0006)** | [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) · [ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.md) · [ADR-0003](./docs/adr/0003-strict-checkjs-type-safety.md) · [ADR-0004](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.md) · [ADR-0005](./docs/adr/0005-mcp-surface-outcome-and-config.md) · [ADR-0006](./docs/adr/0006-differential-parity-oracle-and-shape-fingerprints.md) | [ADR-0001 Zero-Dep MCP](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md) · [ADR-0002 Kernel SSoT & Upgrade](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.en.md) · [ADR-0003 Strict checkJs](./docs/adr/0003-strict-checkjs-type-safety.en.md) · [ADR-0004 AST Gate & FPR](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.en.md) · [ADR-0005 MCP/Outcome/Config](./docs/adr/0005-mcp-surface-outcome-and-config.en.md) · [ADR-0006 Differential Parity Oracle](./docs/adr/0006-differential-parity-oracle-and-shape-fingerprints.en.md) |
 | **AI Agent Onboarding & Protocol** | [quickstart](./docs/ai-agent-quickstart.md) · [AGENTS.md](./AGENTS.md) · [CLAUDE.md](./CLAUDE.md) · [MCP Protocol (ZH)](./skills/ai-test-workbench/references/mcp-server-protocol.md) · [llms.txt](./llms.txt) | [quickstart.en](./docs/ai-agent-quickstart.en.md) · [AGENTS.en.md](./AGENTS.en.md) · [MCP Protocol](./skills/ai-test-workbench/references/mcp-server-protocol.en.md) |
 | **Architecture, Versions & History** | [ARCHITECTURE.md](./ARCHITECTURE.md) · [VERSION.md](./VERSION.md) · [v5 Historical Scorecard](./docs/history/v5-verification-scorecard.md) · [Agentic Design (ZH)](./bench/agentic/DESIGN.md) | [ARCHITECTURE.en.md](./ARCHITECTURE.en.md) · [VERSION.en.md](./VERSION.en.md) · [v5 Historical Scorecard (EN)](./docs/history/v5-verification-scorecard.en.md) · [Agentic Design](./bench/agentic/DESIGN.en.md) |
 | **Adapter / Security / Troubleshooting / Demo / Community** | [adapter](./docs/project-adapter.md) · [security](./docs/security.md) · [troubleshooting](./docs/troubleshooting.md) · [demo](./examples/demo-webapp/README.md) · [CONTRIBUTING](./CONTRIBUTING.md) · [SECURITY](./SECURITY.md) | [adapter.en](./docs/project-adapter.en.md) · [security.en](./docs/security.en.md) · [troubleshooting.en](./docs/troubleshooting.en.md) · [demo.en](./examples/demo-webapp/README.en.md) · [CONTRIBUTING.en](./CONTRIBUTING.en.md) · [SECURITY.en](./SECURITY.en.md) |

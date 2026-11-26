@@ -128,10 +128,12 @@ export async function executeDiagnoseDryRunFastPath(args, ctx) {
   }
   try {
     ctx.onProgress?.({ progress: 10, message: 'Analyzing failure diagnostics (dry-run)...' });
-    const { failureCount, failures } = generateDiagnosticsMarkdown(qaDir, resultsPath);
+    const { failureCount, failures, clusters } = generateDiagnosticsMarkdown(qaDir, resultsPath);
     ctx.onProgress?.({ progress: 100, message: `Diagnosed ${failureCount} failing/flaky test(s)` });
     const safeData = redactStructuredValue({
       failureCount,
+      clusterCount: clusters.length,
+      clusters,
       failures,
       resultsPath,
       outputPath: null,

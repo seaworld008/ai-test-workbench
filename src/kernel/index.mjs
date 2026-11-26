@@ -10,3 +10,4 @@
 export * from './gate-kernel.mjs';
 export * from './target-guard.mjs';
 export * from './schema-validator.mjs';
+export * from './diff-oracle.mjs';
