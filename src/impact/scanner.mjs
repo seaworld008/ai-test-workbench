@@ -19,37 +19,29 @@ export const GRAPH_EXTS = [
 export const GRAPH_IGNORE_DIRS = new Set([
   'node_modules',
   '.git',
-  'dist',
-  'build',
   '.next',
+  '.nuxt',
+  'vendor',
   'reports',
+  'knowledge',
   'playwright-report',
   'test-results',
   '.aitest',
+  '.sandbox',
 ]);
+const ROOT_ONLY_OUTPUT_DIRS = new Set(['dist', 'build', 'out', 'target']);
+const IGNORED_VENDOR_DIR_SUFFIXES = ['public/libs', 'public/static', 'static/libs'];
 export const MAX_GRAPH_FILES = 10000;
-const SOURCE_FILE_RE = /\.(ts|tsx|js|jsx|mjs|cjs|vue)$/i;
+export const DEFAULT_PER_REPO_GRAPH_FILES = 16000;
+const SOURCE_FILE_RE = /\.(ts|tsx|js|jsx|mjs|cjs|vue|java|xml)$/i;
 const REGEX_PRECEDING_KEYWORDS = new Set([
-  'return',
-  'case',
-  'throw',
-  'in',
-  'of',
-  'typeof',
-  'void',
-  'delete',
-  'yield',
-  'await',
-  'new',
-  'else',
-  'do',
+  'return', 'case', 'throw', 'in', 'of', 'typeof', 'void', 'delete', 'yield', 'await', 'new', 'else', 'do',
 ]);
 const REGEX_PRECEDING_PUNCT = new Set(['(', '[', '{', ',', ';', '=', ':', '!', '&', '|', '?', '+', '-', '*', '%', '^', '~', '<', '>']);
 
 /**
  * Strips single-line `//` and block `/* ... *\/` comments in a single linear O(N) pass
- * while preserving string literals (`'...'`, `"..."`, `` `...` ``) and regex literals (`/a\/b/`)
- * so URLs (`http://...`) stay intact and commented-out imports never produce false edges.
+ * while preserving string literals (`'...'`, `"..."`, `` `...` ``) and regex literals (`/a\/b/`).
  * @param {string} source
  * @returns {string}
  */
@@ -62,34 +54,21 @@ export function stripJsCommentsPreserveStrings(source) {
   let lastNonWsChar = '';
   let lastWord = '';
 
-  const canStartRegex = () => {
-    if (!lastNonWsChar) return true;
-    if (REGEX_PRECEDING_PUNCT.has(lastNonWsChar)) return true;
-    return REGEX_PRECEDING_KEYWORDS.has(lastWord);
-  };
+  const canStartRegex = () => !lastNonWsChar || REGEX_PRECEDING_PUNCT.has(lastNonWsChar) || REGEX_PRECEDING_KEYWORDS.has(lastWord);
 
   while (i < len) {
     const ch = s[i];
     const next = i + 1 < len ? s[i + 1] : '';
 
-    // Single-quoted, double-quoted, or template string literal
     if (ch === "'" || ch === '"' || ch === '`') {
       const quote = ch;
       const start = i;
       i += 1;
       while (i < len) {
         const c = s[i];
-        if (c === '\\') {
-          i += 2;
-          continue;
-        }
-        if (c === quote) {
-          i += 1;
-          break;
-        }
-        if (quote !== '`' && (c === '\n' || c === '\r')) {
-          break;
-        }
+        if (c === '\\') { i += 2; continue; }
+        if (c === quote) { i += 1; break; }
+        if (quote !== '`' && (c === '\n' || c === '\r')) break;
         i += 1;
       }
       out.push(s.slice(start, i));
@@ -97,30 +76,21 @@ export function stripJsCommentsPreserveStrings(source) {
       lastWord = '';
       continue;
     }
-
-    // Line comment `// ...`
     if (ch === '/' && next === '/') {
       i += 2;
       while (i < len && s[i] !== '\n' && s[i] !== '\r') i += 1;
       out.push(' ');
       continue;
     }
-
-    // Block comment `/* ... */`
     if (ch === '/' && next === '*') {
       i += 2;
       while (i < len) {
-        if (s[i] === '*' && i + 1 < len && s[i + 1] === '/') {
-          i += 2;
-          break;
-        }
+        if (s[i] === '*' && i + 1 < len && s[i + 1] === '/') { i += 2; break; }
         i += 1;
       }
       out.push(' ');
       continue;
     }
-
-    // Regex literal `/pattern/flags` (avoids mistaking `/[/*]/` for a comment)
     if (ch === '/' && canStartRegex()) {
       const start = i;
       let j = i + 1;
@@ -129,10 +99,7 @@ export function stripJsCommentsPreserveStrings(source) {
       while (j < len) {
         const c = s[j];
         if (c === '\n' || c === '\r') break;
-        if (c === '\\') {
-          j += 2;
-          continue;
-        }
+        if (c === '\\') { j += 2; continue; }
         if (c === '[') inClass = true;
         else if (c === ']') inClass = false;
         else if (c === '/' && !inClass) {
@@ -151,8 +118,6 @@ export function stripJsCommentsPreserveStrings(source) {
         continue;
       }
     }
-
-    // Track identifier words for regex-vs-division disambiguation
     if (/[A-Za-z_$]/.test(ch)) {
       const start = i;
       i += 1;
@@ -163,7 +128,6 @@ export function stripJsCommentsPreserveStrings(source) {
       lastNonWsChar = word[word.length - 1];
       continue;
     }
-
     out.push(ch);
     if (ch !== ' ' && ch !== '\t' && ch !== '\n' && ch !== '\r') {
       lastNonWsChar = ch;
@@ -171,7 +135,6 @@ export function stripJsCommentsPreserveStrings(source) {
     }
     i += 1;
   }
-
   return out.join('');
 }
 
@@ -186,14 +149,14 @@ export function stripJsCommentsPreserveStrings(source) {
  */
 
 /**
- * Single-pass directory walk collecting candidate source files and an O(1) lookup index
- * to eliminate per-import synchronous `fs.existsSync` / `fs.statSync` syscall storms.
+ * Single-pass directory walk collecting candidate source files (TS/JS/Vue/Java/XML) and an O(1) lookup index.
+ * Preserves `build`/`dist`/`out`/`target` under `src/` (e.g. `src/views/infra/build/index.vue`).
  * @param {string} repoDir
  * @param {{ includeQa?: boolean, maxFiles?: number }} [options]
  * @returns {RepoSourceIndex}
  */
 export function buildRepoSourceIndex(repoDir, options = {}) {
-  const maxFiles = options.maxFiles ?? MAX_GRAPH_FILES;
+  const maxFiles = options.maxFiles ?? DEFAULT_PER_REPO_GRAPH_FILES;
   /** @type {Array<{ full: string, rel: string }>} */
   const files = [];
   /** @type {Set<string>} */
@@ -202,8 +165,9 @@ export function buildRepoSourceIndex(repoDir, options = {}) {
   const lowerToRel = new Map();
   let truncated = false;
   const hasSrcDir = fs.existsSync(path.join(repoDir, 'src'));
+  const rootStartsInSrc = path.basename(path.resolve(repoDir)) === 'src';
 
-  const walk = (/** @type {string} */ dir) => {
+  const walk = (/** @type {string} */ dir, /** @type {string} */ relDir, /** @type {boolean} */ hasSrcAncestor) => {
     if (files.length >= maxFiles) {
       truncated = true;
       return;
@@ -221,11 +185,13 @@ export function buildRepoSourceIndex(repoDir, options = {}) {
       }
       if (GRAPH_IGNORE_DIRS.has(entry.name) || entry.name.startsWith('.')) continue;
       if (!options.includeQa && entry.name === 'qa') continue;
+      const rel = relDir ? `${relDir}/${entry.name}` : entry.name;
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        walk(full);
-      } else if (entry.isFile() && SOURCE_FILE_RE.test(entry.name)) {
-        const rel = path.relative(repoDir, full).replace(/\\/g, '/');
+        if (ROOT_ONLY_OUTPUT_DIRS.has(entry.name) && !hasSrcAncestor) continue;
+        if (IGNORED_VENDOR_DIR_SUFFIXES.some((sfx) => rel === sfx || rel.endsWith(`/${sfx}`))) continue;
+        walk(full, rel, hasSrcAncestor || entry.name === 'src');
+      } else if (entry.isFile() && SOURCE_FILE_RE.test(entry.name) && !/\.min\.[mc]?js$/i.test(entry.name)) {
         relSet.add(rel);
         lowerToRel.set(rel.toLowerCase(), rel);
         files.push({ full, rel });
@@ -233,7 +199,7 @@ export function buildRepoSourceIndex(repoDir, options = {}) {
     }
   };
 
-  walk(repoDir);
+  walk(repoDir, '', rootStartsInSrc);
   return { files, relSet, lowerToRel, hasSrcDir, truncated };
 }
 
@@ -280,12 +246,10 @@ export function resolveRepoImportFromIndex(fromRel, specifier, pathAliases, inde
     if (hit) return hit;
   }
 
-  // Handle TypeScript ESM `.js` import specifiers pointing to `.ts` / `.tsx` sources
   if (baseRel.endsWith('.js')) {
     const stem = baseRel.slice(0, -3);
     const tsHit = checkCandidate(`${stem}.ts`) || checkCandidate(`${stem}.tsx`);
     if (tsHit) return tsHit;
   }
-
   return null;
 }

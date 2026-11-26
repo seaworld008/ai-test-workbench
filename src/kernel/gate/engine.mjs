@@ -1,3 +1,4 @@
+// @ts-check
 import fs from 'node:fs';
 import path from 'node:path';
 import { mergeOutcomes } from '../../core/outcome.mjs';
@@ -251,6 +252,7 @@ export function runAuditForQaDir(qaDir, options = {}) {
       activeWaivers: waiverCheck.activeWaivers,
       ...(options.baselineRef !== undefined ? { baselineRef: options.baselineRef } : {}),
       explicitBase: explicitDiffBase,
+      requireDiff,
       extraRules: effectiveExtraRules,
       productRuleSpecs: verifiedProductRuleSpecs,
       trustContext,

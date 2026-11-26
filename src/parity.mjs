@@ -5,6 +5,7 @@ import { resolveQaDirectory } from './agents.mjs';
 import { loadWorkbenchConfig } from './core/config.mjs';
 import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import { loadRuntimeConfig } from './core/runtime-config.mjs';
+import { WORKBENCH_VERSION } from './core/version.mjs';
 import { loadMergedQaEnv } from './origin-guard.mjs';
 import { buildParityMarkdown, loadParityRequests, resolveParityPolicy } from './parity/normalizer.mjs';
 import { executeParitySuite, validateDualTargetSafety } from './parity/runner.mjs';
@@ -19,6 +20,10 @@ export { buildParityMarkdown, loadParityRequests, resolveParityPolicy, validateD
  *   qaDir?: string;
  *   baselineUrl?: string;
  *   candidateUrl?: string;
+ *   baselineApiUrl?: string;
+ *   candidateApiUrl?: string;
+ *   authHeaders?: Record<string, string> | string[] | string;
+ *   noAuth?: boolean;
  *   corpus?: string;
  *   routes?: string | string[];
  *   privacyMode?: string;
@@ -60,6 +65,8 @@ export async function runParityCore(options = {}) {
   const candidateUrl = String(
     options.candidateUrl || mergedEnv.TEST_BASE_URL || (runtimeCfgRes.ok ? runtimeCfgRes.config?.baseURL || '' : '')
   ).trim();
+  const baselineApiUrl = options.baselineApiUrl ? String(options.baselineApiUrl).trim() : '';
+  const candidateApiUrl = options.candidateApiUrl ? String(options.candidateApiUrl).trim() : '';
 
   if (!baselineUrl) {
     return { ok: false, outcome: /** @type {const} */ ('usage'), exitCode: 64, error: 'Missing required --baseline-url <url>' };
@@ -76,6 +83,8 @@ export async function runParityCore(options = {}) {
 
   const safety = validateDualTargetSafety(qaDir, baselineUrl, candidateUrl, {
     ...(options.allowMutation !== undefined ? { allowMutation: options.allowMutation } : {}),
+    ...(baselineApiUrl ? { baselineApiUrl } : {}),
+    ...(candidateApiUrl ? { candidateApiUrl } : {}),
   });
   if (!safety.ok || !safety.baseGuard || !safety.candGuard) {
     return {
@@ -115,6 +124,8 @@ export async function runParityCore(options = {}) {
       dryRun: true,
       baselineUrl,
       candidateUrl,
+      ...(baselineApiUrl ? { baselineApiUrl } : {}),
+      ...(candidateApiUrl ? { candidateApiUrl } : {}),
       inputSource: reqSource.source,
       plannedSamples: reqSource.requests.length,
       privacyMode: policy.privacyMode,
@@ -134,10 +145,16 @@ export async function runParityCore(options = {}) {
     qaDir,
     baselineUrl,
     candidateUrl,
+    ...(baselineApiUrl ? { baselineApiUrl } : {}),
+    ...(candidateApiUrl ? { candidateApiUrl } : {}),
     requests: reqSource.requests,
     baseGuard: safety.baseGuard,
     candGuard: safety.candGuard,
+    baseApiGuard: safety.baseApiGuard,
+    candApiGuard: safety.candApiGuard,
     policy,
+    authHeaders: options.authHeaders,
+    noAuth: options.noAuth,
     concurrency: options.concurrency,
     checkAria: Boolean(options.checkAria),
   });
@@ -153,11 +170,26 @@ export async function runParityCore(options = {}) {
     };
   }
 
+  const recoverySteps = suite.authInvalid
+    ? [
+        `Run "npx ai-test-workbench@${WORKBENCH_VERSION} auth-login --target "${options.target}"" to capture fresh playwright/.auth/user.json and session.json.`,
+        'If your SPA and backend API use separate hosts or ports, pass --baseline-api-url <url> (and --candidate-api-url <url>).',
+        'For custom localStorage token keys, configure aitest.config.json#parity.authStorageKeys or pass explicit authHeaders.',
+      ]
+    : [];
+
+  const authBlockedError = suite.authInvalid
+    ? suite.errors[0] ||
+      `Parity blocked (AUTH_OR_SHELL_INVALID): ${suite.authInvalidCount} sample(s) returned 401/403, wrapped {code:401|403}, HTML shell on API route, or /login redirect.`
+    : null;
+
   const report = {
     schemaVersion: 1,
     measuredAt: new Date().toISOString(),
     baselineUrl,
     candidateUrl,
+    ...(baselineApiUrl ? { baselineApiUrl } : {}),
+    ...(candidateApiUrl ? { candidateApiUrl } : {}),
     inputSource: reqSource.source,
     privacyMode: policy.privacyMode,
     strictByteEscape: policy.strictByteEscape,
@@ -169,6 +201,7 @@ export async function runParityCore(options = {}) {
     clusters: suite.clusters,
     perfWarnings: suite.perfWarnings,
     elapsedMs: suite.elapsedMs,
+    ...(suite.authInvalid ? { blockerKind: 'AUTH_OR_SHELL_INVALID', error: authBlockedError } : {}),
   };
 
   const reportsDir = path.join(qaDir, 'reports');
@@ -177,6 +210,21 @@ export async function runParityCore(options = {}) {
   const summaryMdPath = path.join(reportsDir, 'parity-summary.md');
   fs.writeFileSync(reportJsonPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
   fs.writeFileSync(summaryMdPath, buildParityMarkdown(report, lang), 'utf8');
+
+  if (suite.authInvalid) {
+    return {
+      ok: false,
+      outcome: /** @type {const} */ ('blocked'),
+      exitCode: 2,
+      blockerKind: 'AUTH_OR_SHELL_INVALID',
+      error: authBlockedError,
+      errors: suite.errors,
+      recoverySteps,
+      ...report,
+      reportJsonPath,
+      summaryMdPath,
+    };
+  }
 
   return {
     ok: suite.ok,
@@ -219,6 +267,7 @@ export async function runParityCommand(options = {}) {
       exitCode: res.exitCode,
       summary,
       blockerKind: res.blockerKind || (res.exitCode === 64 ? 'USAGE_ERROR' : null),
+      recoverySteps: Array.isArray(res.recoverySteps) ? res.recoverySteps : [],
       data: res,
     }),
     { asJson, compatSpreadData: !res.error }

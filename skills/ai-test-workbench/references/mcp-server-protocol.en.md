@@ -6,7 +6,7 @@
 
 - **Protocol Versions**: `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05` (zero runtime npm dependencies).
 - **Transports**:
-  1. `stdio`: `node tools/aitest.mjs mcp-serve` (or pinned `npx --package=ai-test-workbench@6.4.0 ai-test-workbench mcp-serve`; NDJSON JSON-RPC with isolated child-process execution `AITEST_MCP_CHILD=1` and zero `globalThis.console` mutation).
+  1. `stdio`: `node tools/aitest.mjs mcp-serve` (or pinned `npx --package=ai-test-workbench@6.5.0 ai-test-workbench mcp-serve`; NDJSON JSON-RPC with isolated child-process execution `AITEST_MCP_CHILD=1` and zero `globalThis.console` mutation).
   2. `Streamable HTTP` (`POST/GET/DELETE /mcp`): `initialize`-only session creation, `404 Not Found` on unknown/expired `Mcp-Session-Id`, idle TTL + `maxSessions` eviction, and batch rejection on `>= 2025-06-18`.
   3. `Legacy HTTP+SSE` (`GET /sse` + `POST /messages`): `2024-11-05` compatible.
 - **Progress, Cancellation & Async Backgrounding (`src/jobs.mjs`)**:

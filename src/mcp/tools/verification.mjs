@@ -94,6 +94,7 @@ export const VERIFICATION_TOOLS = [
         target: { type: 'string', description: 'Target repository or QA directory' },
         base: { type: 'string', description: 'Git base ref (default: merge-base or HEAD~1)' },
         files: { type: 'string', description: 'Comma-separated changed file paths to simulate' },
+        repos: { type: 'array', items: { type: 'string' }, description: 'Optional multi-repo source directory paths' },
         qaDir: { type: 'string', description: 'Optional QA subdirectory name or path' },
         lang: { type: 'string', enum: ['zh', 'en'], description: 'Output language code (zh or en)' },
       },
@@ -113,6 +114,9 @@ export const VERIFICATION_TOOLS = [
       pushOpt(a, '--qa-dir', args.qaDir);
       pushOpt(a, '--base', args.base);
       pushOpt(a, '--files', args.files);
+      if (Array.isArray(args.repos)) {
+        for (const r of args.repos) pushOpt(a, '--repo', r);
+      }
       return a;
     },
     nextActions: () => ['Call aitest_verify_change(mode="impact") for fast attested verification.'],
@@ -246,7 +250,8 @@ export const VERIFICATION_TOOLS = [
       pushOpt(a, '--diff-base', args.diffBase);
       pushOpt(a, '--max-flaky', args.maxFlaky);
       pushOpt(a, '--max-skipped', args.maxSkipped);
-      pushBool(a, '--check-specs', args.checkSpecs);
+      if (args.checkSpecs === false) a.push('--no-check-specs');
+      else pushBool(a, '--check-specs', args.checkSpecs);
       pushBool(a, '--require-e2e', args.requireE2e);
       pushBool(a, '--static-only', args.staticOnly);
       return a;

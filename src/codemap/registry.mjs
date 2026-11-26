@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { BUILTIN_BACKEND_ADAPTERS } from './backend-adapters.mjs';
 import { convertBracketSegment, normalizeRoutePath, normalizeSlash } from './route-matcher.mjs';
+import { extractFrontendImportsAndApis } from './vue-api-extractor.mjs';
+import { extractVueRouterRoutes } from './vue-extractor.mjs';
 
 const VIEW_EXTS = [
   '',
@@ -23,13 +25,15 @@ const VIEW_EXTS = [
 /**
  * @typedef {{ route: string, file: string, kind: string }} FrontendRouteEntry
  * @typedef {{ route: string, routerFile: string, importSpec: string, expectedFile: string | null }} BrokenRouteImport
- * @typedef {{ method: string, path: string, file: string }} FrontendApiCall
- * @typedef {{ relSet?: Set<string>, hasSrcDir?: boolean, truncated?: boolean }} SourceFileIndex
+ * @typedef {{ method: string, path: string, file: string, fnName?: string }} FrontendApiCall
+ * @typedef {{ relSet?: Set<string>, lowerToRel?: Map<string, string>, hasSrcDir?: boolean, truncated?: boolean }} SourceFileIndex
  * @typedef {{ filePath: string, relFile: string, ext: string, text: string, repoDir: string, fileIndex?: SourceFileIndex }} FrontendAdapterContext
- * @typedef {{ routes?: FrontendRouteEntry[], brokenImports?: BrokenRouteImport[], apiCalls?: FrontendApiCall[] }} FrontendAdapterResult
+ * @typedef {{ routes?: FrontendRouteEntry[], brokenImports?: BrokenRouteImport[], apiCalls?: FrontendApiCall[], imports?: string[], axiosPrefixes?: string[] }} FrontendAdapterResult
  * @typedef {{ id: string, description?: string, extract: (ctx: FrontendAdapterContext) => FrontendAdapterResult | null | undefined }} FrontendCodeMapAdapter
  * @typedef {import('./backend-adapters.mjs').BackendEndpoint} BackendEndpoint
  * @typedef {import('./backend-adapters.mjs').DbEntity} DbEntity
+ * @typedef {import('./backend-adapters.mjs').JavaFileMeta} JavaFileMeta
+ * @typedef {import('./backend-adapters.mjs').MybatisMapperMeta} MybatisMapperMeta
  * @typedef {import('./backend-adapters.mjs').BackendCodeMapAdapter} BackendCodeMapAdapter
  */
 
@@ -39,11 +43,11 @@ const VIEW_EXTS = [
  * @param {string} repoDir
  * @param {SourceFileIndex} [fileIndex]
  */
-function resolveImportCandidate(baseFile, importSpec, repoDir, fileIndex) {
+export function resolveImportCandidate(baseFile, importSpec, repoDir, fileIndex) {
   let resolvedBase = null;
   if (importSpec.startsWith('./') || importSpec.startsWith('../')) {
     resolvedBase = path.resolve(path.dirname(baseFile), importSpec);
-  } else if (importSpec.startsWith('@/views/') || importSpec.startsWith('@/pages/') || importSpec.startsWith('@/')) {
+  } else if (importSpec.startsWith('@/')) {
     const sub = importSpec.slice(2);
     const hasSrc = fileIndex?.hasSrcDir !== undefined ? fileIndex.hasSrcDir : fs.existsSync(path.join(repoDir, 'src'));
     resolvedBase = hasSrc ? path.join(repoDir, 'src', sub) : path.join(repoDir, sub);
@@ -54,6 +58,8 @@ function resolveImportCandidate(baseFile, importSpec, repoDir, fileIndex) {
     for (const ext of VIEW_EXTS) {
       const candRel = `${baseRel}${ext}`;
       if (fileIndex.relSet.has(candRel)) return { resolvedRel: candRel, exists: true };
+      const ciRel = fileIndex.lowerToRel?.get(candRel.toLowerCase());
+      if (ciRel) return { resolvedRel: ciRel, exists: true };
     }
     if (!fileIndex.truncated) return { resolvedRel: baseRel, exists: false };
   }
@@ -124,62 +130,31 @@ const BUILTIN_FRONTEND_ADAPTERS = [
   },
   {
     id: 'router-config',
-    description: 'Declarative JS/TS router configs (path + lazy import) & JSX <Route>',
+    description: 'Declarative JS/TS/Vue nested & regex router configs + JSX <Route>',
     extract({ filePath, relFile, text, repoDir, fileIndex }) {
-      /** @type {FrontendRouteEntry[]} */
-      const routes = [];
-      /** @type {BrokenRouteImport[]} */
-      const brokenImports = [];
-      if (/\.(?:ts|tsx|js|jsx|mjs)$/.test(relFile) && /path\s*:\s*['"`]/.test(text)) {
-        for (const match of text.matchAll(/path\s*:\s*['"`]([^'"`*?#(]+)['"`]/g)) {
-          const routePath = match[1];
-          if (!routePath.startsWith('/')) continue;
-          const tail = text.slice((match.index || 0) + match[0].length, (match.index || 0) + match[0].length + 260);
-          const boundedBlock = tail.split(/\bpath\s*:/)[0];
-          const importMatch = boundedBlock.match(/import\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/);
-          const importSpec = importMatch ? importMatch[1] : null;
-          let targetFile = relFile;
-          if (importSpec) {
-            const chk = resolveImportCandidate(filePath, importSpec, repoDir, fileIndex);
-            if (chk.resolvedRel) targetFile = chk.resolvedRel;
-            if (!chk.exists) {
-              brokenImports.push({
-                route: normalizeRoutePath(routePath),
-                routerFile: relFile,
-                importSpec,
-                expectedFile: chk.resolvedRel,
-              });
-            }
-          }
-          routes.push({ route: normalizeRoutePath(routePath), file: targetFile, kind: 'router-config' });
-        }
-      }
+      const vueOut = extractVueRouterRoutes({ filePath, relFile, text, repoDir, fileIndex, resolveImportCandidate });
+      const routes = [...vueOut.routes];
       if (/\.[jt]sx$/.test(relFile) && /<Route\b/.test(text)) {
         for (const m of text.matchAll(/<Route\b[^>]*?\bpath\s*=\s*['"`](\/[^'"`*?]+)['"`]/g)) {
           routes.push({ route: normalizeRoutePath(m[1]), file: relFile, kind: 'react-router-jsx' });
         }
       }
-      return { routes, brokenImports };
+      return { routes, brokenImports: vueOut.brokenImports };
     },
   },
   {
     id: 'frontend-api-calls',
-    description: 'Frontend fetch / axios / request({ url }) API call extractor',
-    extract({ relFile, text }) {
-      /** @type {FrontendApiCall[]} */
-      const apiCalls = [];
-      for (const m of text.matchAll(/\bfetch\s*\(\s*['"`]([^'"`$]+)['"`]/g)) {
-        if (m[1].startsWith('/')) apiCalls.push({ method: 'FETCH', path: normalizeRoutePath(m[1]), file: relFile });
-      }
-      for (const m of text.matchAll(/\baxios\.(get|post|put|delete|patch)\s*\(\s*['"`]([^'"`$]+)['"`]/gi)) {
-        if (m[2].startsWith('/')) {
-          apiCalls.push({ method: m[1].toUpperCase(), path: normalizeRoutePath(m[2]), file: relFile });
-        }
-      }
-      for (const m of text.matchAll(/\brequest\s*\(\s*\{\s*[^}]*?url\s*:\s*['"`]([^'"`$]+)['"`]/gi)) {
-        if (m[1].startsWith('/')) apiCalls.push({ method: 'REQUEST', path: normalizeRoutePath(m[1]), file: relFile });
-      }
-      return { apiCalls };
+    description: 'Frontend fetch / axios / request({ url }) API calls, static imports & axios wrapper prefixes',
+    extract({ filePath, relFile, ext, text, repoDir, fileIndex }) {
+      return extractFrontendImportsAndApis({
+        filePath,
+        relFile,
+        ext,
+        text,
+        repoDir,
+        fileIndex,
+        resolveImportCandidate,
+      });
     },
   },
 ];
@@ -210,14 +185,9 @@ export function registerCodeMapAdapter(kind, adapter, options = {}) {
 
   const list = /** @type {Array<{ id: string }>} */ (kind === 'frontend' ? frontendAdapters : backendAdapters);
   const existingIdx = list.findIndex((a) => a.id === adapter.id);
-  if (existingIdx >= 0) {
-    list.splice(existingIdx, 1);
-  }
-  if (options.prepend) {
-    list.unshift(adapter);
-  } else {
-    list.push(adapter);
-  }
+  if (existingIdx >= 0) list.splice(existingIdx, 1);
+  if (options.prepend) list.unshift(adapter);
+  else list.push(adapter);
   return adapter.id;
 }
 

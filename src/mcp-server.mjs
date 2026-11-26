@@ -85,17 +85,19 @@ export async function runMcpServeCommand(options = {}) {
   process.on('unhandledRejection', onUnhandledRejection);
 
   try {
+    const parsedRoots = options.workspaceRoots ? parseWorkspaceRoots(options.workspaceRoots) : [];
     if (transport === 'stdio') {
       return await startStdioMcpServer({
         defaultTarget: options.target,
         lang: options.lang,
-        workspaceRoots: options.workspaceRoots,
+        workspaceRoots: parsedRoots.length > 0 ? parsedRoots : undefined,
       });
     }
 
     const host = options.host || '127.0.0.1';
     const port = options.port !== undefined ? Number(options.port) : 3847;
-    const workspaceRoots = options.workspaceRoots || (options.target ? [options.target] : [process.cwd()]);
+    const workspaceRoots =
+      parsedRoots.length > 0 ? parsedRoots : options.target ? [options.target] : [process.cwd()];
 
     const server = createMcpHttpServer({
       host,

@@ -1,6 +1,10 @@
-import { spawnSync } from 'node:child_process';
+// @ts-check
 import fs from 'node:fs';
 import path from 'node:path';
+import { canonicalFsPath, execGitSync } from './git-exec.mjs';
+import { clearGitIgnoreCache, isPathGitIgnored } from './git-ignore.mjs';
+
+export { canonicalFsPath, clearGitIgnoreCache, execGitSync, isPathGitIgnored };
 
 /**
  * Authoritative Git & Workspace Fingerprinting Utilities (`G-07`, `G-10`, `T-05`).
@@ -12,22 +16,6 @@ import path from 'node:path';
  * 3. External raw unified diffs are still unquoted via `unquoteGitPath()` in case callers
  *    generated diffs without `core.quotePath=off`.
  */
-
-/**
- * @param {string} cwd
- * @param {string[]} args
- * @param {{ timeoutMs?: number, maxBuffer?: number }} [options]
- */
-export function execGitSync(cwd, args, options = {}) {
-  return spawnSync('git', ['-c', 'core.quotePath=off', ...args], {
-    cwd,
-    shell: false,
-    encoding: 'utf8',
-    windowsHide: true,
-    timeout: options.timeoutMs ?? 15_000,
-    maxBuffer: options.maxBuffer ?? 32 * 1024 * 1024,
-  });
-}
 
 /**
  * Unquotes a Git C-style quoted path (e.g. `"b/\346\265\213\350\257\225/qa/playwright.config.ts"`)
@@ -118,35 +106,6 @@ export function parseGitDiffHeaderPath(headerLine) {
   return candidate.replace(/^[ab]\//, '').replace(/\\/g, '/') || 'unknown';
 }
 
-/**
- * Canonicalizes a filesystem path via `fs.realpathSync.native` (resolving Windows 8.3 short paths
- * such as `RUNNER~1`, directory junctions, and macOS `/var` -> `/private/var` symlinks).
- * For not-yet-existing paths, walks up to the nearest existing ancestor and rejoins trailing segments.
- * @param {string} p
- * @returns {string}
- */
-export function canonicalFsPath(p) {
-  const resolved = path.resolve(p);
-  const realpathNative =
-    typeof fs.realpathSync.native === 'function' ? fs.realpathSync.native : fs.realpathSync;
-  try {
-    if (fs.existsSync(resolved)) return realpathNative(resolved);
-    let cur = resolved;
-    /** @type {string[]} */
-    const tail = [];
-    while (!fs.existsSync(cur)) {
-      const parent = path.dirname(cur);
-      if (parent === cur) break;
-      tail.unshift(path.basename(cur));
-      cur = parent;
-    }
-    const realAncestor = fs.existsSync(cur) ? realpathNative(cur) : cur;
-    return tail.length > 0 ? path.join(realAncestor, ...tail) : realAncestor;
-  } catch {
-    return resolved;
-  }
-}
-
 const canonicalPath = canonicalFsPath;
 
 const GIT_ROOT_CACHE_MAX = 128;
@@ -154,9 +113,10 @@ const GIT_ROOT_CACHE_TTL_MS = 5_000;
 /** @type {Map<string, { gitRoot: string, cachedAt: number }>} */
 const gitRootCache = new Map();
 
-/** Clears the bounded in-memory `resolveGitRoot` cache (intended for tests and workspace resets). */
+/** Clears the bounded in-memory `resolveGitRoot` and `isPathGitIgnored` caches (intended for tests and workspace resets). */
 export function clearGitRootCache() {
   gitRootCache.clear();
+  clearGitIgnoreCache();
 }
 
 /**

@@ -2,7 +2,7 @@
 import { runCorpusCommand } from '../corpus.mjs';
 import { runLearnCommand } from '../learn.mjs';
 import { runParityCommand } from '../parity.mjs';
-import { BOOL, STR, TARGET_OPTS, makeCommon } from './opts.mjs';
+import { BOOL, STR, STR_MULTI, TARGET_OPTS, makeCommon } from './opts.mjs';
 
 /**
  * CLI command definitions for `parity`, `corpus`, and `learn` (`WU-A`, `WU-B`, `WU-D`).
@@ -15,6 +15,10 @@ export const PARITY_CLI_COMMANDS = {
       ...TARGET_OPTS,
       'baseline-url': STR,
       'candidate-url': STR,
+      'baseline-api-url': STR,
+      'candidate-api-url': STR,
+      'auth-header': STR_MULTI,
+      'no-auth': BOOL,
       corpus: STR,
       routes: STR,
       'privacy-mode': STR,
@@ -32,6 +36,10 @@ export const PARITY_CLI_COMMANDS = {
         ...makeCommon(v, lang),
         baselineUrl: v['baseline-url'],
         candidateUrl: v['candidate-url'],
+        baselineApiUrl: v['baseline-api-url'],
+        candidateApiUrl: v['candidate-api-url'],
+        authHeaders: v['auth-header'],
+        noAuth: Boolean(v['no-auth']),
         corpus: v.corpus,
         routes: v.routes,
         privacyMode: v['privacy-mode'],
@@ -71,6 +79,8 @@ export const PARITY_CLI_COMMANDS = {
       ...TARGET_OPTS,
       action: STR,
       sweep: BOOL,
+      repo: STR_MULTI,
+      'max-files': STR,
       'from-reviews': STR,
       'dry-run': BOOL,
     },
@@ -80,6 +90,9 @@ export const PARITY_CLI_COMMANDS = {
         ...makeCommon(v, lang),
         action: v.action || pos[0] || 'distill',
         sweep: Boolean(v.sweep),
+        repo: Array.isArray(v.repo) ? v.repo[0] : v.repo,
+        repos: Array.isArray(v.repo) ? v.repo : v.repo ? [v.repo] : undefined,
+        maxFiles: v['max-files'] !== undefined ? Number(v['max-files']) : undefined,
         fromReviews: v['from-reviews'],
       }),
   },

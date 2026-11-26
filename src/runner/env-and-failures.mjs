@@ -1,5 +1,6 @@
 // @ts-check
 import fs from 'node:fs';
+import { flattenPlaywrightResults } from '../core/playwright-results.mjs';
 import { redactSecrets } from '../core/redact.mjs';
 import { sanitizeProxyUrlEnvValue } from '../jobs/workspace-lock.mjs';
 
@@ -195,4 +196,57 @@ export function extractRunnerFailedSpecs(tests) {
         ...(locatorSuggestions.length > 0 ? { locatorSuggestions } : {}),
       };
     });
+}
+
+/**
+ * Summarizes an isolated Playwright JSON results file without touching global Run Ledger state.
+ * @param {string | null | undefined} resultsPath
+ */
+export function summarizePlaywrightResultsFile(resultsPath) {
+  if (!resultsPath || !fs.existsSync(resultsPath)) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
+    const flat = flattenPlaywrightResults(parsed);
+    let passed = 0;
+    let failed = 0;
+    let flaky = 0;
+    let skipped = 0;
+    const mappedTests = flat.map((t) => {
+      const isFlaky = t.status === 'flaky' || Boolean(t.retryPassed);
+      if (t.status === 'skipped') skipped += 1;
+      else if (isFlaky) flaky += 1;
+      else if (t.status === 'unexpected') failed += 1;
+      else if (t.status === 'expected') passed += 1;
+      const firstFailed = (t.results || []).find(
+        (/** @type {any} */ r) => r?.error || (Array.isArray(r?.errors) && r.errors.length > 0)
+      );
+      const errMsg =
+        firstFailed?.error?.message ||
+        firstFailed?.error?.stack ||
+        (firstFailed?.errors || [])[0]?.message ||
+        null;
+      return {
+        testId: t.testId,
+        file: t.file,
+        line: t.line,
+        title: t.title,
+        status: isFlaky ? 'flaky' : t.status,
+        errorSnippet: errMsg ? String(errMsg).slice(0, 800) : null,
+        attachments: firstFailed?.attachments || [],
+      };
+    });
+    return {
+      counts: {
+        total: flat.length,
+        executed: passed + failed + flaky,
+        passed,
+        failed,
+        flaky,
+        skipped,
+      },
+      tests: mappedTests,
+    };
+  } catch {
+    return null;
+  }
 }

@@ -17,7 +17,70 @@ const SAFE_READONLY_DIALOG_RE =
 const SENSITIVE_QUERY_KEY_RE =
   /(token|key|secret|password|passwd|pwd|mobile|phone|tel|idcard|card|email|code|ticket|auth|session|cookie|sig|sign)/i;
 
+const NON_CRAWLABLE_SYSTEM_ROUTE_RE =
+  /\/(?:401|403|404|500|loading|logout|signout|download)(?:\/|$)|\/redirect(?:\/|$)/i;
+
+const READ_QUERY_POST_SEGMENT_RE =
+  /(?:^|\/|-|_)(?:get|list|query|search|page|find|count|detail)[-_a-z0-9]*$/i;
+
 export { evaluateExploreRequestSafety };
+
+/**
+ * Returns true for system error/utility routes (`/401`, `/403`, `/404`, `/500`, `/redirect`,
+ * `/redirect/**`, `/loading`, `/logout`, etc.) that should be excluded from automatic crawling.
+ * @param {string} routePath
+ * @returns {boolean}
+ */
+export function isNonCrawlableSystemRoute(routePath) {
+  const clean = String(routePath || '/').split('?')[0].split('#')[0];
+  return NON_CRAWLABLE_SYSTEM_ROUTE_RE.test(clean);
+}
+
+/**
+ * Returns true when a blocked POST request's last path segment matches common read-query naming
+ * (suggesting a human-verifiable `EXPLORE_SAFE_POST_PATHS` candidate).
+ * @param {string} rawUrl
+ * @param {string} [baseURL]
+ * @returns {boolean}
+ */
+export function isSuspectedReadQueryPostUrl(rawUrl, baseURL = 'http://placeholder.local') {
+  try {
+    const pathname = new URL(String(rawUrl || ''), baseURL).pathname;
+    const lastSeg = pathname.split('/').filter(Boolean).pop() || '';
+    return READ_QUERY_POST_SEGMENT_RE.test(lastSeg);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Returns true when a request targets a configured `TEST_ABORT_THIRD_PARTY_HOSTS` hostname
+ * (and is NOT `baseURL` or an explicitly allowed host), so explore/perf silently abort without
+ * logging noisy blocked-egress errors.
+ * @param {string} rawUrl
+ * @param {Record<string, any> | null | undefined} guardConfig
+ * @returns {boolean}
+ */
+export function shouldSilentlyAbortThirdPartyHost(rawUrl, guardConfig) {
+  const patterns = Array.isArray(guardConfig?.abortThirdPartyHosts)
+    ? guardConfig.abortThirdPartyHosts.map((/** @type {string} */ s) => String(s).trim().toLowerCase()).filter(Boolean)
+    : [];
+  if (patterns.length === 0) return false;
+  try {
+    const hostname = new URL(String(rawUrl || '')).hostname.toLowerCase();
+    if (!hostname) return false;
+    const baseHost = guardConfig?.baseURL ? new URL(guardConfig.baseURL).hostname.toLowerCase() : '';
+    if (hostname === baseHost) return false;
+    const allowed = Array.from(guardConfig?.allowedHosts || []).map((/** @type {unknown} */ h) => String(h).toLowerCase());
+    if (allowed.includes(hostname)) return false;
+    return patterns.some((/** @type {string} */ p) => {
+      const norm = p.replace(/^\*\./, '');
+      return hostname === norm || hostname.endsWith(`.${norm}`);
+    });
+  } catch {
+    return false;
+  }
+}
 
 /** @param {string} label */
 export function classifyActionSafety(label) {
@@ -41,18 +104,23 @@ export function isSafeReadonlyDialogTrigger(label) {
 }
 
 /**
- * Domain-stratified round-robin BFS queue so multi-module SaaS exploration covers every
- * top-level domain evenly (e.g. /teach, /live, /student, /finance, /admin) rather than
- * exhausting maxPages inside the first module.
+ * 3-tier domain-stratified round-robin BFS queue (`primary` > `secondary` > `fallback`) so multi-module
+ * SaaS exploration prioritizes visible sidebar/menu DOM links over router tree and flat fallback routes
+ * while covering every top-level domain evenly.
  */
 export function createStratifiedRouteQueue() {
-  /** @type {Map<string, string[]>} */
-  const buckets = new Map();
+  /** @type {Array<'primary' | 'secondary' | 'fallback'>} */
+  const TIERS = ['primary', 'secondary', 'fallback'];
+  /** @type {Record<'primary' | 'secondary' | 'fallback', { buckets: Map<string, string[]>, bucketOrder: string[], cursor: number }>} */
+  const queues = {
+    primary: { buckets: new Map(), bucketOrder: [], cursor: 0 },
+    secondary: { buckets: new Map(), bucketOrder: [], cursor: 0 },
+    fallback: { buckets: new Map(), bucketOrder: [], cursor: 0 },
+  };
+  /** @type {Map<string, 'primary' | 'secondary' | 'fallback'>} */
+  const queuedTier = new Map();
   /** @type {Set<string>} */
-  const seen = new Set();
-  /** @type {string[]} */
-  const bucketOrder = [];
-  let cursor = 0;
+  const dequeued = new Set();
 
   const getDomainKey = (/** @type {string} */ route) => {
     const clean = String(route || '/').split('?')[0].replace(/^\/+/, '');
@@ -60,43 +128,82 @@ export function createStratifiedRouteQueue() {
     return `/${clean.split('/')[0]}`;
   };
 
+  /** @param {'primary' | 'secondary' | 'fallback'} tier @param {string} normalized */
+  const pushToTier = (tier, normalized) => {
+    const q = queues[tier];
+    const key = getDomainKey(normalized);
+    let bucket = q.buckets.get(key);
+    if (!bucket) {
+      bucket = [];
+      q.buckets.set(key, bucket);
+      q.bucketOrder.push(key);
+    }
+    bucket.push(normalized);
+  };
+
+  /** @param {'primary' | 'secondary' | 'fallback'} tier @param {string} normalized */
+  const removeFromTier = (tier, normalized) => {
+    const q = queues[tier];
+    const list = q.buckets.get(getDomainKey(normalized));
+    if (!list) return;
+    const idx = list.indexOf(normalized);
+    if (idx >= 0) list.splice(idx, 1);
+  };
+
   return {
-    /** @param {string} route */
-    enqueue(route) {
+    /** @param {string} route @param {'primary' | 'secondary' | 'fallback'} [tier] */
+    enqueue(route, tier = 'primary') {
       const normalized = String(route || '/');
-      if (seen.has(normalized)) return false;
-      seen.add(normalized);
-      const key = getDomainKey(normalized);
-      let bucket = buckets.get(key);
-      if (!bucket) {
-        bucket = [];
-        buckets.set(key, bucket);
-        bucketOrder.push(key);
+      const targetTier = TIERS.includes(tier) ? tier : 'primary';
+      if (dequeued.has(normalized)) return false;
+      const prevTier = queuedTier.get(normalized);
+      if (prevTier) {
+        if (TIERS.indexOf(targetTier) < TIERS.indexOf(prevTier)) {
+          removeFromTier(prevTier, normalized);
+          pushToTier(targetTier, normalized);
+          queuedTier.set(normalized, targetTier);
+          return true;
+        }
+        return false;
       }
-      bucket.push(normalized);
+      queuedTier.set(normalized, targetTier);
+      pushToTier(targetTier, normalized);
       return true;
     },
     dequeue() {
-      const totalBuckets = bucketOrder.length;
-      if (totalBuckets === 0) return null;
-      for (let i = 0; i < totalBuckets; i += 1) {
-        const idx = (cursor + i) % totalBuckets;
-        const key = bucketOrder[idx];
-        const list = buckets.get(key);
-        if (list && list.length > 0) {
-          cursor = (idx + 1) % totalBuckets;
-          return list.shift() ?? null;
+      for (const tier of TIERS) {
+        const q = queues[tier];
+        const totalBuckets = q.bucketOrder.length;
+        for (let i = 0; i < totalBuckets; i += 1) {
+          const idx = (q.cursor + i) % totalBuckets;
+          const key = q.bucketOrder[idx];
+          const list = q.buckets.get(key);
+          if (list && list.length > 0) {
+            q.cursor = (idx + 1) % totalBuckets;
+            const next = list.shift() ?? null;
+            if (next !== null) {
+              dequeued.add(next);
+              queuedTier.delete(next);
+            }
+            return next;
+          }
         }
       }
       return null;
     },
     size() {
       let n = 0;
-      for (const list of buckets.values()) n += list.length;
+      for (const tier of TIERS) {
+        for (const list of queues[tier].buckets.values()) n += list.length;
+      }
       return n;
     },
     domains() {
-      return [...bucketOrder];
+      const seenDomains = new Set();
+      for (const tier of TIERS) {
+        for (const d of queues[tier].bucketOrder) seenDomains.add(d);
+      }
+      return [...seenDomains];
     },
   };
 }
@@ -157,36 +264,54 @@ export function detectEnvelopeBusinessError(httpStatus, body) {
 }
 
 /**
- * Extracts navigable static paths from Vue Router / Vuex permission trees (RuoYi / Yudao / ElementUI).
- * Skips `hidden: true`, parameterized `:id` segments, wildcards `*`, and external URLs.
+ * Extracts navigable static paths AND inherited hidden paths from Vue Router / Vuex permission trees.
+ * Child routes under a `hidden: true` parent inherit hidden status (`WB-P1-04`), and system error/utility
+ * routes (`/401`, `/403`, `/404`, `/500`, `/redirect/**`, `/loading`) are filtered out.
  * @param {Array<any>} routeTrees
+ * @returns {{ routes: string[], hiddenRoutes: string[] }}
  */
-export function extractVueDynamicRoutes(routeTrees = []) {
+export function extractVueRouteInventory(routeTrees = []) {
   /** @type {Set<string>} */
   const out = new Set();
-  /** @param {any[]} routes @param {string} [prefix] */
-  const walk = (routes, prefix = '') => {
+  /** @type {Set<string>} */
+  const hiddenOut = new Set();
+  /** @param {any[]} routes @param {string} [prefix] @param {boolean} [parentHidden] */
+  const walk = (routes, prefix = '', parentHidden = false) => {
     for (const r of routes || []) {
-      if (!r || r.hidden) continue;
+      if (!r) continue;
+      const isHidden = parentHidden || Boolean(r.hidden || r.meta?.hidden);
       const rawPath = typeof r.path === 'string' ? r.path.trim() : '';
       if (!rawPath || rawPath.includes('*') || rawPath.includes(':') || /^https?:\/\//i.test(rawPath)) {
         if (Array.isArray(r.children) && r.children.length > 0 && !rawPath.includes(':')) {
-          walk(r.children, prefix);
+          walk(r.children, prefix, isHidden);
         }
         continue;
       }
       const full = (rawPath.startsWith('/') ? rawPath : `${prefix.replace(/\/$/, '')}/${rawPath}`).replace(/\/+/g, '/');
+      if (isHidden && full && full !== '/') {
+        hiddenOut.add(full);
+      }
       if (Array.isArray(r.children) && r.children.length > 0) {
-        walk(r.children, full);
-      } else if (full && full !== '/') {
+        walk(r.children, full, isHidden);
+      } else if (full && full !== '/' && !isHidden && !isNonCrawlableSystemRoute(full)) {
         out.add(full);
       }
     }
   };
   for (const tree of routeTrees) {
-    if (Array.isArray(tree)) walk(tree, '');
+    if (Array.isArray(tree)) walk(tree, '', false);
   }
-  return [...out];
+  return { routes: [...out], hiddenRoutes: [...hiddenOut] };
+}
+
+/**
+ * Extracts navigable static paths from Vue Router / Vuex permission trees (RuoYi / Yudao / ElementUI).
+ * Skips `hidden: true` (including descendants), parameterized `:id` segments, wildcards `*`, external URLs,
+ * and system error/utility routes.
+ * @param {Array<any>} routeTrees
+ */
+export function extractVueDynamicRoutes(routeTrees = []) {
+  return extractVueRouteInventory(routeTrees).routes;
 }
 
 /** @param {{ route?: string, actualPath?: string, tableHeaders?: string[], filterLabels?: string[], buttons?: string[], hasPasswordInput?: boolean, hasChart?: boolean, hasTable?: boolean }} [pageInfo] */

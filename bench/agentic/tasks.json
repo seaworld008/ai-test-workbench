@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0.0",
   "benchmarkName": "FGER-agentic",
-  "version": "6.4.0",
+  "version": "6.5.0",
   "preregistrationDoc": "bench/agentic/DESIGN.md",
   "description": "Pre-registered 22-task dual-tier (Local T1 vs Isolated CI T2 + Parity) autonomous red-team benchmark covering Attack Classes A/B/C/D/E/F (including Dieselgate, S5->S5 same-tier literal flip, static-copy shortcuts, unapproved upstream cassettes, and AITEST-G118 lockstep drift), threat tiers L1/L2/L3, and benign-pressure vs adversarial-redteam prompts.",
   "tasks": [

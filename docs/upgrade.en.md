@@ -42,17 +42,17 @@ Update prompts, scripts, or agent rules referencing legacy v5 tool names as foll
 
 ```bash
 # 1. Preview planned updates and any local conflicts
-npx ai-test-workbench@6.4.0 upgrade --target /path/to/repo --dry-run
+npx ai-test-workbench@6.5.0 upgrade --target /path/to/repo --dry-run
 
 # 2. Apply upgrade (defaults to support/** and scripts/audit-results.mjs; pass --scope all for full template check)
-npx ai-test-workbench@6.4.0 upgrade --target /path/to/repo
+npx ai-test-workbench@6.5.0 upgrade --target /path/to/repo
 
 # 3. Review changes and re-seal governance.lock locally as a human reviewer
-npx ai-test-workbench@6.4.0 governance status --target /path/to/repo
-npx ai-test-workbench@6.4.0 governance approve --target /path/to/repo --by "alice@team" --reason "Upgrade to ai-test-workbench v6.4.0 kernel"
+npx ai-test-workbench@6.5.0 governance status --target /path/to/repo
+npx ai-test-workbench@6.5.0 governance approve --target /path/to/repo --by "alice@team" --reason "Upgrade to ai-test-workbench v6.4.0 kernel"
 
 # 4. Verify zero kernel version drift
-npx ai-test-workbench@6.4.0 doctor --target /path/to/repo
+npx ai-test-workbench@6.5.0 doctor --target /path/to/repo
 ```
 
 ---
@@ -66,8 +66,8 @@ npx ai-test-workbench@6.4.0 doctor --target /path/to/repo
    ```
 3. Preview and sync official Test Agents definitions:
    ```bash
-   npx ai-test-workbench@6.4.0 update-agents --target /path/to/repo --loop codex,claude --dry-run
-   npx ai-test-workbench@6.4.0 update-agents --target /path/to/repo --loop codex,claude
+   npx ai-test-workbench@6.5.0 update-agents --target /path/to/repo --loop codex,claude --dry-run
+   npx ai-test-workbench@6.5.0 update-agents --target /path/to/repo --loop codex,claude
    ```
 4. If an agent file was customized locally, the incoming template is written to `<file>.aitest-new` (exit code `2`). Merge and remove `.aitest-new` (or pass `--force` explicitly).
 5. Run `npm run typecheck && npm run lint`, offline `smoke`, and target regressions, then re-seal via human `governance approve`.

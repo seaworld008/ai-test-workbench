@@ -4,7 +4,11 @@ import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 import { resolvePlaywrightPackage } from '../core/playwright-resolve.mjs';
-import { detectEnvelopeBusinessError, redactEndpointUrl } from '../explore/safety.mjs';
+import {
+  detectEnvelopeBusinessError,
+  redactEndpointUrl,
+  shouldSilentlyAbortThirdPartyHost,
+} from '../explore/safety.mjs';
 import { computeNextRedirectRequest, MAX_REDIRECT_HOPS, REDIRECT_STATUSES } from '../kernel/target-redirect.mjs';
 import { checkOutgoingRequestSafety } from '../origin-guard.mjs';
 import { computeLatencyPercentiles, medianOfNullable, p75OfNullable } from './budget.mjs';
@@ -51,6 +55,10 @@ export async function runBrowserPerfProfile(qaDir, baseURL, routes, options = {}
     if (guardCfg) {
       if (typeof context.routeWebSocket === 'function') {
         await context.routeWebSocket('**/*', (/** @type {any} */ ws) => {
+          if (shouldSilentlyAbortThirdPartyHost(ws.url(), guardCfg)) {
+            void ws.close({ code: 1008, reason: 'Third-party host aborted silently' });
+            return;
+          }
           const wsCheck = checkOutgoingRequestSafety('GET', ws.url(), {
             ...guardCfg,
             strictReadonly: true,
@@ -67,6 +75,10 @@ export async function runBrowserPerfProfile(qaDir, baseURL, routes, options = {}
         let curMethod = req.method().toUpperCase();
         let curUrl = req.url();
         let curHeaders = { ...req.headers() };
+        if (shouldSilentlyAbortThirdPartyHost(curUrl, guardCfg)) {
+          await route.abort('blockedbyclient');
+          return;
+        }
         const initCheck = checkOutgoingRequestSafety(curMethod, curUrl, {
           ...guardCfg,
           strictReadonly: true,
@@ -131,6 +143,15 @@ export async function runBrowserPerfProfile(qaDir, baseURL, routes, options = {}
       (/** @type {{ sessionPayload: any }} */ { sessionPayload }) => {
         if (sessionPayload?.origin && Array.isArray(sessionPayload.entries) && window.location.origin === sessionPayload.origin) {
           for (const [k, v] of sessionPayload.entries) window.sessionStorage.setItem(k, v);
+        }
+        try {
+          const nowStr = String(Date.now());
+          for (const k of ['lastRecordTime', 'lastActiveTime']) {
+            const cur = window.localStorage.getItem(k);
+            if (cur !== null && /^\d+$/.test(cur.trim())) window.localStorage.setItem(k, nowStr);
+          }
+        } catch {
+          // ignore opaque origin storage restriction
         }
 
         const anyWin = /** @type {any} */ (window);

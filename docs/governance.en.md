@@ -8,7 +8,7 @@
 
 ## 1. Four-Layer Anti-Fake-Green Gate Kernel (`src/kernel/gate/`)
 
-Every `npx ai-test-workbench@6.4.0 audit`, `npx ai-test-workbench@6.4.0 run --audit`, or `npx ai-test-workbench@6.4.0 verify-change` evaluates four fail-closed layers (any missing dependency, ledger, lock, or unbound input yields tri-state `blocked`, exit code `2`):
+Every `npx ai-test-workbench@6.5.0 audit`, `npx ai-test-workbench@6.5.0 run --audit`, or `npx ai-test-workbench@6.5.0 verify-change` evaluates four fail-closed layers (any missing dependency, ledger, lock, or unbound input yields tri-state `blocked`, exit code `2`):
 
 | Layer | Gate | Core Checks | Blocked Cheat Patterns |
 |---|---|---|---|
@@ -19,16 +19,16 @@ Every `npx ai-test-workbench@6.4.0 audit`, `npx ai-test-workbench@6.4.0 run --au
 
 ---
 
-## 2. Human-Only Governance Approval (`npx ai-test-workbench@6.4.0 governance`)
+## 2. Human-Only Governance Approval (`npx ai-test-workbench@6.5.0 governance`)
 
 Protected files are sealed in `<repo>/qa/.aitest/governance.lock` with an append-only `.aitest/governance-audit.jsonl` trail:
 
 ```bash
 # Inspect protected governance file hashes (read-only)
-npx ai-test-workbench@6.4.0 governance status --target "/path/to/repo"
+npx ai-test-workbench@6.5.0 governance status --target "/path/to/repo"
 
 # Re-seal governance.lock locally as a human after intentional config, known-blockers.json, or project-rules.json edits
-npx ai-test-workbench@6.4.0 governance approve --target "/path/to/repo" --by "alice@team" --reason "Update staging perf budget"
+npx ai-test-workbench@6.5.0 governance approve --target "/path/to/repo" --by "alice@team" --reason "Update staging perf budget"
 ```
 
 > [!IMPORTANT]
@@ -36,7 +36,7 @@ npx ai-test-workbench@6.4.0 governance approve --target "/path/to/repo" --by "al
 
 ---
 
-## 3. Stateful Heal Governance (`npx ai-test-workbench@6.4.0 heal` / `aitest_heal`)
+## 3. Stateful Heal Governance (`npx ai-test-workbench@6.5.0 heal` / `aitest_heal`)
 
 All failure remediation flows through a T1-MAC-protected state machine (if the failure matches an `open` entry in governance-locked `qa/known-blockers.json`, `begin` hard-blocks immediately with `blockerLinked: true` and exit code `2`):
 
@@ -57,7 +57,7 @@ All failure remediation flows through a T1-MAC-protected state machine (if the f
 
 ---
 
-## 5. One-Call Change Verdict (`npx ai-test-workbench@6.4.0 verify-change` / `aitest_verify_change`)
+## 5. One-Call Change Verdict (`npx ai-test-workbench@6.5.0 verify-change` / `aitest_verify_change`)
 
 Chains the full fail-closed pipeline in one call:
 `governance verify` -> `Git merge-base` -> `Import-Graph Impact v2` -> `Playwright Run (Run Ledger)` -> `4-Layer Gate Audit` -> `Optional Dual-Target Parity (--mode parity)` -> `Heal Conflict Check` -> `Diagnose & Trace Matrix`, producing:
@@ -78,6 +78,6 @@ Chains the full fail-closed pipeline in one call:
 - Wire `.github/workflows/aitest-verify.yml` via [examples/workflows/use-aitest-verify.yml](../examples/workflows/use-aitest-verify.yml).
 - Verify attestations offline with:
   ```bash
-  npx ai-test-workbench@6.4.0 attest verify --file <attestation.json> --bundle <attestation.sigstore.json> --expect-repo <owner/repo> --expect-workflow <workflow-path> --expect-ref <ref>
+  npx ai-test-workbench@6.5.0 attest verify --file <attestation.json> --bundle <attestation.sigstore.json> --expect-repo <owner/repo> --expect-workflow <workflow-path> --expect-ref <ref>
   ```
 - Private repository note: `signer: github-attest` (default) uses GitHub Artifact Attestations (requires GitHub Enterprise Cloud on private repos); `signer: cosign` logs repository identity to the public Rekor transparency log.

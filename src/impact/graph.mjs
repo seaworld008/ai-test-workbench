@@ -4,7 +4,9 @@ import path from 'node:path';
 import { compileGlob } from '../core/glob.mjs';
 import { runProcess } from '../core/proc.mjs';
 import { canonicalFsPath, resolveGitRoot } from '../kernel/gate-kernel.mjs';
+import { addJavaAndXmlReverseEdges, isIgnoredWorkbenchArtifactPath } from './java-support.mjs';
 import {
+  DEFAULT_PER_REPO_GRAPH_FILES,
   MAX_GRAPH_FILES,
   buildRepoSourceIndex,
   resolveRepoImportFromIndex,
@@ -31,6 +33,8 @@ export const GLOBAL_INFRA_PATTERNS = [
   /(^|\/)tailwind\.config\.[mc]?[jt]s$/i,
   /(^|\/)(?:src\/)?(router|interceptor|interceptors|middleware|store|auth|permission|gateway)(\/|\.(?:[jt]sx?|mjs|vue)$)/i,
 ];
+
+const ROUTER_FILE_RE = /(?:^|\/)(?:[a-z0-9_-]*-)?(?:router|routes)(?:\/|\.|-[a-z])/i;
 
 /** @param {string} pattern @returns {boolean} */
 export function isOverbroadCatchAllGlob(pattern) {
@@ -87,9 +91,7 @@ function loadTsConfigPathAliases(repoDir) {
         const tPrefix = t0.endsWith('*') ? t0.slice(0, -1) : t0;
         const absTarget = canonicalFsPath(path.resolve(baseUrl, tPrefix));
         const targetRelPrefix = path.relative(realRepoDir, absTarget).replace(/\\/g, '/').replace(/\/+$/, '');
-        if (!targetRelPrefix.startsWith('..')) {
-          aliases.push({ prefix, targetRelPrefix });
-        }
+        if (!targetRelPrefix.startsWith('..')) aliases.push({ prefix, targetRelPrefix });
       }
     } catch {
       // ignore non-standard tsconfig
@@ -99,51 +101,107 @@ function loadTsConfigPathAliases(repoDir) {
 }
 
 /**
- * Builds a static reverse import graph (`targetRel -> Set<importerRel>`) across TS/JS/Vue files.
- * Uses a single-pass in-memory source index (zero per-import `fs.existsSync`/`statSync` storms)
- * and strips comments before scanning imports.
+ * Indexes a single repository into `reverse` + `routeRegistrationEdges` (without router hub reverse explosion).
  * @param {string} repoDir
- * @param {{ includeQa?: boolean, maxFiles?: number }} [options]
+ * @param {Map<string, Set<string>>} reverse
+ * @param {Map<string, Set<string>>} routeRegEdges
+ * @param {{ includeQa?: boolean, maxFiles?: number, prefix?: string }} options
  */
-export function buildReverseImportGraph(repoDir, options = {}) {
-  /** @type {Map<string, Set<string>> & { truncated?: boolean }} */
-  const reverse = new Map();
-  reverse.truncated = false;
-  if (!repoDir || !fs.existsSync(repoDir)) return reverse;
-
+function populateRepoIntoReverseGraph(repoDir, reverse, routeRegEdges, options) {
   const pathAliases = loadTsConfigPathAliases(repoDir);
   const index = buildRepoSourceIndex(repoDir, {
     includeQa: Boolean(options.includeQa),
-    maxFiles: options.maxFiles ?? MAX_GRAPH_FILES,
+    maxFiles: options.maxFiles ?? DEFAULT_PER_REPO_GRAPH_FILES,
   });
-  reverse.truncated = index.truncated;
 
+  /** @type {Map<string, Set<string>>} */
+  const localReverse = new Map();
   const importRe =
     /(?:import\s+(?:[^'"`;]{0,200}\s+from\s+)?['"`]([^'"`]+)['"`]|export\s+[^'"`;]{0,200}\s+from\s+['"`]([^'"`]+)['"`]|import\s*\(\s*['"`]([^'"`]+)['"`]\s*\)|require\s*\(\s*['"`]([^'"`]+)['"`]\s*\))/g;
 
   for (const { full, rel: fromRel } of index.files) {
+    if (fromRel.endsWith('.java') || fromRel.endsWith('.xml')) continue;
     let stat;
-    try {
-      stat = fs.statSync(full);
-    } catch {
-      continue;
-    }
+    try { stat = fs.statSync(full); } catch { continue; }
     if (stat.size > 512 * 1024) continue;
     const rawText = fs.readFileSync(full, 'utf8');
-    const text = stripJsCommentsPreserveStrings(rawText);
+    let jsSource = rawText;
+    if (fromRel.endsWith('.vue')) {
+      const blocks = [...rawText.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1]);
+      jsSource = blocks.length > 0 ? blocks.join('\n') : rawText;
+    }
+    const text = stripJsCommentsPreserveStrings(jsSource);
+    const isRouterFile = ROUTER_FILE_RE.test(fromRel);
+
     for (const m of text.matchAll(importRe)) {
       const spec = m[1] || m[2] || m[3] || m[4];
       if (!spec) continue;
+      const isLazyRouterImport = isRouterFile && Boolean(m[3]);
       const targetRel = resolveRepoImportFromIndex(fromRel, spec, pathAliases, index);
-      if (targetRel && targetRel !== fromRel) {
-        let importers = reverse.get(targetRel);
-        if (!importers) {
-          importers = new Set();
-          reverse.set(targetRel, importers);
-        }
-        importers.add(fromRel);
-      }
+      if (!targetRel || targetRel === fromRel) continue;
+      const bucket = isLazyRouterImport ? routeRegEdges : localReverse;
+      const pTarget = options.prefix ? `${options.prefix}/${targetRel}` : targetRel;
+      const pFrom = options.prefix ? `${options.prefix}/${fromRel}` : fromRel;
+      let importers = bucket.get(pTarget);
+      if (!importers) { importers = new Set(); bucket.set(pTarget, importers); }
+      importers.add(pFrom);
     }
+  }
+
+  for (const [k, set] of localReverse.entries()) {
+    let dest = reverse.get(k);
+    if (!dest) { dest = new Set(); reverse.set(k, dest); }
+    for (const v of set) dest.add(v);
+  }
+
+  /** @type {Map<string, Set<string>>} */
+  const javaReverse = new Map();
+  addJavaAndXmlReverseEdges(index.files, javaReverse, stripJsCommentsPreserveStrings);
+  for (const [k, set] of javaReverse.entries()) {
+    const pk = options.prefix ? `${options.prefix}/${k}` : k;
+    let dest = reverse.get(pk);
+    if (!dest) { dest = new Set(); reverse.set(pk, dest); }
+    for (const v of set) dest.add(options.prefix ? `${options.prefix}/${v}` : v);
+  }
+
+  return index.truncated;
+}
+
+/**
+ * Builds a static reverse import graph (`targetRel -> Set<importerRel>`) across TS/JS/Vue/Java/XML files.
+ * Prevents router hub explosion by separating lazy `import(...)` route registrations into `routeRegistrationEdges`.
+ * @param {string} repoDir
+ * @param {{ includeQa?: boolean, maxFiles?: number, repos?: string[] }} [options]
+ */
+export function buildReverseImportGraph(repoDir, options = {}) {
+  /** @type {Map<string, Set<string>> & { truncated?: boolean, routeRegistrationEdges?: Map<string, Set<string>> }} */
+  const reverse = new Map();
+  /** @type {Map<string, Set<string>>} */
+  const routeRegEdges = new Map();
+  reverse.truncated = false;
+  reverse.routeRegistrationEdges = routeRegEdges;
+
+  const repos = Array.isArray(options.repos) && options.repos.length > 0 ? options.repos : repoDir ? [repoDir] : [];
+  const validRepos = [...new Set(repos.filter((r) => r && fs.existsSync(r)).map((r) => path.resolve(r)))];
+  if (validRepos.length === 0) return reverse;
+
+  const multi = validRepos.length > 1;
+  const usedLabels = new Set();
+  for (const root of validRepos) {
+    let prefix = '';
+    if (multi) {
+      const base = path.basename(root) || 'repo';
+      prefix = base;
+      let idx = 2;
+      while (usedLabels.has(prefix)) { prefix = `${base}-${idx}`; idx += 1; }
+      usedLabels.add(prefix);
+    }
+    const truncated = populateRepoIntoReverseGraph(root, reverse, routeRegEdges, {
+      includeQa: options.includeQa,
+      maxFiles: options.maxFiles,
+      prefix,
+    });
+    if (truncated) reverse.truncated = true;
   }
 
   return reverse;
@@ -184,9 +242,7 @@ export function findTransitiveDependents(startFile, reverseGraph, maxDepth = 6) 
  */
 export function evaluateImpactRecall(impactResult, failedSpecFiles = []) {
   const uniqueFailed = [...new Set(failedSpecFiles.map((f) => f.replace(/\\/g, '/')))];
-  if (uniqueFailed.length === 0) {
-    return { totalFailures: 0, coveredFailures: 0, missedSpecs: [], recall: 1 };
-  }
+  if (uniqueFailed.length === 0) return { totalFailures: 0, coveredFailures: 0, missedSpecs: [], recall: 1 };
   if (impactResult.mode === 'full') {
     return { totalFailures: uniqueFailed.length, coveredFailures: uniqueFailed.length, missedSpecs: [], recall: 1 };
   }
@@ -204,29 +260,17 @@ export function evaluateImpactRecall(impactResult, failedSpecFiles = []) {
   };
 }
 
-/**
- * Segment-aligned stem match (`I-03`).
- * @param {string} specRel
- * @param {string} stem
- * @returns {boolean}
- */
+/** @param {string} specRel @param {string} stem @returns {boolean} */
 export function specMatchesStemExactSegment(specRel, stem) {
-  const baseNoExt = path
-    .basename(specRel)
-    .replace(/\.(?:spec|test)\.[jt]s$/i, '')
-    .toLowerCase();
-  const dirSegments = specRel
-    .toLowerCase()
-    .split('/')
-    .slice(0, -1);
+  const baseNoExt = path.basename(specRel).replace(/\.(?:spec|test)\.[jt]s$/i, '').toLowerCase();
+  const dirSegments = specRel.toLowerCase().split('/').slice(0, -1);
   if (baseNoExt === stem || dirSegments.includes(stem)) return true;
   const tokens = baseNoExt.split(/[-_.]+/).filter(Boolean);
   return tokens.length === 1 && tokens[0] === stem;
 }
 
 /**
- * Loads and validates rules from an impact JSON file (`impact-map.json` or `knowledge/impact-map.auto.json`).
- * Rejects invalid JSON and un-flagged catch-all globs (`I-01`).
+ * Loads and validates rules from an impact JSON file.
  * @param {string} filePath
  */
 export function loadAndValidateImpactRules(filePath) {
@@ -239,13 +283,8 @@ export function loadAndValidateImpactRules(filePath) {
     const rawMap = JSON.parse(fs.readFileSync(filePath, 'utf8'));
     rawRules = Array.isArray(rawMap.rules) ? rawMap.rules : [];
   } catch {
-    return {
-      ok: false,
-      rules: [],
-      errorReason: `Invalid JSON in ${path.basename(filePath)} — falling back to full suite.`,
-    };
+    return { ok: false, rules: [], errorReason: `Invalid JSON in ${path.basename(filePath)} — falling back to full suite.` };
   }
-
   for (const r of rawRules) {
     const rawPatterns = /** @type {string[]} */ ((Array.isArray(r.match) ? r.match : [r.source || r.match]).filter(Boolean));
     if (!r.fullSuite && rawPatterns.some(isOverbroadCatchAllGlob)) {
@@ -257,7 +296,6 @@ export function loadAndValidateImpactRules(filePath) {
       };
     }
   }
-
   return {
     ok: true,
     errorReason: null,
@@ -271,17 +309,17 @@ export function loadAndValidateImpactRules(filePath) {
 }
 
 /**
- * Collects changed & untracked files via `git -c core.quotePath=off ... -z` (handles Chinese/Unicode paths & monorepo subdirs, `G-07`).
+ * Collects changed & untracked files via `git -c core.quotePath=off ... -z`, filtering workbench state & report artifacts.
  * @param {string} repoDir
  * @param {string} [baseRef]
+ * @param {{ qaRelPrefix?: string }} [options]
  */
-export async function collectGitChangedFiles(repoDir, baseRef = 'HEAD~1') {
+export async function collectGitChangedFiles(repoDir, baseRef = 'HEAD~1', options = {}) {
   const gitRoot = resolveGitRoot(repoDir);
   if (!gitRoot) {
     return { ok: false, reason: 'Target is not a git repository.', files: /** @type {string[]} */ ([]), validBaseRef: false };
   }
   const realRepoDir = canonicalFsPath(repoDir);
-
   /** @type {Set<string>} */
   const files = new Set();
   const addNulOutput = (/** @type {string} */ stdout) => {
@@ -290,54 +328,28 @@ export async function collectGitChangedFiles(repoDir, baseRef = 'HEAD~1') {
       if (!trimmed) continue;
       const abs = path.join(gitRoot, trimmed);
       const rel = path.relative(realRepoDir, abs).replace(/\\/g, '/');
-      if (rel && !rel.startsWith('..')) {
+      if (rel && !rel.startsWith('..') && !isIgnoredWorkbenchArtifactPath(rel, options.qaRelPrefix || '')) {
         files.add(rel);
       }
     }
   };
 
   const [verifyRes, branchDiff, headCheck, wtDiffHead, untracked] = await Promise.all([
-    baseRef
-      ? runProcess('git', ['-c', 'core.quotePath=off', 'rev-parse', '--verify', baseRef], {
-          cwd: gitRoot,
-          timeoutMs: 5000,
-        })
-      : Promise.resolve(null),
-    baseRef
-      ? runProcess('git', ['-c', 'core.quotePath=off', 'diff', '--name-only', '-z', `${baseRef}...HEAD`], {
-          cwd: gitRoot,
-          timeoutMs: 8000,
-        })
-      : Promise.resolve(null),
-    runProcess('git', ['-c', 'core.quotePath=off', 'rev-parse', '--verify', 'HEAD'], {
-      cwd: gitRoot,
-      timeoutMs: 5000,
-    }),
-    runProcess('git', ['-c', 'core.quotePath=off', 'diff', '--name-only', '-z', 'HEAD'], {
-      cwd: gitRoot,
-      timeoutMs: 8000,
-    }),
-    runProcess('git', ['-c', 'core.quotePath=off', 'ls-files', '--others', '--exclude-standard', '-z'], {
-      cwd: gitRoot,
-      timeoutMs: 8000,
-    }),
+    baseRef ? runProcess('git', ['-c', 'core.quotePath=off', 'rev-parse', '--verify', baseRef], { cwd: gitRoot, timeoutMs: 5000 }) : Promise.resolve(null),
+    baseRef ? runProcess('git', ['-c', 'core.quotePath=off', 'diff', '--name-only', '-z', `${baseRef}...HEAD`], { cwd: gitRoot, timeoutMs: 8000 }) : Promise.resolve(null),
+    runProcess('git', ['-c', 'core.quotePath=off', 'rev-parse', '--verify', 'HEAD'], { cwd: gitRoot, timeoutMs: 5000 }),
+    runProcess('git', ['-c', 'core.quotePath=off', 'diff', '--name-only', '-z', 'HEAD'], { cwd: gitRoot, timeoutMs: 8000 }),
+    runProcess('git', ['-c', 'core.quotePath=off', 'ls-files', '--others', '--exclude-standard', '-z'], { cwd: gitRoot, timeoutMs: 8000 }),
   ]);
 
   const validBaseRef = Boolean(verifyRes && verifyRes.code === 0);
-  if (validBaseRef && branchDiff && branchDiff.code === 0) {
-    addNulOutput(branchDiff.stdout);
-  }
-
+  if (validBaseRef && branchDiff && branchDiff.code === 0) addNulOutput(branchDiff.stdout);
   if (headCheck.code === 0) {
     if (wtDiffHead.code === 0) addNulOutput(wtDiffHead.stdout);
   } else {
-    const wtDiff = await runProcess('git', ['-c', 'core.quotePath=off', 'diff', '--name-only', '-z'], {
-      cwd: gitRoot,
-      timeoutMs: 8000,
-    });
+    const wtDiff = await runProcess('git', ['-c', 'core.quotePath=off', 'diff', '--name-only', '-z'], { cwd: gitRoot, timeoutMs: 8000 });
     if (wtDiff.code === 0) addNulOutput(wtDiff.stdout);
   }
-
   if (untracked.code === 0) addNulOutput(untracked.stdout);
 
   if (!validBaseRef && files.size === 0) {
@@ -348,22 +360,46 @@ export async function collectGitChangedFiles(repoDir, baseRef = 'HEAD~1') {
       validBaseRef: false,
     };
   }
-
   return { ok: true, reason: null, files: [...files].sort(), validBaseRef };
 }
 
 /**
- * Indexes `REQ-*` requirement identifiers to spec files & spec markdown documents so changes in
- * `specs/*.md` or `REQ-*`-tagged files automatically select covering tests (`WU-04`).
- * @param {string} qaDir
- * @param {string} repoDir
- * @param {string[]} allSpecs
+ * Collects git diffs across multiple repositories, prefixing paths with `<repoBasename>/` when `repos.length > 1`.
+ * @param {string[]} repos
+ * @param {string} [baseRef]
+ * @param {{ qaRelPrefix?: string }} [options]
  */
+export async function collectMultiRepoGitChangedFiles(repos, baseRef = 'HEAD~1', options = {}) {
+  if (repos.length <= 1) return collectGitChangedFiles(repos[0], baseRef, options);
+  const results = await Promise.all(repos.map((r) => collectGitChangedFiles(r, baseRef, options)));
+  if (results.some((r) => !r.ok)) {
+    const firstErr = results.find((r) => !r.ok);
+    return { ok: false, reason: firstErr?.reason || 'One or more source repos are not git repositories.', files: [], validBaseRef: false };
+  }
+  const usedLabels = new Set();
+  /** @type {string[]} */
+  const merged = [];
+  repos.forEach((root, idx) => {
+    const base = path.basename(root) || 'repo';
+    let label = base;
+    let n = 2;
+    while (usedLabels.has(label)) { label = `${base}-${n}`; n += 1; }
+    usedLabels.add(label);
+    for (const f of results[idx].files) merged.push(`${label}/${f}`);
+  });
+  return {
+    ok: true,
+    reason: null,
+    files: [...new Set(merged)].sort(),
+    validBaseRef: results.every((r) => r.validBaseRef),
+  };
+}
+
+/** @param {string} qaDir @param {string} repoDir @param {string[]} allSpecs */
 export function buildReqIdToSpecMap(qaDir, repoDir, allSpecs) {
   /** @type {Map<string, Set<string>>} */
   const reqToSpecs = new Map();
   const reqRe = /\bREQ-[A-Za-z0-9_-]+\b/g;
-
   for (const spRel of allSpecs) {
     const abs = path.join(qaDir, spRel);
     if (!fs.existsSync(abs)) continue;
@@ -371,21 +407,14 @@ export function buildReqIdToSpecMap(qaDir, repoDir, allSpecs) {
     for (const m of text.matchAll(reqRe)) {
       const id = m[0].toUpperCase();
       let set = reqToSpecs.get(id);
-      if (!set) {
-        set = new Set();
-        reqToSpecs.set(id, set);
-      }
+      if (!set) { set = new Set(); reqToSpecs.set(id, set); }
       set.add(spRel);
     }
   }
   return reqToSpecs;
 }
 
-/**
- * Extracts `REQ-*` IDs mentioned in a changed file (e.g., `qa/specs/auth.md` or source comment).
- * @param {string} absFilePath
- * @returns {string[]}
- */
+/** @param {string} absFilePath @returns {string[]} */
 export function extractReqIdsFromFile(absFilePath) {
   if (!fs.existsSync(absFilePath)) return [];
   try {

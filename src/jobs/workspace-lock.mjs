@@ -2,6 +2,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { acquireDiskLock } from '../core/disk-lock.mjs';
+import { buildCommandResult } from '../core/outcome.mjs';
+import { redactSecrets } from '../core/redact.mjs';
 
 export const DEFAULT_SYNC_BUDGET_MS = 45_000;
 export const MAX_JOB_OUTPUT_BYTES = 1024 * 1024; // 1MB bounded ring buffer per stream (`M-09`)
@@ -142,8 +144,10 @@ export function buildSafeChildEnv(baseEnv = process.env, resultFilePath = undefi
   return clean;
 }
 
-/** @type {Map<string, Promise<any>>} */
+/** @type {Map<string, { tail: Promise<void>, holder: { toolName: string, jobId: string | null, acquiredAt: string } | null }>} */
 const workspaceLocks = new Map();
+
+export const BARE_JSON_LINE_RE = /^[{}\[\],]+$/;
 
 /** @param {string} workspaceKey */
 function normalizeLockKey(workspaceKey) {
@@ -165,20 +169,95 @@ function normalizeLockKey(workspaceKey) {
 }
 
 /**
- * Per-workspace async mutex + atomic cross-process lockfile (`M-13` / `WU-02`).
- * Fails closed with `{ ok: false, reason: 'WORKSPACE_LOCK_BUSY' }` on lock contention timeout.
+ * Per-workspace async mutex + atomic cross-process lockfile (`M-13` / `WU-02` / `WB-P0-12`).
+ * Enforces bounded timeout on BOTH the in-memory queue wait and the cross-process disk lock,
+ * failing closed with `{ code: 'WORKSPACE_LOCK_BUSY' }` naming the active holder.
  * @template T
  * @param {string | null} workspaceKey
  * @param {() => Promise<T>} fn
  * @param {number} [diskTimeoutMs]
+ * @param {{ toolName?: string, jobId?: string | null }} [holderMeta]
  * @returns {Promise<T>}
  */
-export function withWorkspaceWriteLock(workspaceKey, fn, diskTimeoutMs = 15_000) {
+export async function withWorkspaceWriteLock(workspaceKey, fn, diskTimeoutMs = 15_000, holderMeta = undefined) {
   if (!workspaceKey) return fn();
   const normKey = normalizeLockKey(workspaceKey);
-  const prev = workspaceLocks.get(normKey) || Promise.resolve();
-  const wrapped = async () => {
-    const lockRes = await acquireDiskLock(normKey, diskTimeoutMs);
+  const timeoutMs = Math.max(1, Number(diskTimeoutMs || 15_000));
+  const deadline = Date.now() + timeoutMs;
+
+  let entry = workspaceLocks.get(normKey);
+  if (!entry) {
+    entry = { tail: Promise.resolve(), holder: null };
+    workspaceLocks.set(normKey, entry);
+  }
+  const prevTail = entry.tail;
+  /** @type {() => void} */
+  let releaseTurn = () => {};
+  const myTail = /** @type {Promise<void>} */ (
+    new Promise((resolve) => {
+      releaseTurn = () => resolve();
+    })
+  );
+  entry.tail = myTail;
+
+  let settled = false;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let waitTimer = null;
+  const acquiredTurn = await new Promise((resolve) => {
+    waitTimer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(false);
+    }, timeoutMs);
+
+    prevTail.then(
+      () => {
+        if (settled) return;
+        settled = true;
+        if (waitTimer) clearTimeout(waitTimer);
+        resolve(true);
+      },
+      () => {
+        if (settled) return;
+        settled = true;
+        if (waitTimer) clearTimeout(waitTimer);
+        resolve(true);
+      }
+    );
+  });
+
+  if (!acquiredTurn) {
+    const holder = entry.holder;
+    const holderDesc = holder
+      ? `tool=${holder.toolName}${holder.jobId ? `, jobId=${holder.jobId}` : ''}, acquiredAt=${holder.acquiredAt}`
+      : 'active holder in queue';
+    prevTail.then(
+      () => {
+        if (entry && entry.tail === myTail && !entry.holder) workspaceLocks.delete(normKey);
+        releaseTurn();
+      },
+      () => {
+        if (entry && entry.tail === myTail && !entry.holder) workspaceLocks.delete(normKey);
+        releaseTurn();
+      }
+    );
+    const err = /** @type {Error & { code?: string, holder?: any }} */ (
+      new Error(`[Workspace Lock Busy] Timed out after ${timeoutMs}ms waiting for workspace lock (${holderDesc}).`)
+    );
+    err.code = 'WORKSPACE_LOCK_BUSY';
+    err.holder = holder;
+    throw err;
+  }
+
+  entry.holder = {
+    toolName: holderMeta?.toolName || 'unknown',
+    jobId: holderMeta?.jobId || null,
+    acquiredAt: new Date().toISOString(),
+  };
+
+  try {
+    const remainingDiskMs = Math.max(100, deadline - Date.now());
+    const lockRes = await acquireDiskLock(normKey, remainingDiskMs);
     if (!lockRes.ok) {
       const err = /** @type {Error & { code?: string }} */ (new Error(lockRes.error));
       err.code = lockRes.reason;
@@ -189,15 +268,13 @@ export function withWorkspaceWriteLock(workspaceKey, fn, diskTimeoutMs = 15_000)
     } finally {
       lockRes.release();
     }
-  };
-  const next = prev.then(wrapped, wrapped);
-  const tracked = next.finally(() => {
-    if (workspaceLocks.get(normKey) === tracked) {
-      workspaceLocks.delete(normKey);
+  } finally {
+    if (entry) {
+      entry.holder = null;
+      if (entry.tail === myTail) workspaceLocks.delete(normKey);
     }
-  });
-  workspaceLocks.set(normKey, tracked);
-  return next;
+    releaseTurn();
+  }
 }
 
 /**
@@ -246,4 +323,75 @@ export function readFramedSubprocessResult(resultFilePath, stdoutText) {
     }
   }
   return null;
+}
+
+/**
+ * Formats an error record when workspace lock acquisition or child invocation fails before exit.
+ * @param {string} toolName
+ * @param {unknown} err
+ */
+export function buildJobFailureEnvelope(toolName, err) {
+  const isLockBusy = Boolean(err && typeof err === 'object' && 'code' in err && err.code === 'WORKSPACE_LOCK_BUSY');
+  const msg = err instanceof Error ? err.message : String(err);
+  const exitCode = isLockBusy ? 2 : 1;
+  return {
+    exitCode,
+    lastMessage: redactSecrets(msg).slice(0, 180),
+    parsedData: buildCommandResult({
+      tool: toolName,
+      outcome: isLockBusy ? 'blocked' : 'fail',
+      ok: false,
+      exitCode,
+      summary: msg,
+      blockerKind: isLockBusy ? 'WORKSPACE_LOCK_BUSY' : 'EXECUTION_ERROR',
+      recoverySteps: isLockBusy ? ['Wait for concurrent workspace operation to finish and retry.'] : [],
+      data: { error: msg, reason: isLockBusy ? 'WORKSPACE_LOCK_BUSY' : 'EXECUTION_ERROR' },
+    }),
+  };
+}
+
+/**
+ * Emits job progress to active foreground callback and any late `aitest_job(action="result")` listeners.
+ * @param {Record<string, any>} jobRecord
+ * @param {((info: { progress: number, message: string }) => void) | null | undefined} primaryOnProgress
+ * @param {{ progress: number, message: string }} info
+ */
+export function emitJobProgressNotification(jobRecord, primaryOnProgress, info) {
+  if (jobRecord.progressActive && typeof primaryOnProgress === 'function') {
+    try {
+      primaryOnProgress(info);
+    } catch {
+      // ignore callback failures
+    }
+  }
+  for (const listener of jobRecord.progressListeners || []) {
+    try {
+      listener(info);
+    } catch {
+      // ignore late listener failures
+    }
+  }
+}
+
+/**
+ * Unwraps structured `aitest_job(action="result")` response payloads cleanly.
+ * @param {Record<string, any>} jobRecord
+ * @param {Record<string, any> | null} publicStatus
+ */
+export function formatJobWaitResult(jobRecord, publicStatus) {
+  const rawData = jobRecord.parsedData;
+  const unwrappedData =
+    rawData && typeof rawData === 'object' && rawData.schemaVersion === 2 && rawData.data && typeof rawData.data === 'object'
+      ? rawData.data
+      : rawData || (jobRecord.stdout ? { output: jobRecord.stdout.slice(0, 4000) } : {});
+  const summary =
+    rawData && typeof rawData === 'object' && typeof rawData.summary === 'string'
+      ? rawData.summary
+      : undefined;
+  return {
+    ...publicStatus,
+    ...(summary ? { summary } : {}),
+    data: unwrappedData,
+    stderr: jobRecord.exitCode !== 0 && jobRecord.stderr ? jobRecord.stderr.slice(0, 2000) : undefined,
+  };
 }

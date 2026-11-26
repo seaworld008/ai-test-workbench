@@ -1,11 +1,14 @@
 // @ts-check
 import { convertBracketSegment, normalizeRoutePath } from './route-matcher.mjs';
+import { extractMybatisXmlEntities, extractSpringEndpointsAndEntities } from './spring-extractor.mjs';
 
 /**
- * @typedef {{ method: string, path: string, file: string, framework: string }} BackendEndpoint
- * @typedef {{ table: string, file: string, source: string }} DbEntity
+ * @typedef {{ method: string, path: string, file: string, framework: string, packageName?: string, packagePrefixes?: string[], aliasedPaths?: string[] }} BackendEndpoint
+ * @typedef {{ table: string, file: string, source: string, namespace?: string }} DbEntity
+ * @typedef {{ relFile: string, packageName: string, className: string, fqcn: string, imports: string[], superTypes: string[], fieldTypes: string[], isController: boolean, isService: boolean, isMapper: boolean, isEntity: boolean }} JavaFileMeta
+ * @typedef {{ file: string, namespace: string, tables: string[] }} MybatisMapperMeta
  * @typedef {{ relFile: string, ext: string, text: string }} BackendAdapterContext
- * @typedef {{ endpoints?: BackendEndpoint[], entities?: DbEntity[] }} BackendAdapterResult
+ * @typedef {{ endpoints?: BackendEndpoint[], entities?: DbEntity[], javaMeta?: JavaFileMeta | null, mybatisMapper?: MybatisMapperMeta | null }} BackendAdapterResult
  * @typedef {{ id: string, description?: string, extract: (ctx: BackendAdapterContext) => BackendAdapterResult | null | undefined }} BackendCodeMapAdapter
  */
 
@@ -36,24 +39,18 @@ export const BUILTIN_BACKEND_ADAPTERS = [
   },
   {
     id: 'spring',
-    description: 'Java/Kotlin Spring MVC mappings & JPA/MyBatis @Table/@TableName entities',
+    description: 'Java/Kotlin Spring MVC mappings (class header/body split, @FeignClient skip) & JPA/MyBatis entities',
     extract({ relFile, ext, text }) {
-      if (ext !== '.java' && ext !== '.kt') return null;
-      /** @type {BackendEndpoint[]} */
-      const endpoints = [];
-      /** @type {DbEntity[]} */
-      const entities = [];
-      const classPrefixMatch = text.match(/@RequestMapping\s*\(\s*(?:value\s*=\s*)?['"]([^'"]+)['"]/);
-      const prefix = classPrefixMatch ? classPrefixMatch[1].replace(/\/$/, '') : '';
-      for (const m of text.matchAll(/@(Get|Post|Put|Delete|Patch|Request)Mapping\s*\(\s*(?:value\s*=\s*)?['"]([^'"]+)['"]/g)) {
-        const fullPath = normalizeRoutePath(`${prefix}/${m[2].replace(/^\//, '')}`).replace(/\{([^}]+)\}/g, ':$1');
-        if (fullPath === prefix && m[1] === 'Request') continue;
-        endpoints.push({ method: m[1] === 'Request' ? 'ANY' : m[1].toUpperCase(), path: fullPath, file: relFile, framework: 'spring' });
-      }
-      for (const m of text.matchAll(/@(?:TableName|Table)\s*\(\s*(?:value\s*=|name\s*=)?\s*['"]([a-zA-Z0-9_]+)['"]/g)) {
-        entities.push({ table: m[1], file: relFile, source: 'jpa/mybatis' });
-      }
-      return { endpoints, entities };
+      return extractSpringEndpointsAndEntities(relFile, ext, text);
+    },
+  },
+  {
+    id: 'mybatis-xml',
+    description: 'MyBatis *Mapper.xml namespace & SQL table entity extractor',
+    extract({ relFile, ext, text }) {
+      const out = extractMybatisXmlEntities(relFile, ext, text);
+      if (!out) return null;
+      return { entities: out.entities, mybatisMapper: out.mapper };
     },
   },
   {

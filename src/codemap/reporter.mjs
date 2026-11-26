@@ -74,6 +74,13 @@ export function generateLivingSystemMapMarkdown(codeMap, lang = 'zh') {
     isZh
       ? `- **路由与源码规模**：已测绘 \`${cov.totalRoutes}\` 条活跃路由 · 已覆盖 \`${cov.coveredRoutes}\` 条（覆盖率 **${cov.coveragePct}%**）· 扫描仓库源码 \`${codeMap.sourceSummary?.repoFilesScanned ?? 0}\` 个${codeMap.sourceSummary?.truncated ? ' *(已达扫描上限截断)*' : ''} · 后端端点 \`${codeMap.sourceSummary?.backendEndpointsCount ?? 0}\` 个 · 数据表 \`${(codeMap.sourceSummary?.dbEntities || []).length}\` 张`
       : `- **Topology & Source Scale**: ${cov.totalRoutes} active routes (${cov.coveredRoutes} covered, **${cov.coveragePct}%**) · ${codeMap.sourceSummary?.repoFilesScanned ?? 0} repo files${codeMap.sourceSummary?.truncated ? ' *(TRUNCATED)*' : ''} · ${codeMap.sourceSummary?.backendEndpointsCount ?? 0} backend endpoints · ${(codeMap.sourceSummary?.dbEntities || []).length} DB entities`,
+    ...(Array.isArray(codeMap.meta?.sourceRepos) && codeMap.meta.sourceRepos.length > 1
+      ? [
+          isZh
+            ? `- **关联源码仓库 (${codeMap.meta.sourceRepos.length})**：${codeMap.meta.sourceRepos.map((/** @type {string} */ r) => `\`${r}\``).join(', ')}`
+            : `- **Indexed Source Repos (${codeMap.meta.sourceRepos.length})**: ${codeMap.meta.sourceRepos.map((/** @type {string} */ r) => `\`${r}\``).join(', ')}`,
+        ]
+      : []),
     isZh
       ? `- **待治理隐患（Open / Candidate）**：\`${defects.length}\` 项`
       : `- **Active Defects (Open / Candidate)**: \`${defects.length}\``,

@@ -111,7 +111,7 @@ export function beginHealSession(qaDir, options = {}) {
   if (!ledger.ok) {
     return { ok: false, exitCode: 2, error: ledger.error };
   }
-  const appCodeTreeHash = computeAppCodeTreeHash(path.dirname(qaDir));
+  const appCodeTreeHash = computeAppCodeTreeHash(path.dirname(qaDir), qaDir);
   const priorEntry = ledger.byTestId[targetFailure.testId];
   const quotaReset = Boolean(priorEntry?.appCodeTreeHash && priorEntry.appCodeTreeHash !== appCodeTreeHash);
   const priorAttemptsForTest = quotaReset ? 0 : Number(priorEntry?.attemptsUsed || 0);
@@ -141,6 +141,8 @@ export function beginHealSession(qaDir, options = {}) {
     confidence: targetFailure.confidence,
     candidates: targetFailure.candidates || [targetFailure.categoryCode],
     traceId: targetFailure.traceId,
+    traceIds: targetFailure.traceIds || (targetFailure.traceId ? [targetFailure.traceId] : []),
+    timeWindow: targetFailure.timeWindow || null,
     errorSnippet: targetFailure.errorSnippet,
     codeCorrelation: targetFailure.codeCorrelation,
     repairPermitted,

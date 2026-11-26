@@ -119,6 +119,7 @@ export async function runExploreCommand(options = {}) {
     safePostPaths: parseCsvList(mergedEnv.EXPLORE_SAFE_POST_PATHS ?? ''),
     allowGraphqlQuery: mergedEnv.EXPLORE_ALLOW_GRAPHQL_QUERY !== '0',
     deniedSubstrings: parseLowerCsvList(mergedEnv.TEST_DENIED_ORIGINS ?? ''),
+    abortThirdPartyHosts: parseLowerCsvList(mergedEnv.TEST_ABORT_THIRD_PARTY_HOSTS ?? ''),
   };
 
   const { chromium } = await import(pathToFileURL(pwPkg).href);

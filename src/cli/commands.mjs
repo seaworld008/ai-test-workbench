@@ -14,7 +14,7 @@ import { runVerifyChangeCommand } from '../verdict.mjs';
 
 import { PARITY_CLI_COMMANDS } from './commands-parity.mjs';
 import { WORKSPACE_CLI_COMMANDS } from './commands-workspace.mjs';
-import { BOOL, STR, TARGET_OPTS, makeCommon } from './opts.mjs';
+import { BOOL, STR, STR_MULTI, TARGET_OPTS, makeCommon } from './opts.mjs';
 
 /**
  * Per-command declarative CLI registry (`v6.2`).
@@ -110,12 +110,14 @@ export const CLI_COMMANDS = {
       ...TARGET_OPTS,
       base: STR,
       files: STR,
+      repo: STR_MULTI,
     },
     run: (v, _pos, lang) =>
       runImpactCommand({
         ...makeCommon(v, lang),
         base: v.base,
         files: v.files,
+        repos: Array.isArray(v.repo) ? v.repo : v.repo ? [v.repo] : undefined,
       }),
   },
   audit: {
@@ -126,6 +128,7 @@ export const CLI_COMMANDS = {
       waivers: STR,
       'expected-run-id': STR,
       'check-specs': BOOL,
+      'no-check-specs': BOOL,
       'require-e2e': BOOL,
       'static-only': BOOL,
       'allow-unbound-results': BOOL,
@@ -140,7 +143,7 @@ export const CLI_COMMANDS = {
         results: v.results,
         waivers: v.waivers,
         expectedRunId: v['expected-run-id'],
-        checkSpecs: Boolean(v['check-specs']),
+        checkSpecs: v['no-check-specs'] ? false : v['check-specs'] ? true : undefined,
         requireE2e: Boolean(v['require-e2e']),
         staticOnly: Boolean(v['static-only']),
         allowUnboundResults: Boolean(v['allow-unbound-results']),

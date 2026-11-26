@@ -229,3 +229,25 @@ export function buildPerfMarkdown(report, lang = 'zh') {
   lines.push('');
   return lines.join('\n');
 }
+
+/**
+ * Resolves candidate routes for performance profiling from explicit `--routes` or `code-map.json`.
+ * @param {string | undefined} rawRoutes
+ * @param {Record<string, any> | null} existingCm
+ * @returns {string[]}
+ */
+export function resolvePerfTargetRoutes(rawRoutes, existingCm) {
+  if (rawRoutes) {
+    return String(rawRoutes)
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  if (existingCm?.routes) {
+    const extras = Object.keys(existingCm.routes)
+      .filter((r) => r !== '/' && !r.includes(':') && !/login|404|403|401/i.test(r))
+      .slice(0, 2);
+    if (extras.length > 0) return ['/', ...extras];
+  }
+  return ['/'];
+}

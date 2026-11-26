@@ -3,11 +3,20 @@ import { groupOutcomesBySpecFile } from '../core/playwright-results.mjs';
 import { SCHEMA_VERSIONS } from '../core/version.mjs';
 import { createRoutePatternMatcher, normalizeRoutePath } from './adapters.mjs';
 import {
+  buildJavaDbChainIndex,
   compileDbEntityMatchers,
   computeCodeMapContentFingerprint,
-  computeTopologySnapshotId,
   correlateDbTablesForRoute,
 } from './correlator.mjs';
+import {
+  buildFrontendViewGraph,
+  collectApisViaStaticImports,
+  collectGatewayPrefixes,
+  convergeDefectsAndPerf,
+  getStrippedApiCandidates,
+  matchBackendFilesForApi,
+  resolveDynamicViewForPage,
+} from './route-api-linker.mjs';
 
 export { compileDbEntityMatchers, correlateDbTablesForRoute };
 
@@ -28,10 +37,19 @@ export function migrateCodeMapSchema(rawMap) {
 
 /**
  * Fuses static code index + runtime exploration topology + test results + perf snapshots into
- * Living Code Map v2 (`schemaVersion: 4`) in linear O(N) time with compiled route pattern matchers,
- * pre-grouped frontend API calls, pre-compiled DB entity regexes, and inverted spec coverage maps (`K-01..K-06`).
+ * Living Code Map v4 (`schemaVersion: 4`) in linear O(N) time (`K-01..K-06`).
  * @param {any} existingMap
- * @param {{ nowIso?: string, sourceIndex?: any, topology?: any, specIndex?: Array<{ specFile: string, uiRoutes?: string[], apiPaths: string[] }>, resultsJson?: any, perfReport?: any }} [inputs]
+ * @param {{
+ *   nowIso?: string,
+ *   sourceIndex?: any,
+ *   topology?: any,
+ *   specIndex?: Array<{ specFile: string, uiRoutes?: string[], apiPaths: string[] }>,
+ *   resultsJson?: any,
+ *   perfReport?: any,
+ *   sourceRepos?: string[],
+ *   maxScanFiles?: number,
+ *   apiPrefixes?: string[],
+ * }} [inputs]
  */
 export function mergeLivingCodeMap(existingMap, inputs = {}) {
   const now = inputs.nowIso || new Date().toISOString();
@@ -52,9 +70,7 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
   };
   const topology = inputs.topology || {};
   const specIndex = Array.isArray(inputs.specIndex) ? inputs.specIndex : [];
-  const resultsJson = inputs.resultsJson || null;
-  const perfReport = inputs.perfReport || null;
-  const outcomesBySpec = groupOutcomesBySpecFile(resultsJson);
+  const outcomesBySpec = groupOutcomesBySpecFile(inputs.resultsJson || null);
 
   const staticPatterns = (sourceIndex.frontendRoutes || []).map((/** @type {any} */ r) => normalizeRoutePath(r.route));
   const matchStatic = createRoutePatternMatcher(staticPatterns);
@@ -62,41 +78,24 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
 
   /** @type {Record<string, any>} */
   const routesObj = {};
-
   const createBlankRoute = (/** @type {string} */ key, source = 'static') => {
     const prev = base.routes?.[key] || {};
     return {
-      route: key,
-      source,
-      title: prev.title || '',
-      breadcrumbs: prev.breadcrumbs || [],
-      archetype: prev.archetype || 'unknown',
-      frontendFile: null,
-      tableHeaders: prev.tableHeaders || [],
-      filterLabels: prev.filterLabels || [],
-      readonlyButtons: prev.readonlyButtons || [],
-      mutationButtons: prev.mutationButtons || [],
-      linkedApis: [],
-      linkedBackendFiles: [],
-      linkedDbTables: [],
-      coveringSpecs: [],
-      lastResult: prev.lastResult || 'untested',
-      a11y: prev.a11y || null,
-      firstSeenAt: prev.firstSeenAt || now,
-      lastSeenAt: prev.lastSeenAt || now,
-      stale: false,
-      lastUpdatedAt: now,
+      route: key, source, title: prev.title || '', breadcrumbs: prev.breadcrumbs || [],
+      archetype: prev.archetype || 'unknown', frontendFile: null,
+      tableHeaders: prev.tableHeaders || [], filterLabels: prev.filterLabels || [],
+      readonlyButtons: prev.readonlyButtons || [], mutationButtons: prev.mutationButtons || [],
+      linkedApis: [], linkedBackendFiles: [], linkedDbTables: [], coveringSpecs: [],
+      lastResult: prev.lastResult || 'untested', a11y: prev.a11y || null,
+      firstSeenAt: prev.firstSeenAt || now, lastSeenAt: prev.lastSeenAt || now,
+      stale: false, lastUpdatedAt: now,
     };
   };
-
   const ensureRoute = (/** @type {string} */ rPath, source = 'static') => {
     const normalized = normalizeRoutePath(rPath);
     const key = source === 'runtime' ? matchStatic(normalized) : normalized;
-    if (!routesObj[key]) {
-      routesObj[key] = createBlankRoute(key, source);
-    } else if (source === 'static') {
-      routesObj[key].source = 'static';
-    }
+    if (!routesObj[key]) routesObj[key] = createBlankRoute(key, source);
+    else if (source === 'static') routesObj[key].source = 'static';
     return routesObj[key];
   };
 
@@ -105,26 +104,26 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
     if (fr.file && !entry.frontendFile) entry.frontendFile = fr.file;
     entry.lastSeenAt = now;
   }
-
   for (const [prevKey, prevRoute] of Object.entries(base.routes || {})) {
-    if (routesObj[prevKey]) continue;
-    if (hasStaticIndex && prevRoute.frontendFile) continue;
+    if (routesObj[prevKey] || (hasStaticIndex && prevRoute.frontendFile)) continue;
     if (prevRoute.source === 'runtime' || (!prevRoute.frontendFile && prevRoute.archetype !== 'tested-route')) {
       const ageMs = nowMs - Date.parse(prevRoute.lastSeenAt || prevRoute.lastUpdatedAt || now);
-      const isStale = Number.isFinite(ageMs) && ageMs > STALE_RUNTIME_DAYS * 86_400_000;
       routesObj[prevKey] = {
         ...prevRoute,
         source: 'runtime',
         coveringSpecs: [],
-        stale: isStale,
+        stale: Number.isFinite(ageMs) && ageMs > STALE_RUNTIME_DAYS * 86_400_000,
       };
     }
   }
 
   const exploredRouteKeys = new Set();
+  /** @type {Map<string, any>} */
+  const pageMetaByRoute = new Map();
   for (const p of topology.pages || []) {
     const entry = ensureRoute(p.route || p.actualPath || '/', 'runtime');
     exploredRouteKeys.add(entry.route);
+    pageMetaByRoute.set(entry.route, p);
     if (p.title) entry.title = p.title;
     if (Array.isArray(p.breadcrumbs) && p.breadcrumbs.length > 0) entry.breadcrumbs = p.breadcrumbs;
     if (p.archetype) entry.archetype = p.archetype;
@@ -132,7 +131,8 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
     if (Array.isArray(p.filterLabels) && p.filterLabels.length > 0) entry.filterLabels = p.filterLabels;
     if (Array.isArray(p.readonlyButtons)) entry.readonlyButtons = [...new Set([...entry.readonlyButtons, ...p.readonlyButtons])];
     if (Array.isArray(p.mutationButtons)) entry.mutationButtons = [...new Set([...entry.mutationButtons, ...p.mutationButtons])];
-    if (Array.isArray(p.apisObserved)) entry.linkedApis = [...new Set([...entry.linkedApis, ...p.apisObserved])];
+    const observed = p.apisObserved || p.apis || p.observedApis;
+    if (Array.isArray(observed)) entry.linkedApis = [...new Set([...entry.linkedApis, ...observed])];
     if (p.a11y) entry.a11y = p.a11y;
     entry.lastSeenAt = now;
     entry.stale = false;
@@ -149,9 +149,12 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
   /** @type {Map<string, string[]>} */
   const apiToBackend = new Map();
   for (const be of sourceIndex.backendEndpoints || []) {
-    const list = apiToBackend.get(be.path) || [];
-    if (!list.includes(be.file)) list.push(be.file);
-    apiToBackend.set(be.path, list);
+    for (const p of [be.path, ...(be.aliasedPaths || [])]) {
+      if (!p) continue;
+      const list = apiToBackend.get(p) || [];
+      if (!list.includes(be.file)) list.push(be.file);
+      apiToBackend.set(p, list);
+    }
   }
   const matchBackendApi = createRoutePatternMatcher([...apiToBackend.keys()]);
 
@@ -160,40 +163,51 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
   for (const c of sourceIndex.frontendApiCalls || []) {
     if (!c?.file || !c?.path) continue;
     let list = apiCallsByFile.get(c.file);
-    if (!list) {
-      list = [];
-      apiCallsByFile.set(c.file, list);
-    }
+    if (!list) { list = []; apiCallsByFile.set(c.file, list); }
     list.push(c.path);
   }
 
+  const gatewayPrefixes = collectGatewayPrefixes([...(sourceIndex.axiosPrefixes || []), ...(inputs.apiPrefixes || [])]);
+  const { reverse: reverseFrontend, viewSet } = buildFrontendViewGraph(sourceIndex.frontendImports || {}, sourceIndex.viewFiles || []);
   const compiledEntities = compileDbEntityMatchers(sourceIndex.dbEntities || []);
+  const javaDbChain = buildJavaDbChainIndex(sourceIndex.javaFileInfos || {}, sourceIndex.mybatisMappers || [], sourceIndex.dbEntities || []);
   const backendFileTexts = sourceIndex.backendFileTexts || {};
 
   for (const entry of Object.values(routesObj)) {
+    if (!entry.frontendFile) {
+      const pageMeta = pageMetaByRoute.get(entry.route) || { route: entry.route };
+      const resolvedView = resolveDynamicViewForPage(pageMeta, entry.linkedApis, {
+        viewFiles: sourceIndex.viewFiles || [],
+        frontendApiCalls: sourceIndex.frontendApiCalls || [],
+        reverseFrontend,
+        viewSet,
+        prefixes: gatewayPrefixes,
+      });
+      if (resolvedView) entry.frontendFile = resolvedView;
+    }
+
     if (entry.frontendFile) {
-      const calls = apiCallsByFile.get(entry.frontendFile);
-      if (calls) {
-        const apiSet = new Set(entry.linkedApis);
-        for (const p of calls) {
-          if (!apiSet.has(p)) {
-            apiSet.add(p);
-            entry.linkedApis.push(p);
-          }
-        }
+      const calls = collectApisViaStaticImports(
+        entry.frontendFile,
+        sourceIndex.frontendImports || {},
+        apiCallsByFile,
+        sourceIndex.axiosPrefixByFile || {}
+      );
+      const apiSet = new Set(entry.linkedApis);
+      for (const p of calls) {
+        if (!apiSet.has(p)) { apiSet.add(p); entry.linkedApis.push(p); }
       }
     }
+
     const beFiles = new Set();
     for (const apiPath of entry.linkedApis) {
-      const matchedBePattern = matchBackendApi(apiPath);
-      for (const f of apiToBackend.get(matchedBePattern) || []) beFiles.add(f);
+      for (const f of matchBackendFilesForApi(apiPath, matchBackendApi, apiToBackend, gatewayPrefixes)) beFiles.add(f);
     }
     entry.linkedBackendFiles = [...beFiles];
-    entry.linkedDbTables = correlateDbTablesForRoute(entry, sourceIndex.dbEntities || [], backendFileTexts, compiledEntities);
+    entry.linkedDbTables = correlateDbTablesForRoute(entry, sourceIndex.dbEntities || [], backendFileTexts, compiledEntities, javaDbChain);
   }
 
-  const staticAndCurrentPatterns = Object.keys(routesObj);
-  const matchActive = createRoutePatternMatcher(staticAndCurrentPatterns);
+  const matchActive = createRoutePatternMatcher(Object.keys(routesObj));
   /** @type {Map<string, Set<string>>} */
   const routeToSpecs = new Map();
   /** @type {Map<string, Set<string>>} */
@@ -203,28 +217,24 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
     for (const u of sp.uiRoutes || []) {
       const key = matchActive(u);
       let set = routeToSpecs.get(key);
-      if (!set) {
-        set = new Set();
-        routeToSpecs.set(key, set);
-      }
+      if (!set) { set = new Set(); routeToSpecs.set(key, set); }
       set.add(sp.specFile);
     }
     for (const api of sp.apiPaths || []) {
-      let set = apiToSpecs.get(api);
-      if (!set) {
-        set = new Set();
-        apiToSpecs.set(api, set);
+      for (const cand of [api, ...getStrippedApiCandidates(api, gatewayPrefixes)]) {
+        let set = apiToSpecs.get(cand);
+        if (!set) { set = new Set(); apiToSpecs.set(cand, set); }
+        set.add(sp.specFile);
       }
-      set.add(sp.specFile);
     }
   }
 
   for (const entry of Object.values(routesObj)) {
     const matchedSpecs = new Set(routeToSpecs.get(entry.route) || []);
     for (const api of entry.linkedApis) {
-      const linked = apiToSpecs.get(api);
-      if (linked) {
-        for (const sf of linked) matchedSpecs.add(sf);
+      for (const cand of [api, ...getStrippedApiCandidates(api, gatewayPrefixes)]) {
+        const linked = apiToSpecs.get(cand);
+        if (linked) { for (const sf of linked) matchedSpecs.add(sf); }
       }
     }
     entry.coveringSpecs = [...matchedSpecs];
@@ -249,149 +259,51 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
     const key = `${pt.mode || 'default'}:${pt.id ?? pt.name}`;
     portalsByKey.set(key, { ...(portalsByKey.get(key) || {}), ...pt });
   }
-
   const endpointMap = new Map();
   for (const ep of [...(base.endpoints || []), ...(topology.endpoints || [])]) {
-    if (!ep?.endpoint) continue;
-    endpointMap.set(`${ep.method || 'GET'} ${ep.endpoint}`, ep);
+    if (ep?.endpoint) endpointMap.set(`${ep.method || 'GET'} ${ep.endpoint}`, ep);
   }
 
-  const processedSnapshots = new Set(base.processedSnapshots || []);
-  const currentSnapshotId = computeTopologySnapshotId(topology);
-  const isNewSnapshot = Boolean(currentSnapshotId && !processedSnapshots.has(currentSnapshotId));
-  if (currentSnapshotId) processedSnapshots.add(currentSnapshotId);
-
-  const defectMap = new Map();
-  for (const d of base.defects || []) defectMap.set(d.key, { ...d });
-
-  const currentBrokenKeys = new Set();
-  for (const bi of sourceIndex.brokenRouteImports || []) {
-    const key = `broken-import:${bi.route}`;
-    currentBrokenKeys.add(key);
-    const existing = defectMap.get(key);
-    if (existing) {
-      existing.status = 'open';
-      existing.lastSeenAt = now;
-    } else {
-      defectMap.set(key, {
-        key,
-        severity: 'P1',
-        type: 'broken-route-import',
-        route: bi.route,
-        source: bi.routerFile,
-        message: `Missing dynamic route target "${bi.importSpec}" (${bi.expectedFile})`,
-        status: 'open',
-        seenCount: 1,
-        firstSeenAt: now,
-        lastSeenAt: now,
-      });
-    }
-  }
-  for (const [k, d] of defectMap.entries()) {
-    if (d.type === 'broken-route-import' && !currentBrokenKeys.has(k)) {
-      d.status = 'closed';
-      d.resolvedAt = d.resolvedAt || now;
-    }
-  }
-
-  if (isNewSnapshot) {
-    const observedRuntimeKeys = new Set();
-    const recordRuntimeDefect = (/** @type {string} */ key, /** @type {string} */ severity, /** @type {string} */ type, /** @type {string} */ route, /** @type {string} */ message) => {
-      observedRuntimeKeys.add(key);
-      const prev = defectMap.get(key);
-      if (prev) {
-        prev.status = 'open';
-        prev.cleanStreak = 0;
-        prev.seenCount = (prev.seenCount || 1) + 1;
-        prev.lastSeenAt = now;
-        prev.lastSnapshotId = currentSnapshotId;
-      } else {
-        defectMap.set(key, {
-          key,
-          severity,
-          type,
-          route,
-          message,
-          status: 'open',
-          cleanStreak: 0,
-          seenCount: 1,
-          firstSeenAt: now,
-          lastSeenAt: now,
-          lastSnapshotId: currentSnapshotId,
-        });
-      }
-    };
-
-    for (const ce of topology.consoleErrors || []) {
-      const route = matchActive(ce.route || '/');
-      const msg = String(ce.message || ce).slice(0, 180);
-      recordRuntimeDefect(`console:${route}:${msg.slice(0, 60)}`, 'P1', 'console-error', route, msg);
-    }
-    for (const qa of topology.queryAnomalies || []) {
-      const route = matchActive(qa.route || '/');
-      recordRuntimeDefect(`query-anomaly:${route}:${qa.detail}`, 'P2', 'malformed-query-param', route, qa.detail);
-    }
-
-    for (const [k, d] of defectMap.entries()) {
-      if (d.type === 'broken-route-import' || d.status === 'closed') continue;
-      if (!observedRuntimeKeys.has(k) && exploredRouteKeys.has(d.route)) {
-        d.cleanStreak = Number(d.cleanStreak || 0) + 1;
-        if (d.cleanStreak >= 2) {
-          d.status = 'closed';
-          d.resolvedAt = now;
-        } else {
-          d.status = 'resolved-candidate';
-        }
-      }
-    }
-  }
+  const converged = convergeDefectsAndPerf({
+    base,
+    sourceIndex,
+    topology,
+    perfReport: inputs.perfReport || null,
+    now,
+    exploredRouteKeys,
+    matchActive,
+  });
 
   const activeRoutes = Object.values(routesObj).filter((r) => !r.stale);
   const coveredRoutes = activeRoutes.filter((r) => r.coveringSpecs.length > 0).length;
   const uncoveredRoutes = activeRoutes.filter((r) => r.coveringSpecs.length === 0).map((r) => r.route);
   const coveragePct = activeRoutes.length > 0 ? Math.round((coveredRoutes / activeRoutes.length) * 100) : 0;
-
-  const perfSnapshots = [...(base.perfSnapshots || [])];
-  if (perfReport && perfReport.measuredAt && !perfSnapshots.some((p) => p.measuredAt === perfReport.measuredAt)) {
-    perfSnapshots.push({
-      measuredAt: perfReport.measuredAt,
-      budgetPassed: perfReport.budgetPassed,
-      apiP95Ms: perfReport.apiBenchmark?.p95Ms ?? null,
-      browserSummary: (perfReport.browserMetrics || []).slice(0, 5).map((/** @type {any} */ m) => ({
-        route: m.route,
-        ttfbMs: m.ttfbMs,
-        fcpMs: m.fcpMs,
-        lcpMs: m.lcpMs ?? null,
-        cls: m.cls ?? 0,
-        domNodes: m.domNodes,
-      })),
-    });
-  }
-
   const dbTables = (sourceIndex.dbEntities || []).map((/** @type {any} */ d) => d.table);
-  const openDefectsCount = [...defectMap.values()].filter((d) => d.status === 'open').length;
-  const history = [...(base.history || [])];
-  history.push({
-    revision,
-    day: now.slice(0, 10),
-    updatedAt: now,
-    totalRoutes: activeRoutes.length,
-    coveredRoutes,
-    coveragePct,
-    endpointsCount: endpointMap.size,
-    openDefects: openDefectsCount,
-  });
+  const openDefectsCount = converged.defects.filter((d) => d.status === 'open').length;
 
+  const history = [...(base.history || []), {
+    revision, day: now.slice(0, 10), updatedAt: now, totalRoutes: activeRoutes.length,
+    coveredRoutes, coveragePct, endpointsCount: endpointMap.size, openDefects: openDefectsCount,
+  }];
+
+  const resolvedSourceRepos = inputs.sourceRepos || sourceIndex.repos || base.meta?.sourceRepos || [];
   const nextMap = {
     schemaVersion: SCHEMA_VERSIONS.codeMap,
-    version: '4.0',
+    version: '4.1',
     revision,
     updatedAt: now,
     contentFingerprint: '',
+    meta: {
+      sourceRepos: resolvedSourceRepos,
+      scannedFiles: sourceIndex.fileCount || 0,
+      truncated: Boolean(sourceIndex.truncated),
+      ...(typeof inputs.maxScanFiles === 'number' ? { maxScanFiles: inputs.maxScanFiles } : {}),
+      ...(Array.isArray(inputs.apiPrefixes) && inputs.apiPrefixes.length > 0 ? { apiPrefixes: inputs.apiPrefixes } : {}),
+    },
     baseURL: topology.baseURL || base.baseURL || null,
     techStack: [...new Set([...(base.techStack || []), ...(topology.techStack || [])])],
     portals: [...portalsByKey.values()],
-    processedSnapshots: [...processedSnapshots].slice(-50),
+    processedSnapshots: converged.processedSnapshots,
     sourceSummary: {
       repoFilesScanned: sourceIndex.fileCount || base.sourceSummary?.repoFilesScanned || 0,
       truncated: Boolean(sourceIndex.truncated),
@@ -401,7 +313,7 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
     },
     routes: routesObj,
     endpoints: [...endpointMap.values()],
-    defects: [...defectMap.values()],
+    defects: converged.defects,
     duplicateWaterfalls: topology.duplicateWaterfalls || base.duplicateWaterfalls || [],
     coverage: {
       totalRoutes: activeRoutes.length,
@@ -411,7 +323,7 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
       coveragePct,
       staleRoutesCount: Object.values(routesObj).filter((r) => r.stale).length,
     },
-    perfSnapshots: perfSnapshots.slice(-15),
+    perfSnapshots: converged.perfSnapshots,
     history: history.slice(-30),
   };
 

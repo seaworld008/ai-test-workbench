@@ -1,6 +1,6 @@
-# 版本与兼容性矩阵 (v6.4.0)
+# 版本与兼容性矩阵 (v6.5.0)
 
-> [English Version](./VERSION.en.md) · [简体中文主文档](./README.md) · **工作台与门禁内核版本**：`6.4.0`（单一真源：`src/core/version.mjs`） · **核验日期**：`2026-11-26`
+> [English Version](./VERSION.en.md) · [简体中文主文档](./README.md) · **工作台与门禁内核版本**：`6.5.0`（单一真源：`src/core/version.mjs`） · **核验日期**：`2026-11-26`
 
 ## 1. 运行时与工具链要求
 
@@ -17,7 +17,7 @@
 
 | 工件类型 | 当前 Schema 版本 | 对应模块 |
 |---|---|---|
-| **Gate Kernel** | `6.4.0` | 权威源码 `src/kernel/gate-kernel.mjs`（18 条可插拔规则 `AITEST-G101..G118` + 经治理锁校验的声明式 `qa/support/project-rules.json`，AST 门禁 v2.2，单向同步镜像 `templates/playwright-qa/support/gate-kernel.mjs`，`doctor` 与 `check:vendor` 双重校验漂移） |
+| **Gate Kernel** | `6.5.0` | 权威源码 `src/kernel/gate-kernel.mjs`（18 条可插拔规则 `AITEST-G101..G118` + 经治理锁校验的声明式 `qa/support/project-rules.json`，AST 门禁 v2.2，单向同步镜像 `templates/playwright-qa/support/gate-kernel.mjs`，`doctor` 与 `check:vendor` 双重校验漂移） |
 | **Differential Parity Oracle** | `v1` | `src/kernel/diff-oracle.mjs` / `src/parity/`（五级检查点 `CP1..CP5`、`shape-only` 零明文形状指纹 `fp_<12hex>` 与零依赖 SSE 重组 `src/core/stream-sse.mjs`） |
 | **Memory Loop & Seam Card** | `v1` | `src/memory/` / `src/learn.mjs` / `src/verdict/seam-card.mjs`（受锁 `qa/known-blockers.json`、待审提案 `learn-proposals.{json,md}` 与人类守门员焦点卡） |
 | **CommandResult & Verdict** | `v2` | `src/core/outcome.mjs` / `src/verdict.mjs`（统一 `CommandResult<T>` 信封与 `AITEST_RESULT_FILE` 帧化 IPC） |

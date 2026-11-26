@@ -51,8 +51,8 @@ async function saveSessionSnapshot(context, page, expectedOrigin, storageStatePa
   } catch {
     // ignore chmod failures on Windows filesystems
   }
-  /** @type {{ origin: string, url: string, entries: [string, string][], localStorageKeys: string[] }} */
-  const sessionDump = await page
+  /** @type {{ origin: string, url: string, entries: [string, string][], localStorageKeys: string[], capturedAt: string }} */
+  const rawDump = await page
     .evaluate(() => ({
       origin: window.location.origin,
       url: window.location.href,
@@ -60,6 +60,11 @@ async function saveSessionSnapshot(context, page, expectedOrigin, storageStatePa
       localStorageKeys: Object.keys(window.localStorage),
     }))
     .catch(() => ({ origin: expectedOrigin, url: page.url(), entries: [], localStorageKeys: [] }));
+
+  const sessionDump = {
+    ...rawDump,
+    capturedAt: new Date().toISOString(),
+  };
 
   fs.writeFileSync(sessionStoragePath, JSON.stringify(sessionDump, null, 2) + '\n', {
     encoding: 'utf8',

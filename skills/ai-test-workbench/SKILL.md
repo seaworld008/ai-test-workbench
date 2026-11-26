@@ -16,11 +16,11 @@ Use this skill to execute an **AI-Agent-First, zero-fake-green (`FGER = 0.0%`)**
 2. **Never Target Production & Respect Egress Guards**:
    - `TEST_ENV=production|prod|live|online` or unallowlisted URLs are hard-blocked (exit `2`). Support `TEST_EGRESS_MODE=allowlist`; never call raw `request.newContext()` to bypass fixture guards.
 3. **Tamper-Locked Governance (`governance.lock`)**:
-   - Never modify `eslint.config.mjs`, `playwright.config.ts`, `aitest.config.json`, `waivers.json`, `known-blockers.json`, `corpus/**`, `fixtures/upstream-cassettes/**`, or `support/**` to pass gates. Only a human running `npx ai-test-workbench@6.4.0 governance approve --by <name> --reason "<why>"` in a local terminal can re-seal `.aitest/governance.lock`.
+   - Never modify `eslint.config.mjs`, `playwright.config.ts`, `aitest.config.json`, `waivers.json`, `known-blockers.json`, `corpus/**`, `fixtures/upstream-cassettes/**`, or `support/**` to pass gates. Only a human running `npx ai-test-workbench@6.5.0 governance approve --by <name> --reason "<why>"` in a local terminal can re-seal `.aitest/governance.lock`.
 
 ## 2. Preferred Invocation: Native MCP Server (`mcp-serve` — 17 Canonical Tools)
 
-When connected via `node tools/aitest.mjs mcp-serve` (or pinned `npx --package=ai-test-workbench@6.4.0 ai-test-workbench mcp-serve`), invoke canonical tools directly and inspect `structuredContent`. If a long tool returns `data.backgrounded === true`, poll `aitest_job(action="status", jobId=...)` / `aitest_job(action="result", jobId=...)` or cancel via `aitest_job(action="cancel", jobId=...)`:
+When connected via `node tools/aitest.mjs mcp-serve` (or pinned `npx --package=ai-test-workbench@6.5.0 ai-test-workbench mcp-serve`), invoke canonical tools directly and inspect `structuredContent`. If a long tool returns `data.backgrounded === true`, poll `aitest_job(action="status", jobId=...)` / `aitest_job(action="result", jobId=...)` or cancel via `aitest_job(action="cancel", jobId=...)`:
 
 1. **Readiness & Init**: `aitest_doctor` -> `aitest_init(dryRun=true)` -> `aitest_init` *(governance lock checks/approvals stay CLI-only via `governance status|verify|approve`)*
 2. **Default-Deny 0→1 Exploration & Living Code Map v4**: `aitest_explore` -> `aitest_map_sync`

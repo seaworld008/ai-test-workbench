@@ -99,6 +99,7 @@ export function discardHealSession(qaDir, options = {}) {
   }
 
   session.state = 'discarded';
+  session.repairPermitted = false;
   session.allowedActions = [];
   session.updatedAt = new Date().toISOString();
   session.conclusion = {

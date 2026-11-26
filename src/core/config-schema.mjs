@@ -48,49 +48,16 @@ export const RESERVED_WEAK_MATCHERS = Object.freeze(
 const FORBIDDEN_UPSTREAM_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0']);
 
 /**
+ * @typedef {{ id: string; whenModified: string[]; requireModified: string[]; allowWaiver?: boolean }} LockstepRuleConfig
+ * @typedef {{ id: string; code?: string; title?: string; pattern: string; flags?: string; scope?: 'all' | 'product' | 'specs'; fileGlobs?: string[]; remediation?: string }} MemoryPatternConfig
+ * @typedef {{ normalizePaths?: string[]; strictByteEscape?: boolean; maxLatencyRatio?: number; maxTtftRatio?: number; privacyMode?: 'redacted' | 'shape-only'; authStorageKeys?: string[]; failOnAuthError?: boolean }} ParityConfig
+ * @typedef {{ logsBackend?: 'loki' | 'victorialogs' | 'elk'; traceProtocol?: 'w3c' | 'sw8' | 'all' }} ObservabilityConfig
  * @typedef {{
- *   id: string;
- *   whenModified: string[];
- *   requireModified: string[];
- *   allowWaiver?: boolean;
- * }} LockstepRuleConfig
- *
- * @typedef {{
- *   id: string;
- *   code?: string;
- *   title?: string;
- *   pattern: string;
- *   flags?: string;
- *   scope?: 'all' | 'product' | 'specs';
- *   fileGlobs?: string[];
- *   remediation?: string;
- * }} MemoryPatternConfig
- *
- * @typedef {{
- *   normalizePaths?: string[];
- *   strictByteEscape?: boolean;
- *   maxLatencyRatio?: number;
- *   maxTtftRatio?: number;
- *   privacyMode?: 'redacted' | 'shape-only';
- * }} ParityConfig
- *
- * @typedef {{
- *   assertFunctionNames: string[];
- *   criticalTags: string[];
- *   maxFlaky: number;
- *   maxSkipped: number;
- *   maxWaivers: number;
- *   maxWaiverDays: number;
- *   governance: { protected: string[] };
- *   rules: Record<string, boolean | { enabled?: boolean; severity?: 'error' | 'off' }>;
- *   customMatchers: Record<string, number>;
- *   parity?: ParityConfig;
- *   replayAllowedUpstreamHosts: string[];
- *   lockstepRules: LockstepRuleConfig[];
- *   memoryPatterns: MemoryPatternConfig[];
- *   _configError?: string;
- *   _configErrors?: string[];
- *   [key: string]: unknown;
+ *   assertFunctionNames: string[]; criticalTags: string[]; maxFlaky: number; maxSkipped: number; maxWaivers: number; maxWaiverDays: number;
+ *   sourceRepos: string[]; maxScanFiles?: number; apiPrefixes: string[]; observability?: ObservabilityConfig;
+ *   governance: { protected: string[] }; rules: Record<string, boolean | { enabled?: boolean; severity?: 'error' | 'off' }>;
+ *   customMatchers: Record<string, number>; parity?: ParityConfig; replayAllowedUpstreamHosts: string[];
+ *   lockstepRules: LockstepRuleConfig[]; memoryPatterns: MemoryPatternConfig[]; _configError?: string; _configErrors?: string[]; [key: string]: unknown;
  * }} NormalizedAitestConfig
  */
 
@@ -105,6 +72,8 @@ export const DEFAULT_AITEST_CONFIG = Object.freeze({
   maxSkipped: 0,
   maxWaivers: 5,
   maxWaiverDays: 14,
+  sourceRepos: [],
+  apiPrefixes: [],
   governance: {
     protected: [...DEFAULT_CONFIG_PROTECTED_GLOBS],
   },
@@ -119,6 +88,8 @@ export const DEFAULT_AITEST_CONFIG = Object.freeze({
 export function createDefaultAitestConfig() {
   return {
     ...DEFAULT_AITEST_CONFIG,
+    sourceRepos: [],
+    apiPrefixes: [],
     governance: { protected: [...DEFAULT_CONFIG_PROTECTED_GLOBS] },
     rules: {},
     customMatchers: {},
@@ -188,10 +159,35 @@ export function validateAitestConfigObject(raw) {
   checkStringArray('criticalTags');
   checkStringArray('allowSkipTags');
   checkStringArray('allowedEnvNames');
+  checkStringArray('sourceRepos');
+  checkStringArray('apiPrefixes');
   checkIntRange('maxFlaky', 0, 1000);
   checkIntRange('maxSkipped', 0, 1000);
   checkIntRange('maxWaivers', 0, 100);
   checkIntRange('maxWaiverDays', 1, 90);
+  checkIntRange('maxScanFiles', 100, 200000);
+  if (Array.isArray(obj.sourceRepos) && obj.sourceRepos.some((s) => typeof s === 'string' && !s.trim())) {
+    errors.push('aitest.config.json "sourceRepos" entries must be non-empty path strings.');
+  }
+  if (Array.isArray(obj.apiPrefixes) && obj.apiPrefixes.some((s) => typeof s === 'string' && !s.trim().startsWith('/'))) {
+    errors.push('aitest.config.json "apiPrefixes" entries must start with "/".');
+  }
+  /** @type {ObservabilityConfig | undefined} */
+  let observabilityCfg;
+  if (obj.observability !== undefined) {
+    if (!obj.observability || typeof obj.observability !== 'object' || Array.isArray(obj.observability)) {
+      errors.push('aitest.config.json "observability" must be an object.');
+    } else {
+      const ob = /** @type {Record<string, unknown>} */ (obj.observability);
+      if (ob.logsBackend !== undefined && !['loki', 'victorialogs', 'elk'].includes(String(ob.logsBackend))) {
+        errors.push('aitest.config.json "observability.logsBackend" must be "loki", "victorialogs", or "elk".');
+      }
+      if (ob.traceProtocol !== undefined && !['w3c', 'sw8', 'all'].includes(String(ob.traceProtocol))) {
+        errors.push('aitest.config.json "observability.traceProtocol" must be "w3c", "sw8", or "all".');
+      }
+      observabilityCfg = /** @type {ObservabilityConfig} */ ({ ...ob });
+    }
+  }
 
   if (obj.governance !== undefined) {
     if (!obj.governance || typeof obj.governance !== 'object' || Array.isArray(obj.governance)) {
@@ -270,6 +266,12 @@ export function validateAitestConfigObject(raw) {
       }
       if (p.privacyMode !== undefined && p.privacyMode !== 'redacted' && p.privacyMode !== 'shape-only') {
         errors.push('aitest.config.json "parity.privacyMode" must be "redacted" or "shape-only".');
+      }
+      if (p.authStorageKeys !== undefined && (!Array.isArray(p.authStorageKeys) || !p.authStorageKeys.every((x) => typeof x === 'string' && x.trim().length > 0))) {
+        errors.push('aitest.config.json "parity.authStorageKeys" must be an array of non-empty strings.');
+      }
+      if (p.failOnAuthError !== undefined && typeof p.failOnAuthError !== 'boolean') {
+        errors.push('aitest.config.json "parity.failOnAuthError" must be a boolean.');
       }
       parityCfg = /** @type {ParityConfig} */ ({ ...p });
     }
@@ -391,6 +393,10 @@ export function validateAitestConfigObject(raw) {
       maxSkipped: typeof obj.maxSkipped === 'number' ? obj.maxSkipped : DEFAULT_AITEST_CONFIG.maxSkipped,
       maxWaivers: typeof obj.maxWaivers === 'number' ? obj.maxWaivers : DEFAULT_AITEST_CONFIG.maxWaivers,
       maxWaiverDays: typeof obj.maxWaiverDays === 'number' ? obj.maxWaiverDays : DEFAULT_AITEST_CONFIG.maxWaiverDays,
+      sourceRepos: Array.isArray(obj.sourceRepos) ? /** @type {string[]} */ (obj.sourceRepos).map((s) => s.trim()).filter(Boolean) : [],
+      ...(typeof obj.maxScanFiles === 'number' ? { maxScanFiles: obj.maxScanFiles } : {}),
+      apiPrefixes: Array.isArray(obj.apiPrefixes) ? /** @type {string[]} */ (obj.apiPrefixes).map((s) => s.trim()).filter(Boolean) : [],
+      ...(observabilityCfg ? { observability: observabilityCfg } : {}),
       governance: { protected: [...new Set([...DEFAULT_CONFIG_PROTECTED_GLOBS, ...customProtected])] },
       rules: rulesObj,
       customMatchers: customMatchersObj,

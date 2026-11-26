@@ -12,12 +12,14 @@ import {
   compileBlockedEndpointRules,
   evaluateTargetSafety,
   loadMergedQaEnv,
+  parseLowerCsvList,
 } from './origin-guard.mjs';
 import {
   DEFAULT_BUDGET,
   buildPerfMarkdown,
   computeLatencyPercentiles,
   evaluatePerfBudget,
+  resolvePerfTargetRoutes,
 } from './perf/budget.mjs';
 import { runBrowserPerfProfile, runReadOnlyApiBenchmark } from './perf/collectors.mjs';
 import { runSseStreamBenchmark } from './perf/streaming.mjs';
@@ -104,18 +106,7 @@ export async function runPerfCommand(options = {}) {
   }
 
   const existingCm = readJsonSafe(path.join(qaDir, 'knowledge', 'code-map.json'));
-  let routes = ['/'];
-  if (options.routes) {
-    routes = String(options.routes)
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-  } else if (existingCm?.routes) {
-    const extras = Object.keys(existingCm.routes)
-      .filter((r) => r !== '/' && !r.includes(':') && !/login|404|403|401/i.test(r))
-      .slice(0, 2);
-    if (extras.length > 0) routes = ['/', ...extras];
-  }
+  const routes = resolvePerfTargetRoutes(options.routes, existingCm);
 
   const perfGuardConfig = {
     baseURL: safety.baseURL,
@@ -125,6 +116,7 @@ export async function runPerfCommand(options = {}) {
     extraEgressHosts: safety.extraEgressHosts,
     egressMode: safety.egressMode || 'allowlist',
     blockedRules: compileBlockedEndpointRules(mergedEnv.TEST_BLOCKED_ENDPOINTS ?? DEFAULT_BLOCKED_ENDPOINTS),
+    abortThirdPartyHosts: parseLowerCsvList(mergedEnv.TEST_ABORT_THIRD_PARTY_HOSTS ?? ''),
     strictReadonly: true,
   };
 
@@ -136,6 +128,59 @@ export async function runPerfCommand(options = {}) {
     }
   }
 
+  const concurrency = Math.min(20, Math.max(1, Number(options.concurrency || 4)));
+  const iterations = Math.min(200, Math.max(1, Number(options.iterations || (mode === 'sse' ? 5 : 12))));
+  const plannedEndpoint = mode === 'all' || mode === 'api' ? options.endpoint || mergedEnv.E2E_API_HEALTH_PATH || '/' : null;
+  const plannedSseEndpoint =
+    mode === 'sse' || (mode === 'all' && options.sseEndpoint)
+      ? options.sseEndpoint || options.endpoint || '/api/stream'
+      : null;
+
+  const epUrl = plannedEndpoint ? new URL(plannedEndpoint, safety.baseURL).toString() : null;
+  if (epUrl) {
+    const epCheck = checkOutgoingRequestSafety('GET', epUrl, perfGuardConfig);
+    if (epCheck.blocked) {
+      return failPerf(2, `[Target Guard Blocked] Perf endpoint "${plannedEndpoint}" blocked: ${epCheck.reason}`, 'blocked');
+    }
+  }
+  const sseUrl = plannedSseEndpoint ? new URL(plannedSseEndpoint, safety.baseURL).toString() : null;
+  if (sseUrl) {
+    const sseCheck = checkOutgoingRequestSafety('GET', sseUrl, perfGuardConfig);
+    if (sseCheck.blocked) {
+      return failPerf(2, `[Target Guard Blocked] Perf SSE endpoint "${plannedSseEndpoint}" blocked: ${sseCheck.reason}`, 'blocked');
+    }
+  }
+
+  const budgetPath = path.join(qaDir, 'perf-budget.json');
+  if (options.dryRun) {
+    return emitCommandResult(
+      buildCommandResult({
+        tool: 'perf',
+        outcome: 'pass',
+        ok: true,
+        exitCode: 0,
+        summary: `Dry-run perf plan (mode=${mode}, routes=${routes.length})`,
+        data: {
+          dryRun: true,
+          baseURL: safety.baseURL,
+          mode,
+          readOnly: true,
+          routes: mode === 'api' || mode === 'sse' ? [] : routes,
+          endpoint: plannedEndpoint,
+          sseEndpoint: plannedSseEndpoint,
+          budgetPath,
+          budgetConfigured: fs.existsSync(budgetPath),
+          budgetPassed: true,
+          violations: [],
+          browserMetrics: [],
+          apiBenchmark: null,
+          sseBenchmark: null,
+        },
+      }),
+      { asJson: Boolean(options.json) }
+    );
+  }
+
   const browserMetrics =
     mode === 'api' || mode === 'sse'
       ? []
@@ -145,32 +190,9 @@ export async function runPerfCommand(options = {}) {
           guardConfig: perfGuardConfig,
         });
 
-  let apiBenchmark = null;
-  if (mode === 'all' || mode === 'api') {
-    const concurrency = Math.min(20, Math.max(1, Number(options.concurrency || 4)));
-    const iterations = Math.min(200, Math.max(1, Number(options.iterations || 12)));
-    const ep = options.endpoint || mergedEnv.E2E_API_HEALTH_PATH || '/';
-    const epUrl = new URL(ep, safety.baseURL).toString();
-    const epCheck = checkOutgoingRequestSafety('GET', epUrl, perfGuardConfig);
-    if (epCheck.blocked) {
-      return failPerf(2, `[Target Guard Blocked] Perf endpoint "${ep}" blocked: ${epCheck.reason}`, 'blocked');
-    }
-    apiBenchmark = await runReadOnlyApiBenchmark(epUrl, concurrency, iterations, perfGuardConfig);
-  }
-
-  let sseBenchmark = null;
-  if (mode === 'sse' || (mode === 'all' && options.sseEndpoint)) {
-    const sseEp = options.sseEndpoint || options.endpoint || '/api/stream';
-    const sseUrl = new URL(sseEp, safety.baseURL).toString();
-    const sseCheck = checkOutgoingRequestSafety('GET', sseUrl, perfGuardConfig);
-    if (sseCheck.blocked) {
-      return failPerf(2, `[Target Guard Blocked] Perf SSE endpoint "${sseEp}" blocked: ${sseCheck.reason}`, 'blocked');
-    }
-    const sseIters = Math.min(100, Math.max(1, Number(options.iterations || 5)));
-    sseBenchmark = await runSseStreamBenchmark(sseUrl, sseIters, perfGuardConfig);
-  }
-
-  const budgetCfg = readJsonSafe(path.join(qaDir, 'perf-budget.json')) || DEFAULT_BUDGET;
+  const apiBenchmark = epUrl ? await runReadOnlyApiBenchmark(epUrl, concurrency, iterations, perfGuardConfig) : null;
+  const sseBenchmark = sseUrl ? await runSseStreamBenchmark(sseUrl, Math.min(100, iterations), perfGuardConfig) : null;
+  const budgetCfg = readJsonSafe(budgetPath) || DEFAULT_BUDGET;
   const prevSnapshots = existingCm?.perfSnapshots || [];
   const lastBaseline = prevSnapshots.length > 0 ? prevSnapshots[prevSnapshots.length - 1] : null;
   const evalOut = evaluatePerfBudget({ browserMetrics, apiBenchmark, sseBenchmark }, budgetCfg, options.checkRegression ? lastBaseline : null);
@@ -188,31 +210,25 @@ export async function runPerfCommand(options = {}) {
   };
 
   const exitCode = options.enforceBudget && !evalOut.ok ? 1 : 0;
-  let jsonPath = null;
-  let mdPath = null;
+  const reportsDir = path.join(qaDir, 'reports');
+  fs.mkdirSync(reportsDir, { recursive: true });
+  const jsonPath = path.join(reportsDir, 'perf-report.json');
+  const mdPath = path.join(reportsDir, 'perf-summary.md');
+  fs.writeFileSync(jsonPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
+  fs.writeFileSync(mdPath, buildPerfMarkdown(report, lang), 'utf8');
 
-  if (!options.dryRun) {
-    const reportsDir = path.join(qaDir, 'reports');
-    fs.mkdirSync(reportsDir, { recursive: true });
-    jsonPath = path.join(reportsDir, 'perf-report.json');
-    mdPath = path.join(reportsDir, 'perf-summary.md');
-    fs.writeFileSync(jsonPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
-    fs.writeFileSync(mdPath, buildPerfMarkdown(report, lang), 'utf8');
+  if (fs.existsSync(path.join(qaDir, 'knowledge', 'code-map.json'))) {
+    syncLivingCodeMap(qaDir, { lang, syncImpact: false });
+  }
 
-    if (fs.existsSync(path.join(qaDir, 'knowledge', 'code-map.json'))) {
-      syncLivingCodeMap(qaDir, { lang, syncImpact: false });
-    }
-
-    if (!options.json) {
-      console.log(
-        lang === 'zh'
-          ? `\n[Perf] 性能探测完成 (Browser 路由=${browserMetrics.length}, LCP=${browserMetrics[0]?.lcpMs ?? '-'}ms, API P95=${apiBenchmark?.p95Ms ?? '-'}ms, RPS=${apiBenchmark?.rps ?? '-'})`
-          : `\n[Perf] Benchmark complete (routes=${browserMetrics.length}, LCP=${browserMetrics[0]?.lcpMs ?? '-'}ms, API P95=${apiBenchmark?.p95Ms ?? '-'}ms, RPS=${apiBenchmark?.rps ?? '-'})`
-      );
-      console.log(`  Perf JSON    : ${jsonPath}`);
-      console.log(`  Perf Summary : ${mdPath}`);
-      for (const v of evalOut.violations) console.warn(`  [PERF WARN] ${v}`);
-    }
+  if (!options.json) {
+    console.log(
+      lang === 'zh'
+        ? `\n[Perf] 性能探测完成 (Browser 路由=${browserMetrics.length}, LCP=${browserMetrics[0]?.lcpMs ?? '-'}ms, API P95=${apiBenchmark?.p95Ms ?? '-'}ms, RPS=${apiBenchmark?.rps ?? '-'})`
+        : `\n[Perf] Benchmark complete (routes=${browserMetrics.length}, LCP=${browserMetrics[0]?.lcpMs ?? '-'}ms, API P95=${apiBenchmark?.p95Ms ?? '-'}ms, RPS=${apiBenchmark?.rps ?? '-'})`
+    );
+    console.log(`  Perf JSON    : ${jsonPath}\n  Perf Summary : ${mdPath}`);
+    for (const v of evalOut.violations) console.warn(`  [PERF WARN] ${v}`);
   }
 
   return emitCommandResult(
@@ -222,10 +238,7 @@ export async function runPerfCommand(options = {}) {
       ok: exitCode === 0,
       exitCode,
       summary: `Perf benchmark (routes=${browserMetrics.length}, budgetPassed=${evalOut.ok}, LCP=${browserMetrics[0]?.lcpMs ?? '-'}ms, API P95=${apiBenchmark?.p95Ms ?? '-'}ms)`,
-      data: {
-        ...report,
-        ...(options.dryRun ? { dryRun: true } : { jsonPath, mdPath }),
-      },
+      data: { ...report, jsonPath, mdPath },
     }),
     { asJson: Boolean(options.json) }
   );

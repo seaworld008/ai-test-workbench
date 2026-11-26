@@ -11,20 +11,28 @@ import {
   buildReqIdToSpecMap,
   buildReverseImportGraph,
   collectGitChangedFiles,
+  collectMultiRepoGitChangedFiles,
   evaluateImpactRecall,
   extractReqIdsFromFile,
   findTransitiveDependents,
-  isOverbroadCatchAllGlob,
   listAllSpecFiles,
   loadAndValidateImpactRules,
   specMatchesStemExactSegment,
 } from './impact/graph.mjs';
+import {
+  buildCodeMapFileToSpecMap,
+  evaluateUpwardDependentClosure,
+  extractCandidateStem,
+  isIgnoredWorkbenchArtifactPath,
+  resolveImpactRepos,
+} from './impact/java-support.mjs';
 
 export { buildReverseImportGraph, evaluateImpactRecall, findTransitiveDependents };
 
 /**
  * @typedef {{
  *   mode: 'full' | 'targeted' | 'only-changed',
+ *   downgraded?: boolean,
  *   reason: string,
  *   specs: string[],
  *   totalSpecsCount?: number,
@@ -47,6 +55,7 @@ export { buildReverseImportGraph, evaluateImpactRecall, findTransitiveDependents
 function makeFullImpactResult(reason, changedFiles, why = [], baseRef = undefined) {
   return {
     mode: 'full',
+    downgraded: true,
     reason,
     specs: [],
     why,
@@ -58,19 +67,42 @@ function makeFullImpactResult(reason, changedFiles, why = [], baseRef = undefine
 }
 
 /**
- * Hardened Impact v2 selector (`I-01..I-04`):
+ * Resolves a repo-relative (or multi-repo `<repoLabel>/...`) path to disk for REQ-* scanning.
+ * @param {string} file
+ * @param {string} repoDir
+ * @param {string[]} repos
+ */
+function resolveChangedFileOnDisk(file, repoDir, repos) {
+  if (repos.length > 1) {
+    const slash = file.indexOf('/');
+    if (slash > 0) {
+      const label = file.slice(0, slash);
+      const rest = file.slice(slash + 1);
+      const matchRepo = repos.find((r) => path.basename(r) === label);
+      if (matchRepo) return path.join(matchRepo, rest);
+    }
+  }
+  return path.join(repoDir, file);
+}
+
+/**
+ * Hardened Impact v2.1 selector (`I-01..I-04`, multi-repo, Java imports, CodeMap lookup, upward aggregation):
  * @param {string[]} changedFiles
  * @param {string} qaDir
  * @param {string} repoDir
- * @param {{ canUseOnlyChanged?: boolean }} [options]
+ * @param {{ canUseOnlyChanged?: boolean, repos?: string[] }} [options]
  * @returns {ImpactResult}
  */
 export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {}) {
+  const effectiveRepoDir = canonicalFsPath(repoDir) === canonicalFsPath(qaDir) ? path.dirname(qaDir) : repoDir;
+  const qaRelPrefix = path.relative(canonicalFsPath(effectiveRepoDir), canonicalFsPath(qaDir)).replace(/\\/g, '/');
+  const repos = Array.isArray(options.repos) && options.repos.length > 0 ? options.repos : resolveImpactRepos(effectiveRepoDir, qaDir);
+
   const normalized = [
     ...new Set(
       (changedFiles || [])
         .map((f) => f.replace(/\\/g, '/').replace(/^\.\//, ''))
-        .filter(Boolean)
+        .filter((f) => f && !isIgnoredWorkbenchArtifactPath(f, qaRelPrefix))
     ),
   ];
 
@@ -88,7 +120,6 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
     }
   }
 
-  const qaRelPrefix = path.relative(canonicalFsPath(repoDir), canonicalFsPath(qaDir)).replace(/\\/g, '/');
   const allSpecs = listAllSpecFiles(path.join(qaDir, 'tests'), qaDir);
   if (allSpecs.length === 0) {
     return makeFullImpactResult('No spec files found in QA directory — falling back to full suite.', normalized);
@@ -106,13 +137,11 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
   const loadedAuto = fs.existsSync(autoRulesPath)
     ? loadAndValidateImpactRules(autoRulesPath)
     : { ok: true, rules: [], errorReason: null };
-  const compiledRules = [
-    ...loadedManual.rules,
-    ...(loadedAuto.ok ? loadedAuto.rules : []),
-  ];
-  const reqToSpecs = buildReqIdToSpecMap(qaDir, repoDir, allSpecs);
+  const compiledRules = [...loadedManual.rules, ...(loadedAuto.ok ? loadedAuto.rules : [])];
+  const reqToSpecs = buildReqIdToSpecMap(qaDir, effectiveRepoDir, allSpecs);
+  const codeMapFileToSpecs = buildCodeMapFileToSpecMap(qaDir, allSpecs);
 
-  const reverseGraph = buildReverseImportGraph(repoDir, { includeQa: false });
+  const reverseGraph = buildReverseImportGraph(effectiveRepoDir, { includeQa: false, repos });
   if (reverseGraph.truncated) {
     return makeFullImpactResult(
       `Import graph exceeded ${MAX_GRAPH_FILES}-file scan budget (truncated) — falling back to full suite for recall safety.`,
@@ -131,7 +160,7 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
 
   let allInsideQa = true;
   /** @type {string[]} */
-  let qaNonSpecFiles = [];
+  const qaNonSpecFiles = [];
 
   const matchCandidateFileToSpecs = (/** @type {string} */ candidateFile, /** @type {string | null} */ chainPrefix = null) => {
     let matchedAny = false;
@@ -142,9 +171,7 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
           if (allSpecs.includes(sp)) {
             addSpecReason(
               sp,
-              chainPrefix
-                ? `import-graph: ${chainPrefix} -> rule(${rule.rawMatch})`
-                : `impact-rule: ${candidateFile} (${rule.rawMatch})`
+              chainPrefix ? `import-graph: ${chainPrefix} -> rule(${rule.rawMatch})` : `impact-rule: ${candidateFile} (${rule.rawMatch})`
             );
             matchedAny = true;
           }
@@ -152,12 +179,16 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
       }
     }
 
+    const cmHits = codeMapFileToSpecs.get(candidateFile);
+    if (cmHits) {
+      for (const hit of cmHits) {
+        addSpecReason(hit.spec, chainPrefix ? `import-graph: ${chainPrefix} -> ${hit.via}` : `${hit.via}: ${candidateFile}`);
+        matchedAny = true;
+      }
+    }
+
     if (!matchedAny) {
-      const stem = path
-        .basename(candidateFile)
-        .replace(/\.[a-zA-Z0-9]+$/, '')
-        .replace(/\.(controller|service|view|page|component|route|routes)$/i, '')
-        .toLowerCase();
+      const stem = extractCandidateStem(candidateFile);
       if (stem.length >= 3 && !['index', 'main', 'app', 'utils', 'common', 'base', 'config'].includes(stem)) {
         for (const sp of allSpecs) {
           if (specMatchesStemExactSegment(sp, stem)) {
@@ -167,18 +198,16 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
         }
       }
     }
-
     return { forceFull: false, matchedAny };
   };
 
   for (const file of normalized) {
-    if (/\.(md|txt)$/i.test(file) && !file.includes('specs/')) {
-      continue;
-    }
+    if (/\.(md|txt)$/i.test(file) && !file.includes('specs/')) continue;
 
     const isInsideQa = qaRelPrefix ? file === qaRelPrefix || file.startsWith(`${qaRelPrefix}/`) : file.startsWith('tests/');
     if (isInsideQa) {
-      const relInsideQa = qaRelPrefix ? file.slice(qaRelPrefix.length + 1) : file;
+      const relInsideQa = qaRelPrefix && file.startsWith(`${qaRelPrefix}/`) ? file.slice(qaRelPrefix.length + 1) : file;
+      if (isIgnoredWorkbenchArtifactPath(relInsideQa)) continue;
       if (/^tests\/.*\.(?:spec|test)\.[jt]s$/.test(relInsideQa) && allSpecs.includes(relInsideQa)) {
         addSpecReason(relInsideQa, `direct-spec-edit: ${relInsideQa}`);
         continue;
@@ -198,19 +227,11 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
       continue;
     }
 
-    const absChanged = path.join(repoDir, file);
+    const absChanged = resolveChangedFileOnDisk(file, effectiveRepoDir, repos);
     for (const reqId of extractReqIdsFromFile(absChanged)) {
-      for (const sp of reqToSpecs.get(reqId) || []) {
-        addSpecReason(sp, `req-code-link: ${file} (${reqId})`);
-      }
+      for (const sp of reqToSpecs.get(reqId) || []) addSpecReason(sp, `req-code-link: ${file} (${reqId})`);
     }
-
     allInsideQa = false;
-
-    const direct = matchCandidateFileToSpecs(file, null);
-    if (direct.forceFull) {
-      return makeFullImpactResult(`Impact rule for "${file}" requires full suite.`, normalized, [{ spec: '*', via: `fullSuite-rule: ${file}` }]);
-    }
 
     const dependents = findTransitiveDependents(file, reverseGraph);
     if (dependents.length >= 8) {
@@ -220,8 +241,6 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
         [{ spec: '*', via: `high-fan-in(${dependents.length}): ${file}` }]
       );
     }
-
-    let transitiveMatched = false;
     for (const dep of dependents) {
       if (GLOBAL_INFRA_PATTERNS.some((re) => re.test(dep.file))) {
         return makeFullImpactResult(
@@ -230,40 +249,21 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
           [{ spec: '*', via: `import-graph-infra: ${dep.chain.join(' -> ')}` }]
         );
       }
-      const depMatch = matchCandidateFileToSpecs(dep.file, dep.chain.join(' -> '));
-      if (depMatch.forceFull) {
-        return makeFullImpactResult(
-          `Transitive dependent "${dep.file}" of "${file}" requires full suite.`,
-          normalized,
-          [{ spec: '*', via: `import-graph: ${dep.chain.join(' -> ')}` }]
-        );
-      }
-      if (depMatch.matchedAny) {
-        transitiveMatched = true;
-      } else {
-        // Every transitive dependent MUST map cleanly; any unmapped dependent forces full suite (`I-03`)!
-        return makeFullImpactResult(
-          `Transitive dependent "${dep.file}" of "${file}" is unmapped — falling back to full suite to prevent missed regressions.`,
-          normalized,
-          [{ spec: '*', via: `unmapped-transitive: ${dep.chain.join(' -> ')}` }]
-        );
-      }
     }
 
-    if (!direct.matchedAny && !transitiveMatched) {
-      return makeFullImpactResult(
-        `Unmapped source file "${file}" has unknown blast radius — falling back to full regression suite.`,
-        normalized,
-        [{ spec: '*', via: `unmapped-fallback: ${file}` }]
-      );
+    const closure = evaluateUpwardDependentClosure({ file, reverseGraph, dependents, matchCandidateFileToSpecs });
+    if (!closure.ok) {
+      return makeFullImpactResult(closure.reason || 'Unmapped transitive dependent.', normalized, [
+        { spec: '*', via: closure.via || `unmapped-fallback: ${file}` },
+      ]);
     }
   }
 
-  // Handle Page Object / helper edits inside `qa/` (`I-02`) — NEVER drop their dependent specs!
   if (qaNonSpecFiles.length > 0) {
     if (allInsideQa && whyBySpec.size === 0 && options.canUseOnlyChanged) {
       return {
         mode: 'only-changed',
+        downgraded: false,
         reason: 'Only internal QA helper files changed — delegating to Playwright --only-changed dependency graph.',
         specs: [],
         why: [{ spec: '--only-changed', via: 'playwright-ts-dependency-graph' }],
@@ -272,12 +272,9 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
         changedFiles: normalized,
       };
     }
-
-    // Trace reverse imports inside `qaDir` for modified Page Objects / helpers!
     const qaGraph = buildReverseImportGraph(qaDir, { includeQa: true });
     for (const qaRel of qaNonSpecFiles) {
-      const qaDeps = findTransitiveDependents(qaRel, qaGraph);
-      const depSpecs = qaDeps.filter((d) => allSpecs.includes(d.file));
+      const depSpecs = findTransitiveDependents(qaRel, qaGraph).filter((d) => allSpecs.includes(d.file));
       if (depSpecs.length === 0) {
         return makeFullImpactResult(
           `QA helper/Page Object changed ("${qaRel}") with unresolved spec dependents — running full suite.`,
@@ -285,13 +282,10 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
           [{ spec: '*', via: `qa-helper-fallback: ${qaRel}` }]
         );
       }
-      for (const ds of depSpecs) {
-        addSpecReason(ds.file, `qa-import-graph: ${ds.chain.join(' -> ')}`);
-      }
+      for (const ds of depSpecs) addSpecReason(ds.file, `qa-import-graph: ${ds.chain.join(' -> ')}`);
     }
   }
 
-  // Boost with recently failing specs from Run Ledger
   const recentRuns = readLedgerHistory(qaDir, 5);
   for (const r of recentRuns) {
     for (const ft of r.failedTests || []) {
@@ -307,18 +301,14 @@ export function evaluateImpactForFiles(changedFiles, qaDir, repoDir, options = {
   }
 
   const sortedSpecs = [...whyBySpec.keys()].sort();
-  const whyList = sortedSpecs.map((sp) => ({
-    spec: sp,
-    via: (whyBySpec.get(sp) || []).join('; '),
-  }));
-
   return {
     mode: 'targeted',
+    downgraded: false,
     reason: `Mapped ${normalized.length} changed file(s) to ${sortedSpecs.length} targeted spec(s) (+ smoke).`,
     specs: sortedSpecs,
     totalSpecsCount: allSpecs.length,
     reductionRatio: Number((sortedSpecs.length / allSpecs.length).toFixed(4)),
-    why: whyList,
+    why: sortedSpecs.map((sp) => ({ spec: sp, via: (whyBySpec.get(sp) || []).join('; ') })),
     recallEstimate: null,
     useOnlyChanged: false,
     changedFiles: normalized,
@@ -329,43 +319,37 @@ export { collectGitChangedFiles };
 
 /**
  * @param {string} targetDir
- * @param {{ qaDir?: string, base?: string, files?: string[] }} [options]
+ * @param {{ qaDir?: string, base?: string, files?: string[], repos?: string[], repo?: string | string[] }} [options]
  * @returns {Promise<ImpactResult>}
  */
 export async function computeImpact(targetDir, options = {}) {
   const repoDir = path.resolve(targetDir);
   const qaDir = resolveQaDirectory(repoDir, options.qaDir);
-  if (!qaDir) {
-    throw new Error(`QA directory not found under ${repoDir}`);
-  }
+  if (!qaDir) throw new Error(`QA directory not found under ${repoDir}`);
+
+  const repos = resolveImpactRepos(repoDir, qaDir, options);
+  const effectiveRepoDir = canonicalFsPath(repoDir) === canonicalFsPath(qaDir) ? path.dirname(qaDir) : repoDir;
+  const qaRelPrefix = path.relative(canonicalFsPath(effectiveRepoDir), canonicalFsPath(qaDir)).replace(/\\/g, '/');
 
   const baseRef = options.base || 'HEAD~1';
   if (Array.isArray(options.files) && options.files.length > 0) {
-    return evaluateImpactForFiles(options.files, qaDir, repoDir, { canUseOnlyChanged: false });
+    return evaluateImpactForFiles(options.files, qaDir, effectiveRepoDir, { canUseOnlyChanged: false, repos });
   }
 
-  const gitInfo = await collectGitChangedFiles(repoDir, baseRef);
+  const gitInfo = await collectMultiRepoGitChangedFiles(repos, baseRef, { qaRelPrefix });
   if (!gitInfo.ok) {
-    return {
-      mode: 'full',
-      reason: `${gitInfo.reason} Falling back to full regression suite.`,
-      specs: [],
-      why: [],
-      recallEstimate: null,
-      useOnlyChanged: false,
-      baseRef,
-      changedFiles: [],
-    };
+    return makeFullImpactResult(`${gitInfo.reason} Falling back to full regression suite.`, [], [], baseRef);
   }
 
-  const evaluated = evaluateImpactForFiles(gitInfo.files, qaDir, repoDir, {
-    canUseOnlyChanged: gitInfo.validBaseRef,
+  const evaluated = evaluateImpactForFiles(gitInfo.files, qaDir, effectiveRepoDir, {
+    canUseOnlyChanged: gitInfo.validBaseRef && repos.length <= 1,
+    repos,
   });
   return { ...evaluated, baseRef };
 }
 
 /**
- * @param {{ lang?: string, target?: string, qaDir?: string, base?: string, files?: string | string[], dryRun?: boolean, force?: boolean, json?: boolean }} [options]
+ * @param {{ lang?: string, target?: string, qaDir?: string, base?: string, files?: string | string[], repos?: string[], repo?: string | string[], dryRun?: boolean, force?: boolean, json?: boolean }} [options]
  * @returns {Promise<number>}
  */
 export async function runImpactCommand(options = {}) {
@@ -381,25 +365,22 @@ export async function runImpactCommand(options = {}) {
   }
 
   const explicitFiles = options.files
-    ? String(options.files)
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean)
+    ? String(options.files).split(',').map((s) => s.trim()).filter(Boolean)
     : undefined;
 
   const impact = await computeImpact(options.target, {
     qaDir: options.qaDir,
     base: options.base,
     files: explicitFiles,
+    repos: options.repos,
+    repo: options.repo,
   });
 
   if (!options.json) {
-    console.log(`\n=== ${lang === 'zh' ? 'Diff-Impact v2 受影响测试分析 (含依赖图)' : 'Diff-Impact v2 Test Selection (Import Graph)'} ===`);
+    console.log(`\n=== ${lang === 'zh' ? 'Diff-Impact v2.1 受影响测试分析 (含依赖图)' : 'Diff-Impact v2.1 Test Selection (Import Graph)'} ===`);
     console.log(`Mode: ${impact.mode.toUpperCase()}`);
     console.log(`Reason: ${impact.reason}`);
-    if (impact.changedFiles.length > 0) {
-      console.log(`Changed Files (${impact.changedFiles.length}): ${impact.changedFiles.join(', ')}`);
-    }
+    if (impact.changedFiles.length > 0) console.log(`Changed Files (${impact.changedFiles.length}): ${impact.changedFiles.join(', ')}`);
     if (impact.why && impact.why.length > 0 && impact.specs.length > 0) {
       console.log(`Selected Specs (${impact.specs.length}):`);
       for (const item of impact.why) console.log(`  - ${item.spec}  <- [${item.via}]`);

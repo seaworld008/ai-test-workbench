@@ -1,6 +1,7 @@
 // @ts-check
 
 export const STR = /** @type {const} */ ({ type: 'string' });
+export const STR_MULTI = /** @type {const} */ ({ type: 'string', multiple: true });
 export const BOOL = /** @type {const} */ ({ type: 'boolean' });
 
 export const BASE_OPTS = {
@@ -38,6 +39,8 @@ const NUMERIC_FLAG_BOUNDS = {
   iterations: { min: 1, max: 5000, int: true },
   samples: { min: 1, max: 50, int: true },
   timeout: { min: 1, int: true },
+  'max-scan-files': { min: 100, max: 200000, int: true },
+  'max-files': { min: 1, max: 200000, int: true },
   'max-latency-ratio': { min: 0.01 },
   'max-ttft-ratio': { min: 0.01 },
 };

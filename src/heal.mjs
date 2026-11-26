@@ -10,6 +10,7 @@ import {
 } from './audit.mjs';
 import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import { resolvePlaywrightCli } from './core/playwright-resolve.mjs';
+import { flattenPlaywrightResults } from './core/playwright-results.mjs';
 import { beginHealSession } from './heal/begin.mjs';
 import { concludeHealSession, discardHealSession } from './heal/conclude.mjs';
 import {
@@ -26,22 +27,52 @@ import { executeSuiteCore } from './runner.mjs';
 
 export { MAX_HEAL_ATTEMPTS, autoCloseStaleClassBSessions, beginHealSession, concludeHealSession, discardHealSession };
 
+const TERMINAL_HEAL_STATES = new Set(['verified', 'concluded', 'escalated', 'discarded', 'blocked_by_bug']);
+
+/**
+ * Inspects an isolated attempt Playwright JSON results file to confirm whether the target test passed.
+ * Returns `null` if the results file does not exist or cannot be parsed.
+ * @param {string | null | undefined} resultsPath
+ * @param {Record<string, any>} session
+ * @returns {boolean | null}
+ */
+function inspectAttemptResultsPassed(resultsPath, session) {
+  if (!resultsPath || !fs.existsSync(resultsPath)) return null;
+  try {
+    const raw = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
+    const tests = flattenPlaywrightResults(raw);
+    if (!Array.isArray(tests) || tests.length === 0) return false;
+    const normSessionId = String(session.testId || '').replace(/\\/g, '/');
+    const normSpec = String(session.specFile || '').replace(/\\/g, '/').replace(/^tests\//, '');
+    const match =
+      tests.find((t) => String(t.testId || '').replace(/\\/g, '/') === normSessionId) ||
+      tests.find((t) => {
+        const nf = String(t.file || '').replace(/\\/g, '/').replace(/^tests\//, '');
+        return (nf === normSpec || nf.endsWith(`/${normSpec}`) || normSpec.endsWith(`/${nf}`)) && t.title === session.title;
+      });
+    if (!match) return false;
+    return match.status === 'expected' || match.status === 'flaky';
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Validates and executes a single Class-A repair attempt (`aitest_heal(action="attempt")`), enforcing:
  * 1) T1 HMAC session integrity
  * 2) Category === 'A' (B/C/D hard-blocked -> 0% mis-heal rate)
  * 3) Cross-session `attemptsUsed < 3` per `testId`
  * 4) Layer 0 Governance Lock + Layer 2 Static AST + Layer 3 Full-File AST Semantic Diff Guard
- * 5) Optional targeted Playwright re-run when `skipRun !== true`
+ * 5) Isolated single-spec Playwright re-run (`WB-P0-02`) when `skipRun !== true`
  * @param {string} qaDir
- * @param {{ sessionId?: string, skipRun?: boolean, assumeTestPassed?: boolean }} [options]
+ * @param {{ sessionId?: string, skipRun?: boolean, assumeTestPassed?: boolean, resultsPath?: string }} [options]
  */
 export async function attemptHealRepair(qaDir, options = {}) {
   const loaded = readAndVerifySession(qaDir, options.sessionId);
   if (!loaded.ok) return loaded;
   const session = loaded.session;
 
-  if (session.state === 'verified' || session.state === 'concluded' || session.state === 'escalated') {
+  if (TERMINAL_HEAL_STATES.has(session.state)) {
     return {
       ok: false,
       exitCode: 2,
@@ -69,7 +100,7 @@ export async function attemptHealRepair(qaDir, options = {}) {
   if (!ledger.ok) {
     return { ok: false, exitCode: 2, error: ledger.error };
   }
-  const currentAppCodeHash = session.appCodeTreeHash || computeAppCodeTreeHash(path.dirname(qaDir));
+  const currentAppCodeHash = session.appCodeTreeHash || computeAppCodeTreeHash(path.dirname(qaDir), qaDir);
   const storedEntry = ledger.byTestId[session.testId];
   const storedCount =
     storedEntry?.appCodeTreeHash && storedEntry.appCodeTreeHash !== currentAppCodeHash
@@ -132,7 +163,7 @@ export async function attemptHealRepair(qaDir, options = {}) {
     session.attemptsUsed = nextAttempts;
     session.remainingAttempts = Math.max(0, session.maxAttempts - nextAttempts);
     session.state = nextAttempts >= session.maxAttempts ? 'escalated' : 'repairing';
-    if (session.state === 'escalated') session.allowedActions = ['conclude'];
+    if (session.state === 'escalated') session.allowedActions = ['conclude', 'discard'];
     session.updatedAt = new Date().toISOString();
     session.attempts.push({
       attemptNumber: nextAttempts,
@@ -160,6 +191,9 @@ export async function attemptHealRepair(qaDir, options = {}) {
   session.remainingAttempts = Math.max(0, session.maxAttempts - nextAttempts);
   let testPassed = Boolean(options.assumeTestPassed);
   let runId = null;
+  const attemptResultsRel = path.join('.aitest', 'heals', session.sessionId, `attempt-${nextAttempts}-results.json`);
+  const attemptResultsAbs = path.join(qaDir, attemptResultsRel);
+  let recordedResultsPath = null;
 
   if (!options.skipRun && resolvePlaywrightCli(qaDir)) {
     const runRes = await executeSuiteCore({
@@ -167,9 +201,24 @@ export async function attemptHealRepair(qaDir, options = {}) {
       suite: session.specFile.includes('/api/') ? 'api' : session.specFile.includes('/smoke/') ? 'smoke' : 'e2e',
       extraArgs: [session.specFile],
       audit: false,
+      isolatedResultsPath: attemptResultsAbs,
+      skipGlobalLedgerLatest: true,
+      partialHealSessionId: session.sessionId,
     });
-    testPassed = runRes.ok;
+    const effectiveResultsAbs = runRes.resultsPath || attemptResultsAbs;
+    const inspectedPass = inspectAttemptResultsPassed(effectiveResultsAbs, session);
+    testPassed = Boolean(runRes.ok) && (inspectedPass === null ? true : inspectedPass);
     runId = runRes.runId || null;
+    if (fs.existsSync(effectiveResultsAbs)) {
+      recordedResultsPath = path.relative(qaDir, effectiveResultsAbs).replace(/\\/g, '/');
+    }
+  } else if (options.resultsPath && options.assumeTestPassed === undefined) {
+    const resolvedInputResults = path.resolve(qaDir, options.resultsPath);
+    const inspectedPass = inspectAttemptResultsPassed(resolvedInputResults, session);
+    if (inspectedPass !== null) testPassed = inspectedPass;
+    if (fs.existsSync(resolvedInputResults)) {
+      recordedResultsPath = path.relative(qaDir, resolvedInputResults).replace(/\\/g, '/');
+    }
   }
 
   session.updatedAt = new Date().toISOString();
@@ -178,8 +227,10 @@ export async function attemptHealRepair(qaDir, options = {}) {
     : nextAttempts >= session.maxAttempts
       ? 'escalated'
       : 'repairing';
-  if (session.state === 'verified' || session.state === 'escalated') {
+  if (session.state === 'verified') {
     session.allowedActions = ['conclude'];
+  } else if (session.state === 'escalated') {
+    session.allowedActions = ['conclude', 'discard'];
   }
   session.attempts.push({
     attemptNumber: nextAttempts,
@@ -187,6 +238,7 @@ export async function attemptHealRepair(qaDir, options = {}) {
     gatePassed: true,
     testPassed,
     runId,
+    resultsPath: recordedResultsPath,
   });
   const writeTrustCtx = openTrustContext({ qaDir, repoDir: path.dirname(qaDir), createKeyIfMissing: true });
   writeHealAttemptLedger(qaDir, ledger.byTestId, writeTrustCtx);
@@ -200,6 +252,7 @@ export async function attemptHealRepair(qaDir, options = {}) {
     attemptsUsed: nextAttempts,
     remainingAttempts: session.remainingAttempts,
     runId,
+    resultsPath: recordedResultsPath,
   };
 }
 

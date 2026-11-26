@@ -5,15 +5,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildCommandResult } from '../core/outcome.mjs';
 import { killProcessTree, killProcessTreeAsync } from '../core/proc.mjs';
 import { redactSecrets, redactStructuredValue } from '../core/redact.mjs';
 import {
+  BARE_JSON_LINE_RE,
   DEFAULT_MAX_CONCURRENT_JOBS,
   DEFAULT_SYNC_BUDGET_MS,
   MAX_JOB_OUTPUT_BYTES,
   appendBoundedBuffer,
+  buildJobFailureEnvelope,
   buildSafeChildEnv,
+  emitJobProgressNotification,
+  formatJobWaitResult,
   readFramedSubprocessResult,
   withWorkspaceWriteLock,
 } from './workspace-lock.mjs';
@@ -136,6 +139,7 @@ export class McpJobManager {
       exitCode: null,
       progressLines: 0,
       progressActive: true,
+      progressListeners: /** @type {Set<(info: { progress: number, message: string }) => void>} */ (new Set()),
       lastMessage: `Starting ${spec.toolName}`,
       rawStdout: '',
       stdout: '',
@@ -194,13 +198,7 @@ export class McpJobManager {
           });
 
           jobRecord.pid = child.pid || null;
-          if (spec.onProgress && jobRecord.progressActive) {
-            try {
-              spec.onProgress({ progress: 0, message: jobRecord.lastMessage });
-            } catch {
-              // ignore callback failures
-            }
-          }
+          emitJobProgressNotification(jobRecord, spec.onProgress, { progress: 0, message: jobRecord.lastMessage });
 
           const maxTimer =
             timeoutMs > 0
@@ -213,16 +211,17 @@ export class McpJobManager {
           child.stdout?.on('data', (/** @type {Buffer} */ chunk) => {
             const text = chunk.toString('utf8');
             jobRecord.rawStdout = appendBoundedBuffer(jobRecord.rawStdout, text, this.maxOutputBytes);
-            const lines = text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+            const lines = text
+              .split(/\r?\n/)
+              .map((s) => s.trim())
+              .filter((s) => s.length > 0 && !BARE_JSON_LINE_RE.test(s));
             if (lines.length > 0) {
               jobRecord.progressLines += lines.length;
               jobRecord.lastMessage = redactSecrets(lines[lines.length - 1]).slice(0, 180);
-              if (jobRecord.progressActive && typeof spec.onProgress === 'function') {
-                spec.onProgress({
-                  progress: jobRecord.progressLines,
-                  message: jobRecord.lastMessage,
-                });
-              }
+              emitJobProgressNotification(jobRecord, spec.onProgress, {
+                progress: jobRecord.progressLines,
+                message: jobRecord.lastMessage,
+              });
             }
           });
 
@@ -263,8 +262,8 @@ export class McpJobManager {
                   ? 'succeeded'
                   : 'failed';
 
-            if (jobRecord.progressActive && typeof spec.onProgress === 'function' && !jobRecord.cancelled) {
-              spec.onProgress({
+            if (!jobRecord.cancelled) {
+              emitJobProgressNotification(jobRecord, spec.onProgress, {
                 progress: jobRecord.progressLines + 1,
                 message: `${spec.toolName} ${jobRecord.status} (exitCode=${jobRecord.exitCode})`,
               });
@@ -277,25 +276,27 @@ export class McpJobManager {
       }
     };
 
-    const runPromise = withWorkspaceWriteLock(spec.workspaceLockKey || null, startChild, this.lockTimeoutMs).catch((err) => {
+    const runPromise = withWorkspaceWriteLock(
+      spec.workspaceLockKey || null,
+      startChild,
+      this.lockTimeoutMs,
+      { toolName: spec.toolName, jobId }
+    ).catch((err) => {
       cleanupIpc();
       if (reqKey) this.requestToJob.delete(reqKey);
-      const isLockBusy = err && typeof err === 'object' && 'code' in err && err.code === 'WORKSPACE_LOCK_BUSY';
-      const msg = err instanceof Error ? err.message : String(err);
+      if (jobRecord.cancelling) {
+        jobRecord.cancelled = true;
+        jobRecord.finishedAt = new Date().toISOString();
+        jobRecord.exitCode = 130;
+        jobRecord.status = 'cancelled';
+        return jobRecord;
+      }
+      const built = buildJobFailureEnvelope(spec.toolName, err);
       jobRecord.finishedAt = new Date().toISOString();
-      jobRecord.exitCode = isLockBusy ? 2 : 1;
+      jobRecord.exitCode = built.exitCode;
       jobRecord.status = 'failed';
-      jobRecord.lastMessage = redactSecrets(msg).slice(0, 180);
-      jobRecord.parsedData = buildCommandResult({
-        tool: spec.toolName,
-        outcome: isLockBusy ? 'blocked' : 'fail',
-        ok: false,
-        exitCode: jobRecord.exitCode,
-        summary: msg,
-        blockerKind: isLockBusy ? 'WORKSPACE_LOCK_BUSY' : 'EXECUTION_ERROR',
-        recoverySteps: isLockBusy ? ['Wait for concurrent workspace operation to finish and retry.'] : [],
-        data: { error: msg, reason: isLockBusy ? 'WORKSPACE_LOCK_BUSY' : 'EXECUTION_ERROR' },
-      });
+      jobRecord.lastMessage = built.lastMessage;
+      jobRecord.parsedData = built.parsedData;
       return jobRecord;
     });
 
@@ -350,35 +351,39 @@ export class McpJobManager {
     };
   }
 
-  /** @param {string} jobId @param {number} [waitMs] @param {string | null} [callerSessionId] */
-  async waitForResult(jobId, waitMs = 0, callerSessionId = null) {
+  /**
+   * @param {string} jobId
+   * @param {number} [waitMs]
+   * @param {string | null} [callerSessionId]
+   * @param {{ onProgress?: ((info: { progress: number, message: string }) => void) | null }} [options]
+   */
+  async waitForResult(jobId, waitMs = 0, callerSessionId = null, options = {}) {
     const j = this._getOwnedJob(jobId, callerSessionId);
     if (!j) return null;
     if (j.status === 'running' && waitMs > 0 && j.completionPromise) {
+      const listener = typeof options?.onProgress === 'function' ? options.onProgress : null;
+      if (listener) {
+        j.progressListeners.add(listener);
+        try {
+          listener({ progress: j.progressLines, message: j.lastMessage });
+        } catch {
+          // ignore initial progress delivery error
+        }
+      }
       let timer = null;
-      await Promise.race([
-        j.completionPromise,
-        new Promise((resolve) => {
-          timer = setTimeout(resolve, Math.min(60_000, waitMs));
-        }),
-      ]);
-      if (timer) clearTimeout(timer);
+      try {
+        await Promise.race([
+          j.completionPromise,
+          new Promise((resolve) => {
+            timer = setTimeout(resolve, Math.min(60_000, waitMs));
+          }),
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+        if (listener) j.progressListeners.delete(listener);
+      }
     }
-    const rawData = j.parsedData;
-    const unwrappedData =
-      rawData && typeof rawData === 'object' && rawData.schemaVersion === 2 && rawData.data && typeof rawData.data === 'object'
-        ? rawData.data
-        : rawData || (j.stdout ? { output: j.stdout.slice(0, 4000) } : {});
-    const summary =
-      rawData && typeof rawData === 'object' && typeof rawData.summary === 'string'
-        ? rawData.summary
-        : undefined;
-    return {
-      ...this.getPublicStatus(jobId, callerSessionId),
-      ...(summary ? { summary } : {}),
-      data: unwrappedData,
-      stderr: j.exitCode !== 0 && j.stderr ? j.stderr.slice(0, 2000) : undefined,
-    };
+    return formatJobWaitResult(j, this.getPublicStatus(jobId, callerSessionId));
   }
 
   /** @param {string} jobId @param {string | null} [callerSessionId] */
