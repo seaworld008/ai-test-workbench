@@ -14,9 +14,9 @@ function loadRootPackageVersion() {
   try {
     const pkgPath = path.join(REPO_ROOT, 'package.json');
     const parsed = /** @type {{ version?: unknown }} */ (JSON.parse(fs.readFileSync(pkgPath, 'utf8')));
-    return typeof parsed.version === 'string' && parsed.version.trim() ? parsed.version.trim() : '6.5.0';
+    return typeof parsed.version === 'string' && parsed.version.trim() ? parsed.version.trim() : '6.6.0';
   } catch {
-    return '6.5.0';
+    return '6.6.0';
   }
 }
 
@@ -24,7 +24,7 @@ export const WORKBENCH_VERSION = loadRootPackageVersion();
 
 export const SCHEMA_VERSIONS = Object.freeze({
   resultEnvelope: 2,
-  codeMap: 4,
+  codeMap: 5,
   ledgerManifest: 1,
   governanceLock: 1,
   templateManifest: 1,

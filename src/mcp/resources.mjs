@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from '../agents.mjs';
-import { MCP_PILLARS, MCP_PRESETS, MCP_PROFILES } from '../mcp-hub/catalog.mjs';
+import { MCP_PILLARS, MCP_PILLAR_LABELS, MCP_PRESETS, MCP_PROFILES } from '../mcp-hub/catalog.mjs';
 import { redactSecrets } from '../core/redact.mjs';
 import { REPO_ROOT } from '../core/version.mjs';
 import { getEffectiveAllowedRoots, isTargetWithinAllowedRoots } from './security.mjs';
@@ -24,62 +24,23 @@ export function getMcpResourceDefinitions(defaultTarget = null) {
     },
     {
       uri: 'aitest://mcp/presets',
-      name: '7-Pillar System MCP Catalog (Pinned & Risk-Graded)',
-      description: 'Available version-pinned MCP presets and risk levels across browser, observability, DB, cache, perf, and OpenAPI.',
+      name: '8-Pillar System MCP Catalog (Pinned & Risk-Graded)',
+      description: 'Available version-pinned MCP presets and risk levels across orchestrator, browser, code-intelligence, observability, DB, cache, perf, and OpenAPI.',
       mimeType: 'application/json',
     },
   ];
 
   if (defaultTarget) {
     resources.push(
-      {
-        uri: 'aitest://current/system-map',
-        name: 'Current Living System Knowledge Map',
-        description: `Living Code & System Map Markdown for bound target (${defaultTarget}).`,
-        mimeType: 'text/markdown',
-      },
-      {
-        uri: 'aitest://current/code-map',
-        name: 'Current Living Code Map JSON (v4)',
-        description: `Structured code-map.json for bound target (${defaultTarget}).`,
-        mimeType: 'application/json',
-      },
-      {
-        uri: 'aitest://current/system-overview',
-        name: 'Current Zero-to-One System Overview',
-        description: `Zero-to-one exploration atlas Markdown for bound target (${defaultTarget}).`,
-        mimeType: 'text/markdown',
-      },
-      {
-        uri: 'aitest://current/diagnostics',
-        name: 'Current Failure Diagnostics Summary',
-        description: `Redacted A/B/C/D diagnostics report for bound target (${defaultTarget}).`,
-        mimeType: 'text/markdown',
-      },
-      {
-        uri: 'aitest://current/perf-summary',
-        name: 'Current Performance SLO Summary',
-        description: `PerformanceObserver Web Vitals & API SLO summary for bound target (${defaultTarget}).`,
-        mimeType: 'text/markdown',
-      },
-      {
-        uri: 'aitest://current/verdict-summary',
-        name: 'Current Change Verdict Summary',
-        description: `Latest aitest_verify_change verdict Markdown for bound target (${defaultTarget}).`,
-        mimeType: 'text/markdown',
-      },
-      {
-        uri: 'aitest://current/parity-summary',
-        name: 'Current Differential Parity Summary',
-        description: `Latest aitest_parity differential oracle summary Markdown for bound target (${defaultTarget}).`,
-        mimeType: 'text/markdown',
-      },
-      {
-        uri: 'aitest://current/parity-report',
-        name: 'Current Differential Parity Report (JSON)',
-        description: `Latest aitest_parity structured JSON report for bound target (${defaultTarget}).`,
-        mimeType: 'application/json',
-      }
+      { uri: 'aitest://current/system-map', name: 'Current Living System Knowledge Map', description: `Living Code & System Map Markdown for bound target (${defaultTarget}).`, mimeType: 'text/markdown' },
+      { uri: 'aitest://current/code-map', name: 'Current Living Code Map JSON (v4/v5)', description: `Structured code-map.json for bound target (${defaultTarget}).`, mimeType: 'application/json' },
+      { uri: 'aitest://current/graph-summary', name: 'Current CodeMap & Graph Impact Summary (JSON)', description: `Compact summary of knowledge/code-map.json & graph-impact-index.json for bound target (${defaultTarget}).`, mimeType: 'application/json' },
+      { uri: 'aitest://current/system-overview', name: 'Current Zero-to-One System Overview', description: `Zero-to-one exploration atlas Markdown for bound target (${defaultTarget}).`, mimeType: 'text/markdown' },
+      { uri: 'aitest://current/diagnostics', name: 'Current Failure Diagnostics Summary', description: `Redacted A/B/C/D diagnostics report for bound target (${defaultTarget}).`, mimeType: 'text/markdown' },
+      { uri: 'aitest://current/perf-summary', name: 'Current Performance SLO Summary', description: `PerformanceObserver Web Vitals & API SLO summary for bound target (${defaultTarget}).`, mimeType: 'text/markdown' },
+      { uri: 'aitest://current/verdict-summary', name: 'Current Change Verdict Summary', description: `Latest aitest_verify_change verdict Markdown for bound target (${defaultTarget}).`, mimeType: 'text/markdown' },
+      { uri: 'aitest://current/parity-summary', name: 'Current Differential Parity Summary', description: `Latest aitest_parity differential oracle summary Markdown for bound target (${defaultTarget}).`, mimeType: 'text/markdown' },
+      { uri: 'aitest://current/parity-report', name: 'Current Differential Parity Report (JSON)', description: `Latest aitest_parity structured JSON report for bound target (${defaultTarget}).`, mimeType: 'application/json' }
     );
   }
 
@@ -98,6 +59,12 @@ export function getMcpResourceTemplates() {
       uriTemplate: 'aitest://project/{target}/code-map',
       name: 'Project Living Code Map (JSON)',
       description: 'Reads <repo>/qa/knowledge/code-map.json for URL-encoded {target}.',
+      mimeType: 'application/json',
+    },
+    {
+      uriTemplate: 'aitest://project/{target}/graph-summary',
+      name: 'Project CodeMap & Graph Impact Summary (JSON)',
+      description: 'Summarizes <repo>/qa/knowledge/code-map.json and knowledge/graph-impact-index.json for URL-encoded {target}.',
       mimeType: 'application/json',
     },
     {
@@ -308,7 +275,7 @@ export function readMcpResource(uri, ctx = {}) {
         {
           uri,
           mimeType: 'application/json',
-          text: JSON.stringify({ pillars: MCP_PILLARS, profiles: MCP_PROFILES, presets: MCP_PRESETS }, null, 2),
+          text: JSON.stringify({ pillars: MCP_PILLARS, pillarLabels: MCP_PILLAR_LABELS, profiles: MCP_PROFILES, presets: MCP_PRESETS }, null, 2),
         },
       ],
     };
@@ -318,6 +285,7 @@ export function readMcpResource(uri, ctx = {}) {
   const artifactMapping = {
     'system-map': { rel: path.join('knowledge', 'SYSTEM_MAP.md'), mime: 'text/markdown' },
     'code-map': { rel: path.join('knowledge', 'code-map.json'), mime: 'application/json' },
+    'graph-summary': { rel: path.join('knowledge', 'code-map.json'), mime: 'application/json' },
     'system-overview': { rel: path.join('specs', 'system-overview.md'), mime: 'text/markdown' },
     diagnostics: { rel: path.join('reports', 'ai-diagnostics.md'), mime: 'text/markdown' },
     'perf-summary': { rel: path.join('reports', 'perf-summary.md'), mime: 'text/markdown' },
@@ -369,6 +337,40 @@ export function readMcpResource(uri, ctx = {}) {
         },
       ],
     };
+  }
+
+  if (artifactKey === 'graph-summary') {
+    const cmPath = path.join(qaDir, 'knowledge', 'code-map.json');
+    const idxPath = path.join(qaDir, 'knowledge', 'graph-impact-index.json');
+    /** @param {string} p */
+    const loadJson = (p) => {
+      if (!fs.existsSync(p)) return null;
+      try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return { _parseError: true }; }
+    };
+    const objLen = (/** @type {unknown} */ v) => (Array.isArray(v) ? v.length : v && typeof v === 'object' ? Object.keys(v).length : 0);
+    const cm = loadJson(cmPath);
+    const gi = loadJson(idxPath);
+    const payload = !cm && !gi
+      ? { exists: false, expectedPaths: [cmPath, idxPath] }
+      : {
+          exists: true,
+          codeMap: cm && !cm._parseError
+            ? {
+                present: true, schemaVersion: cm.schemaVersion ?? null, revision: cm.revision ?? null, updatedAt: cm.updatedAt ?? null,
+                sourceReposCount: objLen(cm.meta?.sourceRepos), routesCount: objLen(cm.routes), apisCount: objLen(cm.apis),
+                serviceChainsCount: objLen(cm.serviceChains), coverage: cm.coverage ?? null, graphEngine: cm.meta?.graphEngine ?? cm.graphEngine ?? null,
+              }
+            : { present: Boolean(cm), parseError: Boolean(cm?._parseError) },
+          graphImpactIndex: gi && !gi._parseError
+            ? {
+                present: true, schemaVersion: gi.schemaVersion ?? null, generatedAt: gi.generatedAt ?? null,
+                graphEngine: gi.graphEngine ?? gi.meta?.graphEngine ?? null,
+                fileCount: objLen(gi.fileSymbols || gi.files), symbolCallerCount: objLen(gi.symbolCallers),
+                coverage: gi.coverage ?? gi.meta?.coverage ?? null,
+              }
+            : { present: Boolean(gi), parseError: Boolean(gi?._parseError) },
+        };
+    return { contents: [{ uri, mimeType: 'application/json', text: redactSecrets(JSON.stringify(payload, null, 2)) }] };
   }
 
   const filePath = path.join(qaDir, spec.rel);

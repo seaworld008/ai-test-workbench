@@ -4,7 +4,7 @@
 
 > **Tool-Enforced Override**: Playwright's default healer prompt suggests marking persistent failures with `test.fixme()`. In `ai-test-workbench v6.4.0`, **weakening assertion strength, editing protected configs, adding `test.fail()` / `expect.soft()`, or editing tests on Class B/C/D failures are hard-blocked by the tool state machine (`FGER = 0.0%`)**.
 
-## 1. Mandatory Stateful Healer Workflow (`npx ai-test-workbench@6.5.0 heal` / `aitest_heal`)
+## 1. Mandatory Stateful Healer Workflow (`npx ai-test-workbench@6.6.0 heal` / `aitest_heal`)
 
 Before modifying any `tests/**` file, start a governed heal session:
 
@@ -21,4 +21,4 @@ Before modifying any `tests/**` file, start a governed heal session:
 
 Every `aitest_heal(action="attempt")` and `aitest_audit(diffBase="HEAD")` inspects the entire `qa/` workspace (including untracked files and protected governance files), product-side Dieselgate test-traffic checks (`AITEST-G117`), and cross-directory lockstep sync (`AITEST-G118`):
 - **`S5` exact value assertions** (`toHaveText('exact')`, `toEqual`, `toBe(200)`) cannot be downgraded to **`S3` partial**, **`S2` visibility (`toBeVisible()`)**, **`S1` truthy**, or **`S0` tautologies (`expect(true).toBe(true)`)**.
-- Protected files sealed in `.aitest/governance.lock` (`eslint.config.mjs`, `playwright.config.ts`, `aitest.config.json`, `waivers.json`, `known-blockers.json`, `corpus/**`, `fixtures/upstream-cassettes/**`, `support/**`, etc.) cannot be altered without human `npx ai-test-workbench@6.5.0 governance approve --by <name> --reason "<why>"`.
+- Protected files sealed in `.aitest/governance.lock` (`eslint.config.mjs`, `playwright.config.ts`, `aitest.config.json`, `waivers.json`, `known-blockers.json`, `corpus/**`, `fixtures/upstream-cassettes/**`, `support/**`, etc.) cannot be altered without human `npx ai-test-workbench@6.6.0 governance approve --by <name> --reason "<why>"`.

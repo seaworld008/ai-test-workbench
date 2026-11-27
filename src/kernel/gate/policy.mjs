@@ -1,6 +1,7 @@
 // @ts-check
 import fs from 'node:fs';
 import path from 'node:path';
+import { PROTECTED_AITEST_LOCK_FILES } from '../../core/config-schema.mjs';
 import { DEFAULT_CONFIG_PROTECTED_GLOBS, loadAndValidateAitestConfigFile } from '../../core/config.mjs';
 import { compileGlob } from '../../core/glob.mjs';
 import { WORKBENCH_VERSION } from '../../core/version.mjs';
@@ -9,7 +10,7 @@ import { loadActiveQuarantine } from './policy-quarantine.mjs';
 import { BOT_APPROVER_RE, isBotApprover, isCoveredByWaiver, loadAndValidateWaivers } from './policy-waivers.mjs';
 import { verifyPayloadT1 } from './trust-hmac.mjs';
 
-export { BOT_APPROVER_RE, isBotApprover, isCoveredByWaiver, loadActiveQuarantine, loadAndValidateWaivers };
+export { BOT_APPROVER_RE, PROTECTED_AITEST_LOCK_FILES, isBotApprover, isCoveredByWaiver, loadActiveQuarantine, loadAndValidateWaivers };
 
 export const DEFAULT_PROTECTED_GLOBS = DEFAULT_CONFIG_PROTECTED_GLOBS;
 
@@ -56,7 +57,7 @@ export function isProtectedDiffPath(filePath, extraGlobs = []) {
   const norm = String(filePath || '').replace(/\\/g, '/').replace(/^\.\//, '');
   if (!norm) return false;
 
-  if (/(^|\/)\.aitest\/(governance\.lock|quarantine\.json|governance-audit\.jsonl|template-manifest\.json|baseline-ref)$/i.test(norm)) {
+  if (/(^|\/)\.aitest\/(governance\.lock|quarantine\.json|governance-audit\.jsonl|template-manifest\.json|baseline-ref|mcp\.lock|engine-manifest\.json)$/i.test(norm)) {
     return true;
   }
   if (/(^|\/)\.env(?:\.[^/]+)?$/i.test(norm) && !/\.env\.example$/i.test(norm) && !/\.env\.mcp\.example$/i.test(norm)) {
@@ -131,13 +132,32 @@ function collectFilesMatchingGlobs(qaDir, globs) {
 }
 
 /**
+ * Collects all protected target files inside `qaDir` matching `globs`, plus explicitly including
+ * protected `.aitest/` supply-chain lockfiles (`.aitest/mcp.lock`, `.aitest/engine-manifest.json`)
+ * when present on disk even though generic `.aitest/` runtime directories are skipped during walk.
+ * @param {string} qaDir
+ * @param {readonly string[]} [globs]
+ * @returns {string[]}
+ */
+export function collectProtectedTargetFiles(qaDir, globs = DEFAULT_PROTECTED_GLOBS) {
+  const matched = new Set(collectFilesMatchingGlobs(qaDir, globs));
+  for (const rel of PROTECTED_AITEST_LOCK_FILES) {
+    const full = path.join(qaDir, ...rel.split('/'));
+    if (fs.existsSync(full) && fs.statSync(full).isFile()) {
+      matched.add(rel);
+    }
+  }
+  return [...matched].sort();
+}
+
+/**
  * Computes normalized CRLF->LF SHA-256 hashes of all protected governance files inside `qaDir`.
  * @param {string} qaDir
  */
 export function computeProtectedFileHashes(qaDir) {
   const cfg = loadAitestConfig(qaDir);
   const globs = cfg.governance?.protected || [...DEFAULT_PROTECTED_GLOBS];
-  const matchedFiles = collectFilesMatchingGlobs(qaDir, globs);
+  const matchedFiles = collectProtectedTargetFiles(qaDir, globs);
 
   /** @type {Record<string, string>} */
   const files = {};

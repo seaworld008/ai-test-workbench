@@ -85,7 +85,7 @@ test('mergeLivingCodeMap evolves across revisions and syncImpactMapFromCodeMap p
       'utf8'
     );
 
-    const sync1 = syncLivingCodeMap(qaDir, { lang: 'en', repoDir });
+    const sync1 = await syncLivingCodeMap(qaDir, { lang: 'en', repoDir });
     assert.equal(sync1.revision, 1);
     assert.ok(sync1.impactSync.manualRulesCount >= 1);
     assert.ok(fs.existsSync(sync1.systemMapMdPath));
@@ -102,7 +102,7 @@ test('mergeLivingCodeMap evolves across revisions and syncImpactMapFromCodeMap p
       'utf8'
     );
 
-    const sync2 = syncLivingCodeMap(qaDir, { lang: 'zh', repoDir });
+    const sync2 = await syncLivingCodeMap(qaDir, { lang: 'zh', repoDir });
     assert.equal(sync2.revision, 2);
     const mapJson = JSON.parse(fs.readFileSync(sync2.codeMapPath, 'utf8'));
     assert.ok(mapJson.routes['/orders']);
@@ -147,9 +147,9 @@ test('CodeMap v2 preserves dynamic routes (:id / [id]), prunes deleted routes, a
       'utf8'
     );
 
-    const s1 = syncLivingCodeMap(qaDir, { repoDir });
+    const s1 = await syncLivingCodeMap(qaDir, { repoDir });
     const m1 = JSON.parse(fs.readFileSync(s1.codeMapPath, 'utf8'));
-    assert.equal(m1.schemaVersion, 4);
+    assert.equal(m1.schemaVersion, 5);
     assert.ok(m1.routes['/users/:id']);
     assert.ok(m1.routes['/courses/:courseId']);
     assert.equal(m1.routes['/courses/:courseId'].title, 'Course Detail');
@@ -157,7 +157,7 @@ test('CodeMap v2 preserves dynamic routes (:id / [id]), prunes deleted routes, a
 
     // Re-syncing 5x with the SAME snapshot + skipWriteIfUnchanged -> seenCount stays 1 and revision stays unchanged!
     for (let i = 0; i < 5; i += 1) {
-      const repeat = syncLivingCodeMap(qaDir, { repoDir, skipWriteIfUnchanged: true });
+      const repeat = await syncLivingCodeMap(qaDir, { repoDir, skipWriteIfUnchanged: true });
       assert.equal(repeat.unchanged, true);
       assert.equal(repeat.revision, s1.revision);
     }
@@ -173,7 +173,7 @@ test('CodeMap v2 preserves dynamic routes (:id / [id]), prunes deleted routes, a
       JSON.stringify({ snapshotId: 'snap_002', pages: [{ route: '/courses/course-open-101' }], consoleErrors: [] }),
       'utf8'
     );
-    const s2 = syncLivingCodeMap(qaDir, { repoDir });
+    const s2 = await syncLivingCodeMap(qaDir, { repoDir });
     const m2 = JSON.parse(fs.readFileSync(s2.codeMapPath, 'utf8'));
     assert.equal(Boolean(m2.routes['/temp-old']), false, 'Deleted static route must be pruned');
     assert.equal(m2.defects[0].status, 'resolved-candidate');
@@ -183,7 +183,7 @@ test('CodeMap v2 preserves dynamic routes (:id / [id]), prunes deleted routes, a
       JSON.stringify({ snapshotId: 'snap_003', pages: [{ route: '/courses/course-open-101' }], consoleErrors: [] }),
       'utf8'
     );
-    const s3 = syncLivingCodeMap(qaDir, { repoDir });
+    const s3 = await syncLivingCodeMap(qaDir, { repoDir });
     const m3 = JSON.parse(fs.readFileSync(s3.codeMapPath, 'utf8'));
     assert.equal(m3.defects[0].status, 'closed');
   } finally {

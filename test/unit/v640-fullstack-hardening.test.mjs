@@ -496,10 +496,12 @@ test('WB-P0-04..WB-P0-09 & WB-P1-03: multi-repo Vue + Spring Cloud CodeMap v4.1 
     assert.ok(beTooling.mavenModules.includes('module-system'));
 
     // Sync Living CodeMap across BOTH repos
-    const mapRes = syncLivingCodeMap(qaDir, { repos: [feDir, beDir], syncImpact: 'force' });
+    const mapRes = await syncLivingCodeMap(qaDir, { repos: [feDir, beDir], syncImpact: 'force' });
     assert.ok(fs.existsSync(mapRes.codeMapPath));
+    assert.ok(fs.existsSync(mapRes.graphImpactIndexPath));
     const codeMap = JSON.parse(fs.readFileSync(path.join(qaDir, 'knowledge', 'code-map.json'), 'utf8'));
 
+    assert.equal(codeMap.schemaVersion, 5);
     assert.equal(codeMap.meta.sourceRepos.length, 2);
     assert.ok(codeMap.routes['/user/profile/:dictId'], 'Nested + regex-param Vue route must be normalized');
     assert.match(codeMap.routes['/user/profile/:dictId'].frontendFile || '', /src\/views\/infra\/build\/index\.vue$/);
@@ -517,14 +519,19 @@ test('WB-P0-04..WB-P0-09 & WB-P1-03: multi-repo Vue + Spring Cloud CodeMap v4.1 
       `Expected 4-tier DB table system_tenant in linkedDbTables, got ${JSON.stringify(boardRoute.linkedDbTables)}`
     );
 
-    // Ensure FeignClient & commented-out DeleteMapping & /system/tenant/system/tenant self-duplication are absent
+    // Ensure codeMap.apis is genuinely populated with TenantController endpoints AND excludes FeignClient / commented-out DeleteMapping / self-duplication
     const allApiKeys = Object.keys(codeMap.apis || {});
+    assert.ok(allApiKeys.length > 0, 'Expected populated top-level codeMap.apis in CodeMap v5');
+    assert.ok(
+      allApiKeys.some((k) => k.includes('/admin-api/platform-api/system/tenant/page')),
+      `Expected TenantController prefixed API in codeMap.apis, got ${JSON.stringify(allApiKeys)}`
+    );
     assert.equal(allApiKeys.some((k) => k.includes('commented-out-danger')), false);
     assert.equal(allApiKeys.some((k) => k.includes('/rpc/internal/secret')), false);
     assert.equal(allApiKeys.some((k) => k.includes('/system/tenant/system/tenant')), false);
 
     // Subsequent no-arg syncLivingCodeMap(qaDir) preserves meta.sourceRepos!
-    syncLivingCodeMap(qaDir, { force: true });
+    await syncLivingCodeMap(qaDir, { force: true });
     const codeMapReloaded = JSON.parse(fs.readFileSync(path.join(qaDir, 'knowledge', 'code-map.json'), 'utf8'));
     assert.equal(codeMapReloaded.meta.sourceRepos.length, 2);
 

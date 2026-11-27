@@ -1,13 +1,13 @@
 // @ts-check
 
 export const SECRET_KEY_RE =
-  /(?:password|passwd|pwd|secret|token|cookie|authorization|auth[_-]?(?:header|token|key|secret|bearer|basic|cookie|cred|pass)|credential|api[_-]?key|private[_-]?key|session[_-]?id|bearer|jwt|otp|pin|hmac[_-]?key)/i;
+  /(?:password|passwd|pwd|secret|token|cookie|authorization|auth[_-]?(?:header|token|key|secret|bearer|basic|cookie|cred|pass)|credential|api[_-]?key|private[_-]?key|session[_-]?id|bearer|jwt|otp|(?:^|[_.-])pin(?:[_-]?code)?(?:$|[_.-])|hmac[_-]?key)/i;
 
 const COOKIE_OR_STORAGE_SENSITIVE_NAME_RE =
-  /(?:password|passwd|pwd|secret|token|refresh|cookie|authorization|auth|credential|api[_-]?key|private[_-]?key|session|sess|sid|jwt|csrf|xsrf|otp|pin|bearer|hmac|user[._-]?data|account|supabase|firebase|oauth|oidc|access)/i;
+  /(?:password|passwd|pwd|secret|token|refresh|cookie|authorization|auth|credential|api[_-]?key|private[_-]?key|session|sess|sid|jwt|csrf|xsrf|otp|(?:^|[_.-])pin(?:[_-]?code)?(?:$|[_.-])|bearer|hmac|user[._-]?data|account|supabase|firebase|oauth|oidc|access)/i;
 
 const JSON_SECRET_KEY_PATTERN =
-  '[A-Za-z0-9_.-]{0,48}(?:password|passwd|pwd|secret|client_secret|clientSecret|token|access_token|accessToken|refresh_token|refreshToken|id_token|idToken|auth_token|authToken|api[_-]?key|apiKey|private[_-]?key|privateKey|session[_-]?id|sessionId|cookie|authorization|credential|bearer|jwt|otp|pin|secretKey|secret_key|hmac_key|hmacKey)[A-Za-z0-9_.-]{0,48}';
+  '[A-Za-z0-9_.-]{0,48}(?:password|passwd|pwd|secret|client_secret|clientSecret|token|access_token|accessToken|refresh_token|refreshToken|id_token|idToken|auth_token|authToken|api[_-]?key|apiKey|private[_-]?key|privateKey|session[_-]?id|sessionId|cookie|authorization|credential|bearer|jwt|otp|(?<=["\'_.-])pin(?:[_-]?code)?(?=["\'_.-])|secretKey|secret_key|hmac_key|hmacKey)[A-Za-z0-9_.-]{0,48}';
 
 const JSON_DOUBLE_SECRET_RE = new RegExp(
   `("(${JSON_SECRET_KEY_PATTERN})"[ \\t\\r\\n]{0,16}:[ \\t\\r\\n]{0,16})("(?:\\\\[^\\r\\n]|[^"\\\\\\r\\n]){0,4096}"|'[^'\\r\\n]{0,4096}'|\\d[\\d.]{0,64})`,

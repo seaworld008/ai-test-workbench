@@ -51,7 +51,7 @@ function loadOptionalExternalBlocklist() {
 const ACTIVE_MCP_TOOL_DOCS = new Set(GENERATED_DOC_TARGETS);
 
 /**
- * Canonical MCP tool registry only (`v6.2.1`, 16 tools).
+ * Canonical MCP tool registry only (`v6.6.0`, 17 tools).
  * Active Agent/MCP docs MUST NOT advertise deprecated aliases (`aitest_heal_*` / `aitest_job_*` / `aitest_flaky_report` / `aitest_trace_matrix`).
  */
 const CANONICAL_MCP_TOOLS = new Set(TOOL_REGISTRY.map((t) => t.name));
@@ -72,6 +72,7 @@ const BILINGUAL_STRUCTURE_PAIRS = [
   'docs/adr/0004-pluggable-ast-gate-and-fp-governance.md',
   'docs/adr/0005-mcp-surface-outcome-and-config.md',
   'docs/adr/0006-differential-parity-oracle-and-shape-fingerprints.md',
+  'docs/adr/0007-external-code-graph-engine.md',
   'docs/review/v6-refactor-assessment.md',
   'bench/agentic/DESIGN.md',
   'bench/agentic/results/SUMMARY.md',

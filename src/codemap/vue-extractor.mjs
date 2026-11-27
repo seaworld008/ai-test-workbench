@@ -259,7 +259,8 @@ function unwrapStringLiteral(expr) {
 }
 
 /**
- * Parses static import statements into module specifiers and local identifier -> spec map.
+ * Parses static import statements into module specifiers, local identifier -> spec map,
+ * and per-spec exported symbol names (`namedImportsBySpec`).
  * @param {string} stripped
  */
 export function parseStaticImports(stripped) {
@@ -267,6 +268,20 @@ export function parseStaticImports(stripped) {
   const specs = [];
   /** @type {Map<string, string>} */
   const identifierToSpec = new Map();
+  /** @type {Record<string, string[]>} */
+  const namedImportsBySpec = {};
+  const addNamed = (/** @type {string} */ spec, /** @type {string} */ name) => {
+    const arr = namedImportsBySpec[spec] || (namedImportsBySpec[spec] = []);
+    if (!arr.includes(name)) arr.push(name);
+  };
+  const parseNamedClause = (/** @type {string} */ inner, /** @type {string} */ spec) => {
+    for (const item of inner.split(',')) {
+      const m = item.trim().match(/^([A-Za-z_$][A-Za-z0-9_$]*)(?:\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*))?$/);
+      if (!m) continue;
+      identifierToSpec.set(m[2] || m[1], spec);
+      addNamed(spec, m[1]);
+    }
+  };
 
   for (const m of stripped.matchAll(/\bimport\s+([\s\S]{1,400}?)\s+from\s*['"]([^'"]+)['"]/g)) {
     const clause = m[1].trim();
@@ -274,26 +289,19 @@ export function parseStaticImports(stripped) {
     specs.push(spec);
     if (clause.startsWith('*')) {
       const ns = clause.match(/\*\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*)/);
-      if (ns) identifierToSpec.set(ns[1], spec);
+      if (ns) { identifierToSpec.set(ns[1], spec); addNamed(spec, '*'); }
     } else if (clause.startsWith('{')) {
-      const inner = clause.slice(1, clause.lastIndexOf('}'));
-      for (const item of inner.split(',')) {
-        const asMatch = item.trim().match(/^(?:[A-Za-z_$][A-Za-z0-9_$]*\s+as\s+)?([A-Za-z_$][A-Za-z0-9_$]*)$/);
-        if (asMatch) identifierToSpec.set(asMatch[1], spec);
-      }
+      parseNamedClause(clause.slice(1, clause.lastIndexOf('}')), spec);
     } else {
       const commaIdx = clause.indexOf(',');
       const defName = (commaIdx >= 0 ? clause.slice(0, commaIdx) : clause).trim();
-      if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(defName)) identifierToSpec.set(defName, spec);
+      if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(defName)) {
+        identifierToSpec.set(defName, spec);
+        addNamed(spec, 'default');
+      }
       if (commaIdx >= 0) {
         const rest = clause.slice(commaIdx + 1).trim();
-        if (rest.startsWith('{')) {
-          const inner = rest.slice(1, rest.lastIndexOf('}'));
-          for (const item of inner.split(',')) {
-            const asMatch = item.trim().match(/^(?:[A-Za-z_$][A-Za-z0-9_$]*\s+as\s+)?([A-Za-z_$][A-Za-z0-9_$]*)$/);
-            if (asMatch) identifierToSpec.set(asMatch[1], spec);
-          }
-        }
+        if (rest.startsWith('{')) parseNamedClause(rest.slice(1, rest.lastIndexOf('}')), spec);
       }
     }
   }
@@ -301,7 +309,7 @@ export function parseStaticImports(stripped) {
   for (const m of stripped.matchAll(/\bexport\s+(?:\*|\{[^}]{0,300}\})\s+from\s*['"]([^'"]+)['"]/g)) specs.push(m[1].trim());
   for (const m of stripped.matchAll(/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) specs.push(m[1].trim());
 
-  return { specs: [...new Set(specs)], identifierToSpec };
+  return { specs: [...new Set(specs)], identifierToSpec, namedImportsBySpec };
 }
 
 /**
@@ -378,7 +386,7 @@ export function extractVueRouterRoutes({ filePath, relFile, text, repoDir, fileI
           importSpec = lazyMatch[1];
         } else if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(props.component)) {
           if (LAYOUT_COMPONENT_RE.test(props.component)) isLayout = true;
-          else importSpec = identifierToSpec.get(props.component) || null;
+          importSpec = identifierToSpec.get(props.component) || null;
         }
         if (importSpec) {
           const chk = resolveImportCandidate(filePath, importSpec, repoDir, fileIndex);
@@ -386,7 +394,7 @@ export function extractVueRouterRoutes({ filePath, relFile, text, repoDir, fileI
             targetFile = chk.resolvedRel;
             if (LAYOUT_COMPONENT_RE.test(chk.resolvedRel)) isLayout = true;
           }
-          if (!chk.exists && rawPath !== null) {
+          if (!chk.exists && rawPath !== null && !isLayout) {
             brokenImports.push({
               route: currentPath,
               routerFile: relFile,
@@ -403,6 +411,12 @@ export function extractVueRouterRoutes({ filePath, relFile, text, repoDir, fileI
         if (!seen.has(key)) {
           seen.add(key);
           routes.push({ route: currentPath, file: targetFile, kind: 'router-config' });
+        }
+      } else if (isLayout && hasChildren && rawPath !== null && currentPath !== '/' && targetFile !== relFile) {
+        const key = `layout::${currentPath}::${targetFile}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          routes.push({ route: currentPath, file: targetFile, kind: 'router-layout' });
         }
       }
 

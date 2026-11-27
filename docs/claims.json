@@ -64,7 +64,7 @@
     },
     {
       "id": "CLAIM-11-codemap-v2-convergence",
-      "claim": "Living Code Map v4 preserves dynamic routes (:id / [id]), prunes deleted routes, and converges defects without seenCount inflation",
+      "claim": "Living Code Map v5 preserves dynamic routes (:id / [id]), prunes deleted routes, and converges defects without seenCount inflation",
       "testFile": "test/unit/codemap.test.mjs",
       "testTitleSubstring": "CodeMap v2 preserves dynamic routes"
     },
@@ -193,6 +193,41 @@
       "corpusType": "enterprise-fullstack-hardening",
       "testFile": "test/unit/v640-fullstack-hardening.test.mjs",
       "testTitleSubstring": "WB-P0-01 & partialScope"
+    },
+    {
+      "id": "CLAIM-30-v660-pinned-cbm-sidecar-provider-and-conformance",
+      "claim": "v6.6.0 Decoupled Pinned Sidecar Graph Provider (DeusData/codebase-memory-mcp@0.12.1) embeds verified 6-platform SHA-256 manifests, enforces cross-platform short-path cohort isolation (Windows MAX_PATH/NTFS ACL fallback, macOS <=60B AF_UNIX, Linux/WSL2 DrvFs ban), offline --from-file/--mirror-url installs with N-1 retention, env scrubbing & prompt-poisoning sanitization, and live 8/8 conformance suite",
+      "corpusType": "graph-engine-sidecar",
+      "testFile": "test/unit/v660-cbm-provider.test.mjs",
+      "testTitleSubstring": "engine-manifest: embeds verified v0.12.1 SHA-256 hashes"
+    },
+    {
+      "id": "CLAIM-31-v660-l0-fullstack-extractors",
+      "claim": "v6.6.0 L0 Zero-Dep Full-Stack Extractors resolve Spring WebProperties Java constants & Ant/regex path prefixes (0% cross-portal collisions), Feign/Dubbo RPC bridges, RocketMQ/XxlJob producers, MyBatis XML + BaseMapper<DO> statements, chained Axios/crudFactory endpoints, Vue template/global components, and controller-scoped DB chains",
+      "corpusType": "enterprise-fullstack-l0",
+      "testFile": "test/unit/v660-l0-fullstack-extractors.test.mjs",
+      "testTitleSubstring": "GA-2 & GA-5 Enterprise Full-Stack L0"
+    },
+    {
+      "id": "CLAIM-32-v660-impact-v3-global-infra-and-pipe-sharded-narrowing",
+      "claim": "v6.6.0 Additive-Only Fail-Closed Diff-Impact v3 enforces Global Infra Guard (Spring AutoConfiguration/WebFilter/Interceptor/Advice & Vue global infra/components fail-closed to full suite), loads pipe-sharded-v1 graph-impact-index.json in <20ms with >65 high-fan-in fail-closed sentinel, lifts >=8 fan-in cliffs across MyBatis/Service/Feign -> Prefixed Route -> Vue View -> Spec, and binds scope.graphEngine into in-toto attestations",
+      "corpusType": "impact-v3-and-attestation",
+      "testFile": "test/unit/v660-impact-v3-graph.test.mjs",
+      "testTitleSubstring": "GA-3 Graph-Assisted Symbol Narrowing"
+    },
+    {
+      "id": "CLAIM-33-v660-governance-mcp-lock-and-8-pillar-hub",
+      "claim": "v6.6.0 Governance Lock seals .aitest/mcp.lock and .aitest/engine-manifest.json, upgrades MCP Hub to 8 pillars (adding code-intelligence), enforces native sidecar guardrails (--ui=false, update/install ban, exact version pin, SHA-256 verification), preserves the 17-tool canonical MCP invariant, and exposes aitest://project/{target}/graph-summary",
+      "corpusType": "governance-and-supply-chain",
+      "testFile": "test/unit/v660-governance-mcp-lock.test.mjs",
+      "testTitleSubstring": "v6.6.0 Governance Lock closes .aitest/mcp.lock"
+    },
+    {
+      "id": "CLAIM-34-v660-codemap-v5-fusion-and-upgrade-loop",
+      "claim": "v6.6.0 CodeMap v5 migrates v4 maps cleanly while preserving runtime routes and defects, fuses L0 + L1 graph snapshots into deterministic knowledge/code-map.json & graph-impact-index.json, integrates doctor engine probes, upgrade --scope engines (never auto-resigning governance.lock), and diagnose serviceChains + tenant/auth hints",
+      "corpusType": "codemap-v5-integration",
+      "testFile": "test/unit/v660-codemap-v5-integration.test.mjs",
+      "testTitleSubstring": "v6.6.0 CodeMap v4->v5 migration"
     }
   ]
 }

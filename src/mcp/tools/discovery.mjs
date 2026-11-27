@@ -241,11 +241,11 @@ export const DISCOVERY_TOOLS = [
   {
     name: 'aitest_map_sync',
     category: 'discovery',
-    title: 'Sync Convergent Living Code Map v4',
+    title: 'Sync Convergent Living Code Map v5',
     description:
-      'Use when synchronizing the codebase topology and auto-generated impact map after routes, controllers, or specs change. Writes knowledge/code-map.json, SYSTEM_MAP.md, and knowledge/impact-map.auto.json.',
+      'Use when synchronizing the codebase topology, graph-impact index, and auto-generated impact map after routes, controllers, or specs change. Writes knowledge/code-map.json (v5), SYSTEM_MAP.md, knowledge/graph-impact-index.json, and knowledge/impact-map.auto.json.',
     annotations: {
-      title: 'Synchronize Living Code Map v4',
+      title: 'Synchronize Living Code Map v5',
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: true,
@@ -258,6 +258,15 @@ export const DISCOVERY_TOOLS = [
         repo: { type: 'string', description: 'Optional host source directory path' },
         repos: { type: 'array', items: { type: 'string' }, description: 'Optional list of frontend/backend source repository paths' },
         maxScanFiles: { type: 'integer', minimum: 100, maximum: 200000, description: 'Per-repository source scan file budget (default: 16000)' },
+        engine: {
+          type: 'string',
+          enum: ['auto', 'builtin', 'codebase-memory-mcp'],
+          description: 'Optional CodeMap graph engine mode (auto | builtin | codebase-memory-mcp)',
+        },
+        query: {
+          type: 'string',
+          description: 'Optional composite graph query (symbols, callers/callees, hotspots) returned alongside CodeMap sync',
+        },
         qaDir: { type: 'string', description: 'Optional QA subdirectory name or path' },
         force: { type: 'boolean', description: 'Force rewrite of code-map.json and SYSTEM_MAP.md even if unchanged' },
         noSyncImpact: { type: 'boolean', description: 'Skip auto-updating impact-map.auto.json suggestions' },
@@ -281,6 +290,8 @@ export const DISCOVERY_TOOLS = [
         for (const r of args.repos) pushOpt(a, '--repo', r);
       }
       pushOpt(a, '--max-scan-files', args.maxScanFiles);
+      pushOpt(a, '--engine', args.engine);
+      pushOpt(a, '--query', args.query);
       pushOpt(a, '--qa-dir', args.qaDir);
       pushBool(a, '--force', args.force);
       pushBool(a, '--no-sync-impact', args.noSyncImpact);
@@ -291,9 +302,9 @@ export const DISCOVERY_TOOLS = [
   {
     name: 'aitest_mcp_hub',
     category: 'discovery',
-    title: 'Manage Pinned 7-Pillar MCP Presets & Supply-Chain Doctor',
+    title: 'Manage Pinned 8-Pillar MCP Presets & Supply-Chain Doctor',
     description:
-      'Use when configuring or auditing external pinned MCP integrations. Lists 7-pillar presets, writes .mcp.json/.codex/config.toml, or verifies descriptor hashes against .aitest/mcp.lock.',
+      'Use when configuring or auditing external pinned MCP integrations. Lists 8-pillar presets, inspects read-only graph engine status (engine-status; native binary install stays human-CLI-only), writes .mcp.json/.codex/config.toml, or verifies descriptor hashes against .aitest/mcp.lock.',
     annotations: {
       title: 'Configure & Audit System MCP Hub',
       readOnlyHint: false,
@@ -304,8 +315,12 @@ export const DISCOVERY_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['presets', 'add', 'doctor'], description: 'MCP Hub sub-action (presets | add | doctor)' },
-        target: { type: 'string', description: 'Target repository path (required for add and doctor)' },
+        action: {
+          type: 'string',
+          enum: ['presets', 'add', 'doctor', 'engine-status'],
+          description: 'MCP Hub sub-action (presets | add | doctor | engine-status; native binary installation stays human-CLI-only)',
+        },
+        target: { type: 'string', description: 'Target repository path (required for add, doctor, and engine-status)' },
         profile: {
           type: 'string',
           enum: ['minimal', 'observability', 'data-verify', 'perf', 'enterprise-selfhosted', 'full-link'],
@@ -323,7 +338,7 @@ export const DISCOVERY_TOOLS = [
     dataProps: {},
     skipWorkspaceBoundary: (args) => args.action === 'presets',
     execute: executeMcpHubReadOnlyFastPath,
-    isReadOnly: (args) => args.action === 'presets' || (args.action === 'doctor' && !args.lock),
+    isReadOnly: (args) => args.action === 'presets' || args.action === 'engine-status' || (args.action === 'doctor' && !args.lock),
     buildCliArgs: (args, target, lang) => {
       const a = ['mcp', args.action || 'presets', '--json', `--lang=${lang}`];
       pushOpt(a, '--target', target);
@@ -334,7 +349,10 @@ export const DISCOVERY_TOOLS = [
       pushBool(a, '--dry-run', args.dryRun);
       return a;
     },
-    nextActions: () => ['Call aitest_mcp_hub(action="doctor", lock=true) to lock MCP descriptor hashes into .aitest/mcp.lock.'],
+    nextActions: (_ok, args) =>
+      args.action === 'engine-status'
+        ? ['Use human local CLI "mcp install-engine --target <repo>" to install/verify a pinned sidecar binary, then "governance approve" to seal .aitest/engine-manifest.json.']
+        : ['Call aitest_mcp_hub(action="doctor", lock=true) to lock MCP descriptor hashes into .aitest/mcp.lock, then have a human run "governance approve".'],
   },
   {
     name: 'aitest_skill_install',

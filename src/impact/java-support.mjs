@@ -8,6 +8,11 @@ const WORKBENCH_ARTIFACT_PREFIX_RE = /^(?:\.aitest|reports|knowledge|test-result
 const JAVA_STEM_SUFFIX_RE = /(?:Controller|ServiceImpl|Service|Mapper|Manager|DO|Entity|PO|ReqVO|RespVO|VO|DTO)$/i;
 const JS_STEM_SUFFIX_RE = /\.(?:controller|service|view|page|component|route|routes)$/i;
 const REPO_MARKERS = ['.git', 'package.json', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'go.mod', 'pyproject.toml'];
+const UNIVERSAL_JAVA_BASE_TYPES = new Set([
+  'BaseDO', 'TenantBaseDO', 'BaseEntity', 'BaseVO', 'BaseDTO', 'BaseReqVO', 'BaseRespVO',
+  'BaseMapper', 'BaseMapperX', 'MPJBaseMapper', 'BaseController', 'ServiceImpl', 'IService',
+  'PageParam', 'SortablePageParam', 'Object', 'Serializable', 'Exception', 'RuntimeException',
+]);
 
 /**
  * Returns true if `relPath` is workbench state or report output (`.aitest/**`, `reports/**`,
@@ -79,13 +84,51 @@ export function buildCodeMapFileToSpecMap(qaDir, allSpecs) {
     for (const sp of specs) {
       if (r.frontendFile) addLink(r.frontendFile, sp, `code-map(${r.route})`);
       for (const bf of r.linkedBackendFiles || []) addLink(bf, sp, `code-map-be(${r.route})`);
+      for (const af of r.linkedApiFiles || []) addLink(af, sp, `code-map-fe-api(${r.route})`);
+      for (const sf of [...(r.linkedServiceFiles || []), ...(r.linkedMapperFiles || []), ...(r.linkedXmlFiles || [])]) {
+        addLink(sf, sp, `code-map-be(${r.route})`);
+      }
     }
   }
-  const apisList = Array.isArray(cm?.apis) ? cm.apis : Object.values(cm?.apis || {});
-  for (const api of apisList) {
-    const specs = Array.isArray(api?.coveringSpecs) ? api.coveringSpecs : [];
+  const apisEntries = Array.isArray(cm?.apis)
+    ? cm.apis.map((/** @type {any} */ api) => [api?.path || api?.route || '', api])
+    : Object.entries(cm?.apis || {});
+  for (const [apiKey, api] of apisEntries) {
+    const label = api?.path || api?.route || apiKey || '';
+    const routeSpecs = Array.isArray(api?.linkedRoutes)
+      ? api.linkedRoutes.flatMap((/** @type {string} */ rk) => cm?.routes?.[rk]?.coveringSpecs || [])
+      : [];
+    const specs = [...new Set([...(Array.isArray(api?.coveringSpecs) ? api.coveringSpecs : []), ...routeSpecs])];
+    const beFiles = [
+      ...(Array.isArray(api?.backendFiles) ? api.backendFiles : []),
+      ...(api?.backendFile ? [api.backendFile] : []),
+      ...(api?.controllerFile ? [api.controllerFile] : []),
+    ];
+    const feFiles = [
+      ...(Array.isArray(api?.frontendFiles) ? api.frontendFiles : []),
+      ...(Array.isArray(api?.frontendApiFiles) ? api.frontendApiFiles : []),
+      ...(api?.frontendApiFile ? [api.frontendApiFile] : []),
+    ];
     for (const sp of specs) {
-      for (const bf of api?.backendFiles || []) addLink(bf, sp, `code-map-api(${api.path || api.route || ''})`);
+      for (const bf of beFiles) addLink(bf, sp, `code-map-api(${label})`);
+      for (const ff of feFiles) addLink(ff, sp, `code-map-api-fe(${label})`);
+    }
+  }
+  const chainsList = Array.isArray(cm?.serviceChains) ? cm.serviceChains : Object.values(cm?.serviceChains || {});
+  for (const ch of chainsList) {
+    if (!ch || typeof ch !== 'object') continue;
+    const routeSpecs = ch.route && cm?.routes?.[ch.route]?.coveringSpecs ? cm.routes[ch.route].coveringSpecs : [];
+    const specs = [...new Set([...(Array.isArray(ch.coveringSpecs) ? ch.coveringSpecs : []), ...routeSpecs])];
+    const label = ch.apiPath || ch.route || '';
+    const files = [
+      ch.viewFile, ch.frontendFile, ch.apiFile, ch.frontendApiFile, ch.controllerFile,
+      ...(Array.isArray(ch.serviceFiles) ? ch.serviceFiles : []),
+      ...(Array.isArray(ch.feignFiles) ? ch.feignFiles : []),
+      ...(Array.isArray(ch.mapperFiles) ? ch.mapperFiles : []),
+      ...(Array.isArray(ch.xmlFiles) ? ch.xmlFiles : []),
+    ].filter(Boolean);
+    for (const sp of specs) {
+      for (const f of files) addLink(f, sp, `code-map-chain(${label})`);
     }
   }
   return map;
@@ -169,10 +212,22 @@ export function addJavaAndXmlReverseEdges(files, reverseGraph, stripCommentsFn) 
   const pkgToEntries = new Map();
   /** @type {Map<string, string[]>} */
   const simpleToRels = new Map();
-  /** @type {Array<{ rel: string, pkg: string, className: string, imports: string[], superNames: string[], stripped: string }>} */
+  /** @type {Array<{ rel: string, pkg: string, className: string, imports: string[], implNames: string[], extendsNames: string[], stripped: string }>} */
   const javaRecords = [];
   /** @type {Array<{ rel: string, text: string }>} */
   const xmlRecords = [];
+
+  const stripGenericArgs = (/** @type {string} */ s) => {
+    let out = '';
+    let depth = 0;
+    for (let i = 0; i < s.length; i += 1) {
+      const ch = s[i];
+      if (ch === '<') depth += 1;
+      else if (ch === '>') depth = Math.max(0, depth - 1);
+      else if (depth === 0) out += ch;
+    }
+    return out;
+  };
 
   for (const { full, rel } of files) {
     if (!rel.endsWith('.java') && !rel.endsWith('.xml')) continue;
@@ -200,14 +255,21 @@ export function addJavaAndXmlReverseEdges(files, reverseGraph, stripCommentsFn) 
 
     const imports = [...stripped.matchAll(/^\s*import\s+(?:static\s+)?([a-zA-Z0-9_.*$]+)\s*;/gm)].map((m) => m[1]);
     /** @type {string[]} */
-    const superNames = [];
+    const implNames = [];
+    /** @type {string[]} */
+    const extendsNames = [];
     if (decl?.[2]) {
-      const implPart = decl[2].match(/\bimplements\s+([^{]+)/);
+      const headerClause = stripGenericArgs(decl[2]);
+      const extPart = headerClause.match(/\bextends\s+(.+?)(?=\bimplements\b|$)/);
+      if (extPart) {
+        for (const m of extPart[1].matchAll(/\b([A-Z][A-Za-z0-9_$]*)\b/g)) extendsNames.push(m[1]);
+      }
+      const implPart = headerClause.match(/\bimplements\s+([^{]+)/);
       if (implPart) {
-        for (const m of implPart[1].matchAll(/\b([A-Z][A-Za-z0-9_$]*)\b/g)) superNames.push(m[1]);
+        for (const m of implPart[1].matchAll(/\b([A-Z][A-Za-z0-9_$]*)\b/g)) implNames.push(m[1]);
       }
     }
-    javaRecords.push({ rel, pkg, className, imports, superNames, stripped });
+    javaRecords.push({ rel, pkg, className, imports, implNames, extendsNames, stripped });
   }
 
   const addEdge = (/** @type {string} */ targetRel, /** @type {string} */ importerRel) => {
@@ -216,6 +278,11 @@ export function addJavaAndXmlReverseEdges(files, reverseGraph, stripCommentsFn) 
     if (!set) { set = new Set(); reverseGraph.set(targetRel, set); }
     set.add(importerRel);
   };
+
+  /** @type {Array<{ subRel: string, superRel: string, superName: string }>} */
+  const extendsEdges = [];
+  /** @type {Map<string, number>} */
+  const subclassCounts = new Map();
 
   for (const rec of javaRecords) {
     /** @type {Map<string, string>} */
@@ -242,10 +309,26 @@ export function addJavaAndXmlReverseEdges(files, reverseGraph, stripCommentsFn) 
         importedSimpleToRel.set(cand.className, cand.rel);
       }
     }
+    const resolveTypeRel = (/** @type {string} */ name) =>
+      importedSimpleToRel.get(name) || (simpleToRels.get(name)?.length === 1 ? simpleToRels.get(name)?.[0] : undefined);
     // Bridge `Impl -> Interface` so editing `*ServiceImpl.java` propagates to `*Controller.java` injecting `*Service`!
-    for (const ifaceName of rec.superNames) {
-      const ifaceRel = importedSimpleToRel.get(ifaceName) || (simpleToRels.get(ifaceName)?.length === 1 ? simpleToRels.get(ifaceName)?.[0] : undefined);
+    for (const ifaceName of rec.implNames) {
+      const ifaceRel = resolveTypeRel(ifaceName);
       if (ifaceRel) addEdge(rec.rel, ifaceRel);
+    }
+    // Bridge Java `extends` inheritance (Super -> Sub always; polymorphic Sub -> Super for non-universal base types)
+    for (const superName of rec.extendsNames) {
+      const superRel = resolveTypeRel(superName);
+      if (!superRel || superRel === rec.rel) continue;
+      addEdge(superRel, rec.rel);
+      extendsEdges.push({ subRel: rec.rel, superRel, superName });
+      subclassCounts.set(superRel, (subclassCounts.get(superRel) || 0) + 1);
+    }
+  }
+
+  for (const { subRel, superRel, superName } of extendsEdges) {
+    if (!UNIVERSAL_JAVA_BASE_TYPES.has(superName) && (subclassCounts.get(superRel) || 0) <= 6) {
+      addEdge(subRel, superRel);
     }
   }
 

@@ -6,18 +6,41 @@ import test from 'node:test';
 import { runCli } from '../../src/cli.mjs';
 import {
   MCP_PILLARS,
+  MCP_PILLAR_LABELS,
   MCP_PRESETS,
+  MCP_PROFILES,
   auditMcpSafety,
+  buildCbmCohortDefaults,
   mergeMcpServersIntoCodexToml,
   mergeMcpServersIntoJson,
 } from '../../src/mcp-hub.mjs';
 
-test('MCP_PRESETS covers all 7 pillars including built-in ai-test-workbench orchestrator', () => {
+test('MCP_PRESETS covers all 8 pillars including built-in ai-test-workbench orchestrator & codebase-memory-mcp code-intelligence', () => {
   const pillarsFound = new Set(Object.values(MCP_PRESETS).map((p) => p.pillar));
+  assert.equal(MCP_PILLARS.length, 8);
   assert.ok(MCP_PILLARS.includes('orchestrator'));
+  assert.ok(MCP_PILLARS.includes('code-intelligence'));
+  assert.deepEqual(MCP_PILLAR_LABELS['code-intelligence'], { zh: '代码图谱智能', en: 'Code Graph Intelligence' });
   assert.ok(MCP_PRESETS['ai-test-workbench']);
   assert.ok(MCP_PRESETS['ai-test-workbench'].args[0].startsWith('--package=ai-test-workbench@'));
   assert.deepEqual(MCP_PRESETS['ai-test-workbench'].args.slice(1), ['ai-test-workbench', 'mcp-serve']);
+
+  const cbm = MCP_PRESETS['codebase-memory-mcp'];
+  assert.ok(cbm);
+  assert.equal(cbm.pillar, 'code-intelligence');
+  assert.equal(cbm.pinnedVersion, '0.12.1');
+  assert.equal(cbm.command, 'codebase-memory-mcp');
+  assert.deepEqual(cbm.args, ['--ui=false']);
+  assert.equal(cbm.riskLevel, 'local-write');
+  assert.equal(cbm.readonly, false);
+  assert.equal(cbm.transport, 'stdio');
+  assert.equal(cbm.offlineCapable, true);
+  assert.ok('CBM_RUNTIME_DIR' in cbm.envTemplate);
+  assert.ok('CBM_CACHE_DIR' in cbm.envTemplate);
+  assert.ok('CBM_ALLOWED_ROOT' in cbm.envTemplate);
+  assert.ok(MCP_PROFILES['enterprise-selfhosted'].includes('codebase-memory-mcp'));
+  assert.ok(MCP_PROFILES['full-link'].includes('codebase-memory-mcp'));
+
   for (const pillar of MCP_PILLARS) {
     assert.equal(pillarsFound.has(pillar), true, `Missing MCP pillar: ${pillar}`);
   }
@@ -26,16 +49,41 @@ test('MCP_PRESETS covers all 7 pillars including built-in ai-test-workbench orch
   assert.ok(MCP_PRESETS['redis-readonly'].args.includes('--readonly'));
 });
 
-test('mergeMcpServersIntoJson and mergeMcpServersIntoCodexToml preserve existing custom entries cleanly', () => {
-  const jsonRes = mergeMcpServersIntoJson({ mcpServers: { custom: { command: 'node', args: ['x.js'] } } }, ['grafana', 'loki']);
+test('mergeMcpServersIntoJson and mergeMcpServersIntoCodexToml preserve existing custom entries and inject safe codebase-memory-mcp cohort defaults', () => {
+  const jsonRes = mergeMcpServersIntoJson(
+    { mcpServers: { custom: { command: 'node', args: ['x.js'] } } },
+    ['grafana', 'loki', 'codebase-memory-mcp']
+  );
   assert.ok(jsonRes.config.mcpServers.custom);
   assert.ok(jsonRes.config.mcpServers.grafana);
-  assert.equal(jsonRes.added.length, 2);
+  assert.deepEqual(jsonRes.config.mcpServers['codebase-memory-mcp'].args, ['--ui=false']);
+  assert.equal(jsonRes.config.mcpServers['codebase-memory-mcp'].env.CBM_RUNTIME_DIR, '${CBM_RUNTIME_DIR}');
+  assert.equal(jsonRes.config.mcpServers['codebase-memory-mcp'].env.CBM_CACHE_DIR, '${CBM_CACHE_DIR}');
+  assert.equal(jsonRes.config.mcpServers['codebase-memory-mcp'].env.CBM_ALLOWED_ROOT, '${CBM_ALLOWED_ROOT}');
+  assert.equal(jsonRes.added.length, 3);
 
-  const tomlRes = mergeMcpServersIntoCodexToml('[mcp_servers.custom]\ncommand = "node"\n', ['grafana', 'mysql-readonly']);
+  const customCohort = buildCbmCohortDefaults({
+    codeMapConfig: { externalEngine: { runtimeDir: '/tmp/cbm/r', cacheDir: '/tmp/cbm/c' } },
+    allowedRoot: '/repo',
+  });
+  assert.deepEqual(customCohort.args, ['--ui=false']);
+  assert.equal(customCohort.env.CBM_RUNTIME_DIR, '/tmp/cbm/r');
+  assert.equal(customCohort.env.CBM_CACHE_DIR, '/tmp/cbm/c');
+  assert.equal(customCohort.env.CBM_ALLOWED_ROOT, '/repo');
+
+  const tomlRes = mergeMcpServersIntoCodexToml('[mcp_servers.custom]\ncommand = "node"\n', [
+    'grafana',
+    'mysql-readonly',
+    'codebase-memory-mcp',
+  ]);
   assert.match(tomlRes.content, /\[mcp_servers\.custom\]/);
   assert.match(tomlRes.content, /\[mcp_servers\.grafana\]/);
   assert.match(tomlRes.content, /ALLOW_DELETE_OPERATION = "false"/);
+  assert.match(tomlRes.content, /\[mcp_servers\.codebase-memory-mcp\]/);
+  assert.match(tomlRes.content, /args = \["--ui=false"\]/);
+  assert.match(tomlRes.content, /CBM_RUNTIME_DIR = "\$\{CBM_RUNTIME_DIR\}"/);
+  assert.match(tomlRes.content, /CBM_CACHE_DIR = "\$\{CBM_CACHE_DIR\}"/);
+  assert.match(tomlRes.content, /CBM_ALLOWED_ROOT = "\$\{CBM_ALLOWED_ROOT\}"/);
 });
 
 test('auditMcpSafety rejects unsafe write-enabled Grafana/MySQL or hardcoded credentials', () => {

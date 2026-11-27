@@ -1,116 +1,79 @@
 // @ts-check
 import path from 'node:path';
 import { normalizeRoutePath } from './route-matcher.mjs';
+import { extractJavaBaseMapperEntities, extractMybatisXmlDetails } from './rpc-mybatis-extractor.mjs';
+import {
+  attachSpringPackagePrefixes,
+  extractJavaStringConstants,
+  extractSpringPrefixRulesFromFile,
+  matchAntPackagePattern,
+  matchSpringPackagePattern,
+  readBalancedParens,
+  resolveJavaStringExpr,
+  resolveSpringPackagePrefix,
+  stripJavaComments,
+} from './spring-prefix-resolver.mjs';
+
+export {
+  attachSpringPackagePrefixes,
+  extractSpringPrefixRulesFromFile,
+  matchAntPackagePattern,
+  matchSpringPackagePattern,
+  resolveSpringPackagePrefix,
+  stripJavaComments,
+};
 
 const HTTP_METHOD_RE = /\bRequestMethod\.(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\b/i;
+const IGNORED_FIELD_TYPES = new Set([
+  'String', 'Integer', 'Long', 'Double', 'Float', 'Boolean', 'Short', 'Byte', 'Character', 'Number', 'Object',
+  'Class', 'Void', 'BigDecimal', 'BigInteger', 'Date', 'LocalDate', 'LocalTime', 'LocalDateTime', 'Instant',
+  'List', 'ArrayList', 'LinkedList', 'Set', 'HashSet', 'Map', 'HashMap', 'ConcurrentHashMap', 'Collection',
+  'Optional', 'Stream', 'Pattern', 'Logger', 'AtomicInteger', 'AtomicLong', 'AtomicBoolean', 'ThreadLocal',
+  'Executor', 'ExecutorService', 'ObjectMapper', 'RestTemplate', 'StringRedisTemplate', 'RedisTemplate',
+  'RedissonClient', 'PlatformTransactionManager', 'HttpServletRequest', 'HttpServletResponse', 'MultipartFile',
+]);
+const UTILITY_HUB_NAME_RE =
+  /(?:ResultBuilder\w*|CommonResult|PageResult|BeanUtils|Convert|Utils|Util|Helper|Constants|Constant|Properties|Enum|Exception|StrategyFactory|CheckChain|RedisDAO|Producer|Consumer|VO|DTO|Template)$/;
 
 /**
- * Strips Java/Kotlin `//` and `/* *\/` comments linearly while preserving string & text-block literals.
- * @param {string} source
- * @returns {string}
- */
-export function stripJavaComments(source) {
-  const s = String(source || '');
-  const len = s.length;
-  /** @type {string[]} */
-  const out = [];
-  let i = 0;
-  while (i < len) {
-    const ch = s[i];
-    const next = i + 1 < len ? s[i + 1] : '';
-    if (ch === '"' && next === '"' && s[i + 2] === '"') {
-      const start = i;
-      i += 3;
-      while (i < len) {
-        if (s[i] === '\\') { i += 2; continue; }
-        if (s[i] === '"' && s[i + 1] === '"' && s[i + 2] === '"') { i += 3; break; }
-        i += 1;
-      }
-      out.push(s.slice(start, i));
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      const start = i;
-      const q = ch;
-      i += 1;
-      while (i < len) {
-        if (s[i] === '\\') { i += 2; continue; }
-        if (s[i] === q) { i += 1; break; }
-        if (s[i] === '\n' || s[i] === '\r') break;
-        i += 1;
-      }
-      out.push(s.slice(start, i));
-      continue;
-    }
-    if (ch === '/' && next === '/') {
-      i += 2;
-      while (i < len && s[i] !== '\n' && s[i] !== '\r') i += 1;
-      out.push(' ');
-      continue;
-    }
-    if (ch === '/' && next === '*') {
-      i += 2;
-      while (i < len) {
-        if (s[i] === '*' && i + 1 < len && s[i + 1] === '/') { i += 2; break; }
-        i += 1;
-      }
-      out.push(' ');
-      continue;
-    }
-    out.push(ch);
-    i += 1;
-  }
-  return out.join('');
-}
-
-/**
- * Extracts balanced `(...)` argument text starting at `openParenIdx`.
- * @param {string} text
- * @param {number} openParenIdx
- * @returns {{ body: string, endIdx: number } | null}
- */
-function readBalancedParens(text, openParenIdx) {
-  let depth = 0;
-  for (let i = openParenIdx; i < text.length; i += 1) {
-    const ch = text[i];
-    if (ch === '"' || ch === "'") {
-      const q = ch;
-      i += 1;
-      while (i < text.length) {
-        if (text[i] === '\\') { i += 1; }
-        else if (text[i] === q) break;
-        i += 1;
-      }
-      continue;
-    }
-    if (ch === '(') depth += 1;
-    else if (ch === ')') {
-      depth -= 1;
-      if (depth === 0) return { body: text.slice(openParenIdx + 1, i), endIdx: i };
-    }
-  }
-  return null;
-}
-
-/**
- * Parses mapping paths from Spring `@*Mapping(...)` argument body.
- * Supports `"/a"`, `value = "/a"`, `path = {"/a", "/b"}`, and multiline values.
+ * Parses mapping paths from Spring `@*Mapping(...)` argument body, resolving Java constants when present.
  * @param {string} argsBody
+ * @param {Record<string, string>} localConsts
+ * @param {Map<string, string>} globalConsts
+ * @param {string[]} imports
+ * @param {string} packageName
  * @returns {string[]}
  */
-function parseSpringMappingPaths(argsBody) {
+function parseSpringMappingPaths(argsBody, localConsts, globalConsts, imports, packageName) {
   const clean = String(argsBody || '').trim();
   if (!clean) return [''];
 
-  const named = clean.match(/\b(?:value|path)\s*=\s*(\{[\s\S]*?\}|["'][^"']*["'])/);
+  const resolveItem = (/** @type {string} */ item) => {
+    const resolved = resolveJavaStringExpr(item, localConsts, globalConsts, imports, packageName);
+    if (resolved !== null) return resolved;
+    const lit = item.match(/["']([^"']*)["']/);
+    return lit ? lit[1] : null;
+  };
+
+  const named = clean.match(/\b(?:value|path)\s*=\s*(\{[\s\S]*?\}|[^,)]+)/);
   if (named) {
-    const items = [...named[1].matchAll(/["']([^"']*)["']/g)].map((m) => m[1]);
-    return items.length > 0 ? items : [''];
+    const raw = named[1].trim();
+    if (raw.startsWith('{')) {
+      const items = raw.slice(1, raw.lastIndexOf('}')).split(',').map((s) => resolveItem(s.trim())).filter((s) => s !== null);
+      return items.length > 0 ? items : [''];
+    }
+    const single = resolveItem(raw);
+    return single !== null ? [single] : [''];
   }
-  if (/^\s*["']/.test(clean) || /^\s*\{/.test(clean)) {
-    const head = clean.startsWith('{') ? clean.slice(0, clean.indexOf('}') + 1) : clean.split(',')[0];
-    const items = [...head.matchAll(/["']([^"']*)["']/g)].map((m) => m[1]);
+  if (/^\s*\{/.test(clean)) {
+    const head = clean.slice(1, clean.indexOf('}'));
+    const items = head.split(',').map((s) => resolveItem(s.trim())).filter((s) => s !== null);
     if (items.length > 0) return items;
+  }
+  const firstArg = clean.split(',')[0].trim();
+  if (!firstArg.includes('=')) {
+    const single = resolveItem(firstArg);
+    if (single !== null) return [single];
   }
   return [''];
 }
@@ -118,33 +81,49 @@ function parseSpringMappingPaths(argsBody) {
 /**
  * Scans `@(Get|Post|Put|Delete|Patch|Request)Mapping` annotations inside a Java/Kotlin snippet.
  * @param {string} snippet
- * @returns {Array<{ kind: string, method: string, paths: string[] }>}
+ * @param {Record<string, string>} localConsts
+ * @param {Map<string, string>} globalConsts
+ * @param {string[]} imports
+ * @param {string} packageName
+ * @returns {Array<{ kind: string, method: string, paths: string[], index: number, afterIdx: number }>}
  */
-function scanMappingAnnotations(snippet) {
-  /** @type {Array<{ kind: string, method: string, paths: string[] }>} */
+function scanMappingAnnotations(snippet, localConsts, globalConsts, imports, packageName) {
+  /** @type {Array<{ kind: string, method: string, paths: string[], index: number, afterIdx: number }>} */
   const out = [];
   const annRe = /@(Get|Post|Put|Delete|Patch|Request)Mapping\b/g;
   for (const m of snippet.matchAll(annRe)) {
     const kind = m[1];
-    let idx = (m.index || 0) + m[0].length;
+    const startIdx = m.index || 0;
+    let idx = startIdx + m[0].length;
     while (idx < snippet.length && /\s/.test(snippet[idx])) idx += 1;
     let body = '';
+    let afterIdx = idx;
     if (snippet[idx] === '(') {
       const balanced = readBalancedParens(snippet, idx);
-      if (balanced) body = balanced.body;
+      if (balanced) {
+        body = balanced.body;
+        afterIdx = balanced.endIdx + 1;
+      }
     }
     let method = kind === 'Request' ? 'ANY' : kind.toUpperCase();
     if (kind === 'Request') {
       const rm = body.match(HTTP_METHOD_RE);
       if (rm) method = rm[1].toUpperCase();
     }
-    out.push({ kind, method, paths: parseSpringMappingPaths(body) });
+    out.push({
+      kind,
+      method,
+      paths: parseSpringMappingPaths(body, localConsts, globalConsts, imports, packageName),
+      index: startIdx,
+      afterIdx,
+    });
   }
   return out;
 }
 
 /**
- * Extracts Java package, class name, imports, super-types, and injected field types for 4-tier DB correlation.
+ * Extracts Java package, class name, imports, super-types (preserving `BaseMapper<EntityDO>` generic entity types!),
+ * `implements` vs `extends`, injected/declared field types, and utility/hub classification.
  * @param {string} relFile
  * @param {string} stripped
  */
@@ -165,17 +144,52 @@ export function extractJavaMetadata(relFile, stripped) {
 
   /** @type {string[]} */
   const superTypes = [];
+  /** @type {string[]} */
+  const implementsTypes = [];
   if (typeDecl && typeDecl[2]) {
-    for (const m of typeDecl[2].matchAll(/\b([A-Z][A-Za-z0-9_$]*)\b/g)) {
+    const clause = typeDecl[2];
+    for (const m of clause.matchAll(/\b([A-Z][A-Za-z0-9_$]*)\b/g)) {
       if (!['Object', 'Serializable'].includes(m[1])) superTypes.push(m[1]);
     }
+    const implPart = clause.match(/\bimplements\s+([\s\S]*)$/);
+    if (implPart) {
+      for (const item of implPart[1].split(',')) {
+        const clean = item.trim().replace(/<[^>]*>/g, '').split(/\s+/)[0];
+        if (/^[A-Z][A-Za-z0-9_$]*$/.test(clean) && clean !== 'Serializable') implementsTypes.push(clean);
+      }
+    }
+  }
+
+  const genericEntityTypes = extractJavaBaseMapperEntities(stripped);
+  for (const ent of genericEntityTypes) {
+    if (!superTypes.includes(ent)) superTypes.push(ent);
   }
 
   /** @type {string[]} */
   const fieldTypes = [];
-  for (const m of stripped.matchAll(/(?:@(?:Resource|Autowired|Inject)\s+(?:private|protected|public)?\s*(?:final\s+)?|private\s+final\s+)([A-Z][A-Za-z0-9_$]*)(?:<[^>]*>)?\s+[a-zA-Z_$][A-Za-z0-9_$]*\s*[;=]/g)) {
-    fieldTypes.push(m[1]);
+  const annotatedFieldRe =
+    /@(?:Resource|Autowired|Inject|DubboReference)\b(?:\s*\([^)]*\))?\s*(?:private|protected|public)?\s*(?:final\s+)?([A-Z][A-Za-z0-9_$]*)(?:<[^>]*>)?\s+[a-zA-Z_$][A-Za-z0-9_$]*\s*[;=]/g;
+  for (const m of stripped.matchAll(annotatedFieldRe)) {
+    if (!IGNORED_FIELD_TYPES.has(m[1])) fieldTypes.push(m[1]);
   }
+  const memberFieldRe =
+    /^\s*(?:private|protected)\s+(?:final\s+)?([A-Z][A-Za-z0-9_$]*)(?:<[^>]*>)?\s+[a-zA-Z_$][A-Za-z0-9_$]*\s*;/gm;
+  for (const m of stripped.matchAll(memberFieldRe)) {
+    if (!IGNORED_FIELD_TYPES.has(m[1])) fieldTypes.push(m[1]);
+  }
+
+  const isFeignClient = /@FeignClient\b/.test(stripped);
+  const isDubboService = /@DubboService\b/.test(stripped);
+  const isController = !isFeignClient && /@(?:Rest)?Controller\b/.test(stripped);
+  const isService = /@Service\b/.test(stripped) || /Service(?:Impl)?$/.test(className);
+  const isMapper = /@Mapper\b/.test(stripped) || /Mapper$/.test(className) || genericEntityTypes.length > 0;
+  const isEntity = /@(?:TableName|Table|Entity)\b/.test(stripped) || /(?:DO|Entity|PO)$/.test(className);
+  const isApiImpl = (isController || isDubboService) && /ApiImpl$/.test(className);
+  const isUtilityHub =
+    !isController &&
+    !isMapper &&
+    !isEntity &&
+    (UTILITY_HUB_NAME_RE.test(className) || (!isService && imports.length > 60));
 
   return {
     relFile,
@@ -184,11 +198,17 @@ export function extractJavaMetadata(relFile, stripped) {
     fqcn,
     imports,
     superTypes: [...new Set(superTypes)],
+    implementsTypes: [...new Set(implementsTypes)],
+    genericEntityTypes,
     fieldTypes: [...new Set(fieldTypes)],
-    isController: /@(?:Rest)?Controller\b/.test(stripped),
-    isService: /@Service\b/.test(stripped) || /Service(?:Impl)?$/.test(className),
-    isMapper: /@Mapper\b/.test(stripped) || /Mapper$/.test(className),
-    isEntity: /@(?:TableName|Table|Entity)\b/.test(stripped) || /(?:DO|Entity|PO)$/.test(className),
+    isController,
+    isService,
+    isMapper,
+    isEntity,
+    isFeignClient,
+    isDubboService,
+    isApiImpl,
+    isUtilityHub,
   };
 }
 
@@ -198,8 +218,9 @@ export function extractJavaMetadata(relFile, stripped) {
  * @param {string} relFile
  * @param {string} ext
  * @param {string} text
+ * @param {Map<string, string>} [globalConsts]
  */
-export function extractSpringEndpointsAndEntities(relFile, ext, text) {
+export function extractSpringEndpointsAndEntities(relFile, ext, text, globalConsts = new Map()) {
   if (ext !== '.java' && ext !== '.kt') return null;
   const stripped = stripJavaComments(text);
   /** @type {import('./backend-adapters.mjs').BackendEndpoint[]} */
@@ -218,8 +239,16 @@ export function extractSpringEndpointsAndEntities(relFile, ext, text) {
     }
   }
 
-  if (/@FeignClient\b/.test(stripped)) {
+  if (javaMeta.isFeignClient) {
     return { endpoints, entities, javaMeta };
+  }
+
+  const decl = extractJavaStringConstants(relFile, stripped);
+  /** @type {Record<string, string>} */
+  const localConsts = {};
+  for (const [k, rhs] of Object.entries(decl.rawConsts)) {
+    const val = resolveJavaStringExpr(rhs, localConsts, globalConsts, decl.imports, decl.packageName);
+    if (val !== null) localConsts[k] = val;
   }
 
   const classMatch = stripped.match(
@@ -229,10 +258,18 @@ export function extractSpringEndpointsAndEntities(relFile, ext, text) {
   const headerText = splitIdx > 0 ? stripped.slice(0, splitIdx) : '';
   const bodyText = splitIdx > 0 ? stripped.slice(splitIdx) : stripped;
 
-  const classMappings = scanMappingAnnotations(headerText).filter((a) => a.kind === 'Request');
+  const classMappings = scanMappingAnnotations(headerText, localConsts, globalConsts, decl.imports, decl.packageName).filter(
+    (a) => a.kind === 'Request'
+  );
   const classPrefixes = classMappings.length > 0 ? classMappings.flatMap((c) => c.paths) : [''];
 
-  for (const methodAnn of scanMappingAnnotations(bodyText)) {
+  for (const methodAnn of scanMappingAnnotations(bodyText, localConsts, globalConsts, decl.imports, decl.packageName)) {
+    const sigSlice = bodyText.slice(methodAnn.afterIdx, methodAnn.afterIdx + 500);
+    const sigNoAnns = sigSlice.replace(/@[A-Za-z0-9_.$]+(?:\s*\([^)]*\))?\s*/g, ' ');
+    const methodMatch = sigNoAnns.match(
+      /\b(?:public|protected|private)\s+(?:static\s+|final\s+|synchronized\s+)*(?:<[^>{;]+>\s*)?[A-Za-z0-9_$.<>,?\s[\]]+\s+([a-zA-Z_$][A-Za-z0-9_$]*)\s*\(/
+    );
+    const handler = methodMatch ? methodMatch[1] : undefined;
     for (const cPref of classPrefixes) {
       for (const mPath of methodAnn.paths) {
         const cleanPref = cPref.replace(/\/+$/, '');
@@ -245,6 +282,7 @@ export function extractSpringEndpointsAndEntities(relFile, ext, text) {
           path: normalized,
           file: relFile,
           framework: 'spring',
+          ...(handler ? { handler } : {}),
           ...(javaMeta.packageName ? { packageName: javaMeta.packageName } : {}),
         });
       }
@@ -254,132 +292,12 @@ export function extractSpringEndpointsAndEntities(relFile, ext, text) {
   return { endpoints, entities, javaMeta };
 }
 
-const SQL_KEYWORDS = new Set([
-  'select', 'set', 'where', 'values', 'dual', 'lateral', 'unnest', 'json_table', 'information_schema',
-  'as', 'on', 'and', 'or', 'null', 'true', 'false', 'case', 'when', 'then', 'else', 'end', 'if', 'in',
-  'is', 'not', 'like', 'exists', 'between', 'distinct', 'all', 'any', 'some', 'union', 'order', 'group',
-  'having', 'limit', 'offset', 'inner', 'left', 'right', 'outer', 'full', 'cross', 'using', 'by', 'asc',
-  'desc', 'into', 'table', 'index', 'view', 'cursor', 'fetch', 'first', 'next', 'only', 'row', 'rows',
-  'with', 'recursive', 'temp', 'temporary', 'each', 'new', 'old', 'result', 'count', 'sum', 'avg', 'min',
-  'max', 'from', 'join', 'update', 'delete', 'insert', 'replace', 'truncate', 'alter', 'create', 'drop',
-]);
-
 /**
- * Extracts `<mapper namespace="...">` and SQL table references from MyBatis `*Mapper.xml` files.
+ * Extracts `<mapper namespace="...">`, SQL table references, and per-statement line ranges from MyBatis `*Mapper.xml`.
  * @param {string} relFile
  * @param {string} ext
  * @param {string} text
  */
 export function extractMybatisXmlEntities(relFile, ext, text) {
-  if (ext !== '.xml' || !/<mapper\b/i.test(text)) return null;
-  const nsMatch = text.match(/<mapper\b[^>]*\bnamespace\s*=\s*["']([^"']+)["']/i);
-  const namespace = nsMatch ? nsMatch[1].trim() : '';
-  const noComments = text.replace(/<!--[\s\S]*?-->/g, ' ');
-  const sqlOnly = noComments
-    .replace(/#\{[^}]*\}|\$\{[^}]*\}/g, ' ')
-    .replace(/<[^>]+>/g, ' ');
-
-  /** @type {Set<string>} */
-  const tables = new Set();
-  for (const m of sqlOnly.matchAll(/\b(?:FROM|JOIN|INTO|UPDATE)\s+[`"']?([A-Za-z_][A-Za-z0-9_.]{1,63})[`"']?/gi)) {
-    const raw = m[1].includes('.') ? m[1].split('.').pop() || m[1] : m[1];
-    if (raw.length < 2 || SQL_KEYWORDS.has(raw.toLowerCase())) continue;
-    tables.add(raw);
-  }
-
-  return {
-    entities: [...tables].map((table) => ({ table, file: relFile, source: 'mybatis-xml', ...(namespace ? { namespace } : {}) })),
-    mapper: namespace ? { file: relFile, namespace, tables: [...tables] } : null,
-  };
-}
-
-/**
- * Extracts Spring `WebConfiguration` / `WebProperties` / `application*.yml` package-to-prefix rules.
- * @param {string} relFile
- * @param {string} text
- * @returns {Array<{ packagePattern: string, prefixes: string[] }>}
- */
-export function extractSpringPrefixRulesFromFile(relFile, text) {
-  /** @type {Array<{ packagePattern: string, prefixes: string[] }>} */
-  const rules = [];
-  const addRule = (/** @type {string} */ pkgPat, /** @type {string} */ pref) => {
-    const cleanPref = normalizeRoutePath(pref);
-    if (!pkgPat || !cleanPref || cleanPref === '/') return;
-    const prefixes = [cleanPref];
-    if (pkgPat.includes('.platform.') && cleanPref === '/platform-api') {
-      prefixes.push('/admin-api/platform-api');
-    }
-    rules.push({ packagePattern: pkgPat.trim(), prefixes: [...new Set(prefixes)] });
-  };
-
-  if (/\.(java|kt)$/i.test(relFile)) {
-    const stripped = stripJavaComments(text);
-    if (/(?:WebConfiguration|WebMvcConfig|WebProperties|configurePathMatch|PathMatchConfigurer|addPathPrefix)/.test(stripped)) {
-      for (const m of stripped.matchAll(/new\s+Api\s*\(\s*["'](\/[^"']+)["']\s*,\s*["']([^"']+)["']\s*\)/g)) {
-        addRule(m[2], m[1]);
-      }
-      for (const m of stripped.matchAll(/addPathPrefix\s*\(\s*["'](\/[^"']+)["'][\s\S]{0,200}?["']([a-zA-Z0-9_.*]+controller[a-zA-Z0-9_.*]*)["']/g)) {
-        addRule(m[2], m[1]);
-      }
-    }
-  } else if (/(?:application|bootstrap)[^/]*\.(?:ya?ml|properties)$/i.test(relFile)) {
-    const lines = text.split(/\r?\n/);
-    for (let i = 0; i < lines.length; i += 1) {
-      const pm = lines[i].match(/^\s*prefix\s*[:=]\s*['"]?(\/[A-Za-z0-9_/-]+)['"]?/);
-      if (!pm) continue;
-      for (let j = Math.max(0, i - 3); j < Math.min(lines.length, i + 4); j += 1) {
-        const cm = lines[j].match(/^\s*controller\s*[:=]\s*['"]?([*A-Za-z0-9_.]+)['"]?/);
-        if (cm) addRule(cm[1], pm[1]);
-      }
-    }
-    for (const m of text.matchAll(/^\s*([a-z0-9_.-]+)\.prefix\s*=\s*(\/[A-Za-z0-9_/-]+)/gm)) {
-      const ctrlMatch = text.match(new RegExp(`^\\s*${m[1].replace(/\./g, '\\.')}\\.controller\\s*=\\s*(\\S+)`, 'm'));
-      if (ctrlMatch) addRule(ctrlMatch[1], m[2]);
-    }
-  }
-  return rules;
-}
-
-/**
- * Matches a Java package name against an Ant-style package pattern (`**.controller.platform.**`).
- * @param {string} packageName
- * @param {string} pattern
- * @returns {boolean}
- */
-export function matchAntPackagePattern(packageName, pattern) {
-  if (!packageName || !pattern) return false;
-  const escaped = pattern
-    .replace(/\*\*/g, '\u0001')
-    .replace(/\*/g, '\u0002')
-    .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-    .replace(/\\\.\u0001\\\./g, '(?:\\..+)?\\.')
-    .replace(/\u0001\\\./g, '(?:.+\\.)?')
-    .replace(/\\\.\u0001/g, '(?:\\..*)?')
-    .replace(/\u0001/g, '.*')
-    .replace(/\u0002/g, '[^.]+');
-  return new RegExp(`^${escaped}$`).test(packageName);
-}
-
-/**
- * Attaches discovered package-prefix aliases to Spring `backendEndpoints` after full repo indexing.
- * @param {Array<{ method: string, path: string, file: string, framework: string, packageName?: string, packagePrefixes?: string[], aliasedPaths?: string[] }>} endpoints
- * @param {Array<{ packagePattern: string, prefixes: string[] }>} rules
- */
-export function attachSpringPackagePrefixes(endpoints, rules) {
-  if (!Array.isArray(endpoints) || !Array.isArray(rules) || rules.length === 0) return;
-  for (const ep of endpoints) {
-    if (ep.framework !== 'spring' || !ep.packageName) continue;
-    /** @type {Set<string>} */
-    const prefixes = new Set(ep.packagePrefixes || []);
-    for (const r of rules) {
-      if (matchAntPackagePattern(ep.packageName, r.packagePattern)) {
-        for (const p of r.prefixes) prefixes.add(p);
-      }
-    }
-    if (prefixes.size === 0) continue;
-    ep.packagePrefixes = [...prefixes];
-    ep.aliasedPaths = [...prefixes]
-      .filter((p) => !ep.path.startsWith(`${p}/`) && ep.path !== p)
-      .map((p) => normalizeRoutePath(`${p}${ep.path}`));
-  }
+  return extractMybatisXmlDetails(relFile, ext, text);
 }

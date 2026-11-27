@@ -119,7 +119,7 @@ setup('establish QA session storageState', async ({ request, page, baseURL }) =>
       const bodyCode = body && typeof body === 'object' ? body.code : undefined;
       if (status === 401 || status === 403 || bodyCode === 401 || bodyCode === 403) {
         throw new Error(
-          `[Session Expired] Saved QA storageState failed session ping GET ${pingUrl.pathname} (http=${status}, code=${String(bodyCode ?? 'n/a')}). Re-run "npx ai-test-workbench@6.5.0 auth-login --target <repo>" to refresh playwright/.auth/user.json.`
+          `[Session Expired] Saved QA storageState failed session ping GET ${pingUrl.pathname} (http=${status}, code=${String(bodyCode ?? 'n/a')}). Re-run "npx ai-test-workbench@6.6.0 auth-login --target <repo>" to refresh playwright/.auth/user.json.`
         );
       }
     }

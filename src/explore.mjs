@@ -164,7 +164,7 @@ export async function runExploreCommand(options = {}) {
     fs.writeFileSync(path.join(pagesSpecDir, `${routeToSafeSlug(p.route)}.md`), generatePageAriaSpecMarkdown(p, lang), 'utf8');
   }
 
-  const codeMapSync = syncLivingCodeMap(qaDir, { lang, syncImpact: !options.noSyncImpact });
+  const codeMapSync = await syncLivingCodeMap(qaDir, { lang, syncImpact: !options.noSyncImpact });
   const summary = {
     ...buildExploreCliSummary(persistedTopology, { entryPath, topologyPath, overviewPath, pagesSpecDir, codeMapSync }),
     apiSchemasPath: schemaOut.outPath,

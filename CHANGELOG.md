@@ -4,6 +4,38 @@
 
 本日志遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 与 [语义化版本 (SemVer)](https://semver.org/spec/v2.0.0.html) 规范。
 
+## [6.6.0] - 2026-11-27
+
+### CodeMap v5 三层融合架构、解耦锁版本外部代码图谱侧车与持续升版闭环 ([ADR-0007](./docs/adr/0007-external-code-graph-engine.md))
+- **解耦锁版本侧车图谱引擎与 Graph Provider SPI（`src/codemap/providers/{registry,engine-manifest,engine-installer,cbm-client,cbm-normalizer,cbm-adapter}.mjs`、`conformance/graph-engine/`）**：
+  - 严格保持根包 **0 运行时第三方依赖**，通过可插拔 Graph Provider SPI 对接官方 **`DeusData/codebase-memory-mcp@0.12.1`**（MIT，纯只读 `stdio` JSON-RPC 侧车，强制 `--ui=false`）；缺失或超时自动优雅降级为 L0 `builtin` 模式，`doctor` 并发探活仅报 `OK`/`WARN` 从不阻断工作流；
+  - `engine-manifest.mjs` 内置 6 平台（Windows x64/arm64、macOS arm64/x64、Linux x64/arm64）官方 `v0.12.1` SHA-256 摘要，实施跨平台短路径分群隔离（绝不落入 `<qaDir>/.aitest/`；Windows `<185` 字符 + 祖先 NTFS ACL 探测与 `%SystemDrive%\aitw-{rt,cbm}` owner-only `icacls` 回退；macOS `<=60B` `AF_UNIX` 预算；Linux 禁 WSL2 DrvFs `/mnt/*`）；
+  - `engine-installer.mjs` 提供人类终端专属 `mcp install-engine --engine codebase-memory-mcp`（强校 SHA-256、阻断 Zip-Slip、支持 `--from-file`/`--mirror-url`/`--expected-sha256` 离线安装与 `N-1` 版本保留回滚）与 `upgrade --scope engines`（仅对标版本与给出指引，绝不自动下载或自动重签 `governance.lock`）；
+  - `cbm-client.mjs` 与 `cbm-normalizer.mjs` 实施严格环境变量白名单清洗、UTF-8 中文路径安全、`8 MB` 输出上限、跨平台进程树强杀（`killProcessTree`）、跨服务 Feign/RPC 停止边界、`BaseMapperX`/`Object.*`/POJO 噪声剔除与 `sanitizeUntrustedCodeMetadata` 防代码元数据提示词投毒；
+  - 新增 `conformance/graph-engine/` 含中文路径多仓 Fixture 的官方 Live **`8/8`** 一致性回归套件与 `.github/workflows/ci.yml` 定时/`workflow_dispatch` Live 门禁作业。
+- **L0 零依赖企业级全栈提取器升级（`src/codemap/{spring-prefix-resolver,rpc-mybatis-extractor,vue-template-factory,spring-extractor,vue-api-extractor,vue-extractor,route-api-linker,correlator,adapters}.mjs`）**：
+  - 新增 `spring-prefix-resolver.mjs` 精确解析 Java `static final String` 常量、Ant/正则路径与最具体包前缀，在 1.01M-LOC 基准上将跨门户 `@RequestMapping` 碰撞率从 `46/46 (100%)` 降至 **`0 / 3,512 (0%)`**；
+  - 新增 `rpc-mybatis-extractor.mjs` 提取 OpenFeign/Dubbo 跨服务桥接（跳过 `@ApiOperation` 等注解）、RocketMQ 生产者、XXL-Job 处理器、MyBatis XML 语句与 `BaseMapper<DO>` 直接库表链，精准收敛控制器关联库表（`262 → 10` Builtin / `11` CBM，下降 **96.2% / 95.8%**）；
+  - 新增 `vue-template-factory.mjs` 解析链式 Axios、`crudFactory` 生成端点、Vue 模板自定义组件与全局组件注册（如 `<right-toolbar>`）以及动态下发菜单路由（`Layout` 壳页解析与增量运行路由持久化，1.01M-LOC 运行时 80 路由视图命中 **`79/80 (98.75%)`** 且 `FP1 === FP2`）。
+- **CodeMap v5 融合引擎、缓存秒级查询与全链路诊断增强（`src/codemap/{sync,v5-fusion,merger,reporter}.mjs`、`src/codemap.mjs`、`src/diagnose.mjs`、`src/diagnose/observability.mjs`）**：
+  - 将 `SCHEMA_VERSIONS.codeMap` 升级至 **`5`**，支持 `v4 → v5` 自动无缝迁移（保留运行态动态路由与缺陷）；CLI `map` 与 MCP `aitest_map_sync` 新增 `--engine auto|builtin|codebase-memory-mcp` 与 `--query <symbol>` 缓存组合快速查询（零原始源码正文泄漏）；
+  - `diagnose` 将 CodeMap v5 `serviceChains` 与优先级排序后的租户/鉴权过滤器线索 `tenantAuthHints` 渲染进 `ai-diagnostics.md` 与缺陷工单。
+
+### Additive-Only Fail-Closed Diff-Impact v3 与 `<20ms` `pipe-sharded-v1` 投影索引
+- **Global Infra Guard（`src/impact/global-infra-guard.mjs`）**：变更命中 Spring `META-INF/spring.factories`、`AutoConfiguration.imports`、`WebFilter`/`GlobalFilter`/`OncePerRequestFilter`/`HandlerInterceptor`/`ControllerAdvice`/`WebConfigurer`/`WebProperties`/`RequestInterceptor`/MyBatis `@Intercepts`，或 Vue 全局请求/权限守卫与未映射全局组件时，无条件 Fail-Closed 回退 `mode: "full"`。
+- **`pipe-sharded-v1` 16 分片延迟水合索引与符号级选测（`src/impact/{graph-index,graph-index-codec,java-support}.mjs`、`src/impact.mjs`、`src/verdict.mjs`）**：
+  - 将预投影索引编码为零 JSON 转义、字符串驻留（`_ft`）的 16 分片 `pipe-sharded-v1` 格式（剔除 POJO/VO/DTO/DO/Enum/Test 与内置伪节点），只读 `Proxy` 按需延迟水合；在 1.01M-LOC 企业基准上 CBM 索引从 `6.46 MB / 26.71 ms` 压缩至 **`4.11 MB / 8.76 ms` 中位加载耗时**（Builtin **`1.29 MB / 2.17 ms`**），远低于 `< 20 ms` 预算；
+  - 新增最内层可调用符号 hunk 匹配、`OVERRIDE` 继承向上遍历、Feign 调用者桥接与 `> 65` 调用者 **`*HIGH_FAN_IN*`** Fail-Closed 哨兵（如 `CommonResult#success` 3,595 调用者自动回退全量）；
+  - 在 1.01M-LOC 企业级 Vue 2 + Spring Cloud 多租户 SaaS 基准（12,889 文件、12 微服务、692 控制器、360 MyBatis XML、129 Feign）实测：深层 Service 方法变更收敛 **`-99.78%`**（`1,366 → 3` Java 文件 → `5` Vue 视图 → `5` Spec），跨服务 Feign API 收敛 **`-98.98%`**（`1,667 → 17` 文件，零 `Object.getClass` 噪声），MyBatis XML Statement 收敛 **`-98.78%`**（`410 → 5` 文件）；
+  - `verify-change` 自动在 `in-toto Statement v1` 证明书中绑定 **`scope.graphEngine`**（`{ provider, version, binarySha256, mode, usedForNarrowing }`）。
+
+### 治理锁封签加固、8 大支柱 MCP Hub、新只读资源与安全修复
+- **治理锁补齐 `.aitest/mcp.lock` 与 `.aitest/engine-manifest.json`（`src/core/config-schema.mjs`、`src/kernel/gate/policy.mjs`）**：显式将二者纳入 `PROTECTED_AITEST_LOCK_FILES` 与 `.aitest/governance.lock` 封签保护，并扩展 `aitest.config.json` Schema 强校 `codeMap.engine` 与 `codeMap.externalEngine`。
+- **8 大支柱 MCP Hub 与原生侧车审计（`src/mcp-hub/{catalog,auditor}.mjs`、`src/mcp-hub.mjs`、`src/mcp/resources.mjs`、`src/mcp/tools/{discovery,fast-paths}.mjs`）**：
+  - 新增第 8 支柱 **`code-intelligence`**（内置 `codebase-memory-mcp@0.12.1` 预设并加入 `enterprise-selfhosted` / `full-link` Profile）；`mcp doctor` 强检 `--ui=false`、禁止自更新子命令、精确版本号与本地二进制 SHA-256（含 `strictChecksum`）；
+  - 严守 **17 个权威 MCP 工具**不变，新增只读 `aitest_mcp_hub(action="engine-status")` 进程内快速通道与只读资源 `aitest://project/{target}/graph-summary`（及 `aitest://current/graph-summary`）；
+  - 收紧 `src/core/redact.mjs` 中 `pin` 脱敏边界正则，完整保留 `pinnedVersion` 元数据同时继续 100% 脱敏 `pin`/`pincode`/`pin_code`/`user_pin` 凭据。
+
 ## [6.5.0] - 2026-11-26
 
 ### 防假绿门禁闭环、自愈状态隔离与鉴权差分先知止血 (`WB-P0-01..03` · `WB-P1-01..02`)

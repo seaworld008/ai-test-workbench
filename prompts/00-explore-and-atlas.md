@@ -5,7 +5,7 @@
 当你接手一个陌生或 AI 高速迭代生成的 Web/SaaS 系统时，在编写深度 E2E 用例前先执行以下 0→1 探索步骤：
 
 ## 执行步骤
-1. 检查登录态或引导用户运行 `npx ai-test-workbench@6.5.0 auth-login` / 调用 `aitest_explore`（CLI：`npx ai-test-workbench@6.5.0 explore --target <repo> --base-url <TEST_BASE_URL>`）。
+1. 检查登录态或引导用户运行 `npx ai-test-workbench@6.6.0 auth-login` / 调用 `aitest_explore`（CLI：`npx ai-test-workbench@6.6.0 explore --target <repo> --base-url <TEST_BASE_URL>`）。
 2. 检查系统是否存在 **多端视角 / 租户或组织切换器**（如顶栏/抽屉/Vuex/Redux 中的平台端与租户工作台切换器）。务必分别探索默认入口与至少一个核心业务子工作台！
 3. 在严格只读护栏下（`TEST_ALLOW_MUTATION=0` —— 严禁新增/编辑/删除/支付/发短信/状态切换写入），完整记录所有发现路由：
    - 路由路径与面包屑

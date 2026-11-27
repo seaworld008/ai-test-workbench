@@ -1,12 +1,12 @@
-# Native Multi-Protocol MCP Server Reference (`mcp-serve` v6.4.0)
+# Native Multi-Protocol MCP Server Reference (`mcp-serve` v6.6.0)
 
-> [简体中文 (默认)](./mcp-server-protocol.md) · [SKILL.md](../SKILL.md) · [ADR-0001](../../../docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md) · [ADR-0005](../../../docs/adr/0005-mcp-surface-outcome-and-config.en.md)
+> [简体中文 (默认)](./mcp-server-protocol.md) · [SKILL.md](../SKILL.md) · [ADR-0001](../../../docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md) · [ADR-0005](../../../docs/adr/0005-mcp-surface-outcome-and-config.en.md) · [ADR-0007](../../../docs/adr/0007-external-code-graph-engine.en.md)
 
 ## 1. Protocols, Transports & Child-Process Job Execution
 
 - **Protocol Versions**: `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05` (zero runtime npm dependencies).
 - **Transports**:
-  1. `stdio`: `node tools/aitest.mjs mcp-serve` (or pinned `npx --package=ai-test-workbench@6.5.0 ai-test-workbench mcp-serve`; NDJSON JSON-RPC with isolated child-process execution `AITEST_MCP_CHILD=1` and zero `globalThis.console` mutation).
+  1. `stdio`: `node tools/aitest.mjs mcp-serve` (or pinned `npx --package=ai-test-workbench@6.6.0 ai-test-workbench mcp-serve`; NDJSON JSON-RPC with isolated child-process execution `AITEST_MCP_CHILD=1` and zero `globalThis.console` mutation).
   2. `Streamable HTTP` (`POST/GET/DELETE /mcp`): `initialize`-only session creation, `404 Not Found` on unknown/expired `Mcp-Session-Id`, idle TTL + `maxSessions` eviction, and batch rejection on `>= 2025-06-18`.
   3. `Legacy HTTP+SSE` (`GET /sse` + `POST /messages`): `2024-11-05` compatible.
 - **Progress, Cancellation & Async Backgrounding (`src/jobs.mjs`)**:
@@ -24,8 +24,8 @@
 | `aitest_init` | Discovery & Setup | No | Initialize Isolated QA Workspace & Governance Lock |
 | `aitest_bootstrap` | Discovery & Setup | No | Zero-to-One Autonomous Loopback Bootstrapper |
 | `aitest_explore` | Discovery & Setup | No | Zero-to-One Default-Deny Read-Only Explorer |
-| `aitest_map_sync` | Discovery & Setup | No | Sync Convergent Living Code Map v4 |
-| `aitest_mcp_hub` | Discovery & Setup | No | Manage Pinned 7-Pillar MCP Presets & Supply-Chain Doctor |
+| `aitest_map_sync` | Discovery & Setup | No | Sync Convergent Living Code Map v5 |
+| `aitest_mcp_hub` | Discovery & Setup | No | Manage Pinned 8-Pillar MCP Presets & Supply-Chain Doctor |
 | `aitest_skill_install` | Discovery & Setup | No | Install Portable Agent Skill into Project |
 | `aitest_verify_change` | Verification & Gates | No | One-Call Agent Change Verification & Attested Verdict |
 | `aitest_impact` | Verification & Gates | Yes | Compute Dependency-Graph Diff-Impact Scope (v2) |
@@ -43,6 +43,6 @@
 
 ## 3. Resources & Prompts
 
-- **Static Resources**: `aitest://docs/quickstart`, `aitest://skill/ai-test-workbench`, `aitest://mcp/presets`.
-- **Resource Templates**: `aitest://project/{target}/{system-map|code-map|system-overview|diagnostics|perf-summary}`.
+- **Static Resources**: `aitest://docs/quickstart`, `aitest://skill/ai-test-workbench`, `aitest://mcp/presets` (8-pillar catalog).
+- **Resource Templates**: `aitest://project/{target}/{system-map|code-map|graph-summary|system-overview|diagnostics|perf-summary|verdict-summary|parity-summary|parity-report}` (plus `aitest://current/*` aliases when bound to a default target).
 - **Bilingual Prompts**: `first-time-onboarding`, `explore-unknown-system`, `generate-and-verify-specs`, `strict-healer-triage`, `full-link-rca-and-perf`.

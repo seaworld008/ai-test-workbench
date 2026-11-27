@@ -1,6 +1,6 @@
-# Version & Compatibility Matrix (v6.5.0)
+# Version & Compatibility Matrix (v6.6.0)
 
-> [简体中文 (默认)](./VERSION.md) · [English README](./README.en.md) · **Workbench & Gate Kernel Version**: `6.5.0` (single source: `src/core/version.mjs`) · **Verified Date**: `2026-11-26`
+> [简体中文 (默认)](./VERSION.md) · [English README](./README.en.md) · **Workbench & Gate Kernel Version**: `6.6.0` (single source: `src/core/version.mjs`) · **Verified Date**: `2026-11-27`
 
 ## 1. Runtime & Engine Requirements
 
@@ -10,6 +10,7 @@
 | **npm** | `>= 10.0.0` | `>= 11.0.0` | `11.20.0` |
 | **Git** | `>= 2.35` | `>= 2.45` | `2.51.1.windows.1` |
 | **MCP Protocol** | `2024-11-05` | `2025-11-25` (Streamable HTTP / stdio / Legacy SSE) | `2024-11-05`..`2025-11-25` verified |
+| **Graph Sidecar (`codebase-memory-mcp`)** *(optional)* | `0.12.1` (exact pin + SHA-256) | `0.12.1` (`--ui=false` + short-path isolation) | `0.12.1` (live `8/8` verified) |
 | **Codex CLI** *(optional)* | `>= 0.150.0` | Latest | `0.171.0` |
 | **Claude Code** *(optional)* | `>= 2.0.0` | Latest | `2.1.322` |
 
@@ -17,14 +18,16 @@
 
 | Artifact | Schema Version | Module |
 |---|---|---|
-| **Gate Kernel** | `6.5.0` | Authoritative `src/kernel/gate-kernel.mjs` (18 pluggable rules `AITEST-G101..G118` + governance-locked declarative `qa/support/project-rules.json`, AST Gate v2.2, one-way vendor mirror `templates/playwright-qa/support/gate-kernel.mjs`, drift-checked by `doctor` & `check:vendor`) |
+| **Gate Kernel** | `6.6.0` | Authoritative `src/kernel/gate-kernel.mjs` (18 pluggable rules `AITEST-G101..G118` + governance-locked declarative `qa/support/project-rules.json`, sealing `.aitest/mcp.lock` and `.aitest/engine-manifest.json`, one-way vendor mirror `templates/playwright-qa/support/gate-kernel.mjs`, drift-checked by `doctor` & `check:vendor`) |
+| **Living Code Map** | `v5` (`schemaVersion: 5`) | `src/codemap/sync.mjs`, `src/codemap/v5-fusion.mjs`, `src/codemap/providers/` (L0 zero-dep full-stack extractors + L1 pinned `codebase-memory-mcp@0.12.1` sidecar + L2 anti-corruption fusion; automatic v4 -> v5 migration) |
+| **Graph Impact Index** | `v1` (`pipe-sharded-v1`) | `src/impact/graph-index.mjs`, `src/impact/graph-index-codec.mjs`, `src/impact/global-infra-guard.mjs` (`knowledge/graph-impact-index.json` 16-shard `<20ms` lazy hydration + `>65` high-fan-in fail-closed sentinel + Global Infra Guard) |
+| **8-Pillar MCP Hub** | `v1` (`.aitest/mcp.lock`) | `src/mcp-hub/catalog.mjs`, `src/mcp-hub/auditor.mjs` (8 pillars adding `code-intelligence`; `mcp doctor` verifies native sidecar `--ui=false` & binary SHA-256) |
 | **Differential Parity Oracle** | `v1` | `src/kernel/diff-oracle.mjs` / `src/parity/` (5-checkpoint `CP1..CP5`, `shape-only` zero-plaintext fingerprints `fp_<12hex>`, and zero-dep SSE reassembly `src/core/stream-sse.mjs`) |
 | **Memory Loop & Seam Card** | `v1` | `src/memory/` / `src/learn.mjs` / `src/verdict/seam-card.mjs` (sealed `qa/known-blockers.json`, staging-only `learn-proposals.{json,md}`, and Human Seam Gatekeeper Card) |
-| **CommandResult & Verdict** | `v2` | `src/core/outcome.mjs` / `src/verdict.mjs` (Unified `CommandResult<T>` envelope & `AITEST_RESULT_FILE` framed IPC) |
+| **CommandResult & Verdict** | `v2` | `src/core/outcome.mjs` / `src/verdict.mjs` (Unified `CommandResult<T>` envelope, `AITEST_RESULT_FILE` framed IPC, and `scope.graphEngine` attestation binding) |
 | **Governance Lock** | `v1` | `src/governance.mjs` (`.aitest/governance.lock`) |
 | **Template Manifest** | `v1` | `src/upgrade.mjs` / `src/init.mjs` (`.aitest/template-manifest.json`) |
 | **Run Ledger & Attestation** | `v1` | `src/ledger.mjs` / `src/verdict.mjs` (`.aitest/runs/<runId>/manifest.json` & `attestation.json`) |
-| **Living Code Map** | `v4` | `src/codemap.mjs` (`knowledge/code-map.json`) |
 | **Heal Session & Quarantine** | `v1` | `src/heal.mjs` / `src/flaky.mjs` |
 
 ## 3. Root Dev Dependencies & Locked Template QA Dependencies

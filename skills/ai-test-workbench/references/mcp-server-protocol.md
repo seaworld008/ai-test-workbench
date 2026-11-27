@@ -1,12 +1,12 @@
-# 原生全协议 MCP 服务端协议参考 (`mcp-serve` v6.4.0)
+# 原生全协议 MCP 服务端协议参考 (`mcp-serve` v6.6.0)
 
-> [English Version](./mcp-server-protocol.en.md) · [SKILL.md](../SKILL.md) · [ADR-0001](../../../docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) · [ADR-0005](../../../docs/adr/0005-mcp-surface-outcome-and-config.md)
+> [English Version](./mcp-server-protocol.en.md) · [SKILL.md](../SKILL.md) · [ADR-0001](../../../docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) · [ADR-0005](../../../docs/adr/0005-mcp-surface-outcome-and-config.md) · [ADR-0007](../../../docs/adr/0007-external-code-graph-engine.md)
 
 ## 1. 支持的协议、传输与并发作业模型
 
 - **支持协议版本**：`2025-11-25`（最新）、`2025-06-18`、`2025-03-26`、`2024-11-05`（根包零运行时依赖）。
 - **三大传输方式**：
-  1. `stdio`：`node tools/aitest.mjs mcp-serve`（或锁版本 `npx --package=ai-test-workbench@6.5.0 ai-test-workbench mcp-serve`；逐行 NDJSON JSON-RPC，长任务运行于独立子进程 `AITEST_MCP_CHILD=1`，零 `globalThis.console` 劫持）。
+  1. `stdio`：`node tools/aitest.mjs mcp-serve`（或锁版本 `npx --package=ai-test-workbench@6.6.0 ai-test-workbench mcp-serve`；逐行 NDJSON JSON-RPC，长任务运行于独立子进程 `AITEST_MCP_CHILD=1`，零 `globalThis.console` 劫持）。
   2. `Streamable HTTP`：`POST / GET / DELETE /mcp`（仅 `initialize` 分配 `Mcp-Session-Id`；未知或过期会话返回 `404 Not Found`；支持空闲 TTL 与 `maxSessions` 淘汰；`2025-06-18+` 拒绝 JSON-RPC Batch）。
   3. `Legacy HTTP+SSE`：`GET /sse` + `POST /messages`（兼容 `2024-11-05`）。
 - **进度流、取消与异步作业（`src/jobs.mjs`）**：
@@ -24,8 +24,8 @@
 | `aitest_init` | 发现与初始化 | 否 | Initialize Isolated QA Workspace & Governance Lock |
 | `aitest_bootstrap` | 发现与初始化 | 否 | Zero-to-One Autonomous Loopback Bootstrapper |
 | `aitest_explore` | 发现与初始化 | 否 | Zero-to-One Default-Deny Read-Only Explorer |
-| `aitest_map_sync` | 发现与初始化 | 否 | Sync Convergent Living Code Map v4 |
-| `aitest_mcp_hub` | 发现与初始化 | 否 | Manage Pinned 7-Pillar MCP Presets & Supply-Chain Doctor |
+| `aitest_map_sync` | 发现与初始化 | 否 | Sync Convergent Living Code Map v5 |
+| `aitest_mcp_hub` | 发现与初始化 | 否 | Manage Pinned 8-Pillar MCP Presets & Supply-Chain Doctor |
 | `aitest_skill_install` | 发现与初始化 | 否 | Install Portable Agent Skill into Project |
 | `aitest_verify_change` | 执行与门禁验证 | 否 | One-Call Agent Change Verification & Attested Verdict |
 | `aitest_impact` | 执行与门禁验证 | 是 | Compute Dependency-Graph Diff-Impact Scope (v2) |
@@ -43,6 +43,6 @@
 
 ## 3. Resources 与 Prompts
 
-- **静态 Resources**：`aitest://docs/quickstart`、`aitest://skill/ai-test-workbench`、`aitest://mcp/presets`
-- **动态 Resource Templates**：`aitest://project/{target}/{system-map|code-map|system-overview|diagnostics|perf-summary}`
+- **静态 Resources**：`aitest://docs/quickstart`、`aitest://skill/ai-test-workbench`、`aitest://mcp/presets`（8 大支柱目录）
+- **动态 Resource Templates**：`aitest://project/{target}/{system-map|code-map|graph-summary|system-overview|diagnostics|perf-summary|verdict-summary|parity-summary|parity-report}`（绑定目标时同步提供 `aitest://current/*` 别名）
 - **Prompts (`prompts/get`)**：`first-time-onboarding`、`explore-unknown-system`、`generate-and-verify-specs`、`strict-healer-triage`、`full-link-rca-and-perf`（默认中文，支持 `lang: "en"`）。

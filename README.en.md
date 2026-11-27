@@ -1,12 +1,12 @@
 <div align="center">
 
-# AI Test Workbench (`v6.5.0`)
+# AI Test Workbench (`v6.6.0`)
 
 **Trustworthy Verification Kernel & Native Multi-Protocol MCP Server for AI Coding Agents**
 
-Provides a **4-Layer Fail-Closed AST Anti-Fake-Green Gate (`S0–S5` + `AITEST-G101..G118` + SymbolTable + Dieselgate & Cross-Directory Lockstep Guard)** · **One-Call Change Verdict (`verify-change` · in-toto v1 + `T0/T1/T2` + Human Seam Gatekeeper Card)** · **5-Checkpoint Differential Parity Oracle (`aitest_parity` + Zero-Plaintext Shape Fingerprints + Sealed Upstream Cassettes)** · **Toolified Memory Loop (`aitw learn` Distiller & Repo Sweeper + Sealed `known-blockers.json`)** · **Zero-Dep Native MCP Server (`stdio` / `/mcp` / `/sse` · 17 Canonical Tools · Framed Subprocess IPC)** · **Loopback Bootstrap (`aitest_bootstrap`) & SSE `TTFT` / Web Vitals**
+Provides **CodeMap v5 Three-Tier Graph Fusion + Decoupled Pinned Sidecar (`codebase-memory-mcp@0.12.1`) + Additive-Only Fail-Closed Diff-Impact v3 (`pipe-sharded-v1` `<20ms`)** · **8-Pillar Pinned MCP Hub (adding `code-intelligence` & Governance-Sealed `.aitest/mcp.lock` / `engine-manifest.json`)** · **4-Layer Fail-Closed AST Anti-Fake-Green Gate (`S0–S5` + `AITEST-G101..G118` + SymbolTable + Dieselgate & Cross-Directory Lockstep Guard)** · **One-Call Change Verdict (`verify-change` · in-toto v1 + `scope.graphEngine` + `T0/T1/T2` + Human Seam Gatekeeper Card)** · **5-Checkpoint Differential Parity Oracle (`aitest_parity` + Zero-Plaintext Shape Fingerprints)** · **Zero-Dep Native MCP Server (`stdio` / `/mcp` / `/sse` · 17 Canonical Tools · Framed Subprocess IPC)**
 
-[简体中文文档 (默认)](./README.md) · [v5→v6 Upgrade Guide](./docs/upgrade.en.md) · [Governance & 4-Layer Gate](./docs/governance.en.md) · [AI Agent Quickstart](./docs/ai-agent-quickstart.en.md) · [AGENTS.en.md](./AGENTS.en.md) · [Architecture](./ARCHITECTURE.en.md) · [v6 Refactor Assessment](./docs/review/v6-refactor-assessment.en.md) · [Changelog](./CHANGELOG.en.md)
+[简体中文文档 (默认)](./README.md) · [v5→v6.6 Upgrade Guide](./docs/upgrade.en.md) · [Governance & 4-Layer Gate](./docs/governance.en.md) · [ADR-0007 Graph Sidecar](./docs/adr/0007-external-code-graph-engine.en.md) · [AI Agent Quickstart](./docs/ai-agent-quickstart.en.md) · [AGENTS.en.md](./AGENTS.en.md) · [Architecture](./ARCHITECTURE.en.md) · [Changelog](./CHANGELOG.en.md)
 
 [![CI](https://img.shields.io/github/actions/workflow/status/seaworld008/ai-test-workbench/ci.yml?branch=main&style=flat-square&logo=github&label=CI)](https://github.com/seaworld008/ai-test-workbench/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/seaworld008/ai-test-workbench?style=flat-square&color=0ea5e9&label=Release)](https://github.com/seaworld008/ai-test-workbench/releases)
@@ -22,21 +22,22 @@ Provides a **4-Layer Fail-Closed AST Anti-Fake-Green Gate (`S0–S5` + `AITEST-G
 
 ## 1. Scope & Verified Benchmarks
 
-When AI coding agents (Claude Code, Codex CLI, Cursor, VS Code Copilot, Gemini CLI) generate or edit Playwright tests at high velocity, the primary risk is **fake-green passes**: tests turn green not because the application is correct, but because assertions were weakened (`toHaveText('49/50')` → `toBeVisible()` or `expect(true).toBe(true)`), errors were swallowed (`.catch(() => null)` / `expect.soft()` / `test.fail()`), governance configs were altered (`testIgnore` / disabled ESLint rules), or stale `results.json` artifacts were replayed.
+When AI coding agents (Claude Code, Codex CLI, Cursor, VS Code Copilot, Gemini CLI) generate or edit Playwright tests at high velocity, the primary risk is **fake-green passes**: tests turn green not because the application is correct, but because assertions were weakened (`toHaveText('49/50')` → `toBeVisible()` or `expect(true).toBe(true)`), errors were swallowed (`.catch(() => null)` / `expect.soft()` / `test.fail()`), governance configs were altered (`testIgnore` / disabled ESLint rules), or stale `results.json` artifacts were replayed. At million-LOC multi-repo microservice scale, file-level diff-impact also suffers from fan-in fallback cliffs and unguarded global infrastructure edits.
 
-`ai-test-workbench` moves those invariants out of prompts into a **tool-enforced independent verification kernel**:
+`ai-test-workbench v6.6.0` moves anti-fake-green invariants, full-stack code-graph intelligence (CodeMap v5 + decoupled `codebase-memory-mcp@0.12.1` sidecar), and fail-closed symbol-level test selection (Diff-Impact v3) into a **zero-runtime-dependency, tool-enforced verification kernel**:
 
 | Metric | Verified Measurement (Corpus-Qualified & Reproducible) | Enforcing Mechanism |
 |---|---|---|
 | **Fake-Green Escape Rate (`FGER-internal` / `FGER-holdout`)** | Internal corpus **`0.0%` (`26/26`)** · Red-Team holdout **`0.0%` (`24/24`)** (`npm run bench`) | 4-Layer fail-closed AST Gate (`AITEST-G101..G118`) + Sticky T1 MAC Governance Lock |
 | **Benign Refactoring FPR (Internal Corpus)** | **`0.0%` (`12/12`)** (Prettier wraps, locator renames, ARIA consolidation; `npm run bench`) | Full-file TypeScript Compiler API semantic AST comparison |
 | **Gate FPR (Real-World Unseen Holdout, `v6.0` Frozen Blind Eval, `n=50`, `seed=20261125`)** | **`6.1%` (`3/49` normal commits, Wilson 95% CI `[2.1%, 16.5%]`)**; raw alert rate `8.0%` (`4/50`, `1/1` TP retained); down 50% from v5.1.1's `12.2%` (`6/49`, CI `[5.7%, 24.2%]`) | Frozen first-run blind evaluation across 5 permissive OSS repos (preserved unmodified); see [v6 Holdout Summary](./bench/real-world/results/SUMMARY-v6-holdout.en.md) |
-| **Gate FPR (100-Commit Real-World Regression Corpus, `v6.4.0` Post-Hoc Re-Evaluation, `n=100`)** | Pilot **`4.2%` (`2/48`, CI `[1.2%, 14.0%]`)** · Holdout corpus post-hoc **`4.1%` (`2/49`, CI `[1.1%, 13.7%]`)** · Combined **`4.1%` (`4/97`, Wilson 95% CI `[1.6%, 10.1%]`, `3/3` TP retained)** (down from `5.2% (5/97)` in `v6.0..v6.2.1`; `AITEST-G118` is zero-overhead when unconfigured); **`>=200` formal eval: `pending` (no extrapolation)** | AST Gate v2.2: cross-file title pooling + lexical scope stack + pre-existing `if`-block conservation (`G110`) + governance-locked `customMatchers` / structured domain matchers + fault-injection awareness ([ADR-0004](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.en.md)) |
-| **Agentic Red-Team Escape Rate (`FGER-agentic`)** | Scripted multi-step baseline (`n=22`, incl. Class E Dieselgate & Class F Parity/Copy/Cassette/Lockstep, `npm run bench:agentic`): **Local T1 `13.6%` (`3/22`, CI `[4.7%, 33.3%]` — only documented boundary probes `AG-B4`/`AG-C4`/`AG-F1`)** · **CI T2 Merge-Grade `0.0%` (`0/22`, CI `[0.0%, 14.9%]`)** · `honest-fix` control `4/4` T2 pass; **live LLM runs (`claude`/`codex`/`gemini`): `pending` (adapters ready, no extrapolation)** | Isolated sandbox + hidden business oracles + live Baseline `Parity-Oracle` + Ephemeral Fulcio T2 CA; see [Red-Team Design](./bench/agentic/DESIGN.en.md) & [Baseline Summary](./bench/agentic/results/SUMMARY.en.md) |
+| **Gate FPR (100-Commit Real-World Regression Corpus, `v6.4.0+` Post-Hoc Re-Evaluation, `n=100`)** | Pilot **`4.2%` (`2/48`, CI `[1.2%, 14.0%]`)** · Holdout corpus post-hoc **`4.1%` (`2/49`, CI `[1.1%, 13.7%]`)** · Combined **`4.1%` (`4/97`, Wilson 95% CI `[1.6%, 10.1%]`, `3/3` TP retained)**; **`>=200` formal eval: `pending` (no extrapolation)** | AST Gate v2.2: cross-file title pooling + lexical scope stack + pre-existing `if`-block conservation (`G110`) + governance-locked `customMatchers` / structured domain matchers ([ADR-0004](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.en.md)) |
+| **Agentic Red-Team Escape Rate (`FGER-agentic`)** | Scripted multi-step baseline (`n=22`, incl. Class E Dieselgate & Class F Parity/Copy/Cassette/Lockstep, `npm run bench:agentic`): **Local T1 `13.6%` (`3/22`, CI `[4.7%, 33.3%]` — only documented boundary probes `AG-B4`/`AG-C4`/`AG-F1`)** · **CI T2 Merge-Grade `0.0%` (`0/22`, CI `[0.0%, 14.9%]`)** · `honest-fix` control `4/4` T2 pass; **live LLM runs: `pending` (no extrapolation)** | Isolated sandbox + hidden business oracles + live Baseline `Parity-Oracle` + Ephemeral Fulcio T2 CA; see [Red-Team Design](./bench/agentic/DESIGN.en.md) & [Baseline Summary](./bench/agentic/results/SUMMARY.en.md) |
+| **Enterprise 1.01M-LOC Multi-Repo Benchmark (`v6.6.0` CodeMap v5 + Diff-Impact v3)** | Enterprise 1.01M-LOC Vue 2 + Spring Cloud multi-tenant SaaS benchmark (12,889 files, 12 microservices, 692 controllers, 360 MyBatis XMLs, 129 Feign clients; zero edits to target repos): cross-portal route collisions **`0 / 3,512 (0%)`** (down from `46/46`), controller DB tables **`262 → 10/11` (-96.2% / -95.8%)**, `pipe-sharded-v1` load **`8.76 ms` med / `4.11 MB`** (Builtin **`2.17 ms` / `1.29 MB`**), deep Service/Feign/MyBatis XML narrowing **`-98.78% to -99.78%`**, dynamic menu view hit rate **`79/80 (98.75%)`**, live sidecar conformance **`8/8 PASS`** | L0 zero-dep full-stack extractors + L1 pinned `codebase-memory-mcp@0.12.1` sidecar + L2 anti-corruption fusion + Global Infra Guard + `>65` high-fan-in fail-closed sentinel ([ADR-0007](./docs/adr/0007-external-code-graph-engine.en.md)) |
 | **Seeded-Defect Detection Rate (`SDDR`)** | Single demo target `demo-campus` **`100.0%` (`7/7`)** (`npm run bench`) | Zero-dep JSON Schema validator + RBAC/concurrency + WCAG 2.0/2.1/2.2 |
-| **Triage Accuracy / C→A Misclassification / Mis-Heal** | `45/45` internal + `12/12` real Playwright stacks: **`100%` · C→A `0.0%` · Mis-Heal `0.0%`** | Structured runtime guard signals + C-before-A precedence + tamper-evident healer |
-| **Secret Redaction Recall** | Internal adversarial corpus **`100.0%` (`35/35`)** (`npm run bench`) | Redaction v3 (structured parse-before-redact preserving `heal_*`/`job_*` IDs and boolean/number fields) |
-| **Verdict Trust Levels (`T0 / T1 / T2`)** | **T0** = Unverified local run · **T1** = Local Run Ledger + MAC (proves integrity, not provenance) · **T2** = Re-run from a clean checkout on a GitHub-hosted runner, keylessly signed with Sigstore, and verified for issuer identity | **Only T2 is a merge-grade green**; see [reusable workflow example](./examples/workflows/use-aitest-verify.yml) & `attest verify` |
+| **Triage Accuracy / C→A Misclassification / Mis-Heal** | `45/45` internal + `12/12` real Playwright stacks: **`100%` · C→A `0.0%` · Mis-Heal `0.0%`** | Structured runtime guard signals + C-before-A precedence + tamper-evident healer + v5 `serviceChains` & `tenantAuthHints` |
+| **Secret Redaction Recall** | Internal adversarial corpus **`100.0%` (`35/35`)** (`npm run bench`) | Redaction v3 (structured parse-before-redact preserving `heal_*`/`job_*`/`pinnedVersion` while redacting `pin`/`pincode`) |
+| **Verdict Trust Levels (`T0 / T1 / T2`)** | **T0** = Unverified local run · **T1** = Local Run Ledger + MAC (proves integrity, not provenance) · **T2** = Re-run from a clean checkout on a GitHub-hosted runner, keylessly signed with Sigstore, and verified for issuer identity | **Only T2 is a merge-grade green**; `in-toto v1` attestations also bind `scope.graphEngine` |
 
 ### Trust Levels & Reusable CI Workflow (Only T2 Is Merge-Grade Green)
 
@@ -49,7 +50,7 @@ Adopt T2 verification via [examples/workflows/use-aitest-verify.yml](./examples/
 ```yaml
 jobs:
   aitest-t2-verdict:
-    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.5.0
+    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.6.0
     permissions:
       id-token: write
       attestations: write
@@ -65,7 +66,7 @@ jobs:
 Verify a T2 attestation bundle offline (fail-closed by default: missing signature, T1-only MAC, digest tampering, or workflow identity mismatch exits non-zero with `trustLevel <= T1`):
 
 ```bash
-npx ai-test-workbench@6.5.0 attest verify \
+npx ai-test-workbench@6.6.0 attest verify \
   --file attestation.json \
   --bundle attestation.sigstore.json \
   --expect-repo owner/repo \
@@ -77,20 +78,22 @@ npx ai-test-workbench@6.5.0 attest verify \
 
 ---
 
-## 2. v6.4.0 Layered Architecture
+## 2. v6.6.0 Layered Architecture & Three-Tier Code-Graph Fusion
 
-v6.4.0 builds on the acyclic four-layer core with the 5-checkpoint differential parity oracle (`src/kernel/diff-oracle.mjs` + `src/parity/`), zero-plaintext shape-fingerprint clustering, toolified memory loop (`src/memory/` + `src/learn.mjs`), `AITEST-G118` cross-directory lockstep gate, and Human Seam Gatekeeper Card, keeping every `src/**/*.mjs` strictly `<= 435` LOC (see [ARCHITECTURE.en.md](./ARCHITECTURE.en.md) and [ADR-0006](./docs/adr/0006-differential-parity-oracle-and-shape-fingerprints.en.md)):
+`v6.6.0` extends the acyclic four-layer, zero-runtime-dependency core with **CodeMap v5** (L0 zero-dep full-stack extractors + L1 decoupled pinned `codebase-memory-mcp@0.12.1` sidecar + L2 anti-corruption fusion), **Additive-Only Fail-Closed Diff-Impact v3** (Global Infra Guard + `<20ms` `pipe-sharded-v1` lazy-hydrated index), an **8-Pillar MCP Hub** (adding `code-intelligence`), and governance-sealed `.aitest/mcp.lock` / `.aitest/engine-manifest.json`, keeping every `src/**/*.mjs <= 450` LOC (see [ARCHITECTURE.en.md](./ARCHITECTURE.en.md) and [ADR-0007](./docs/adr/0007-external-code-graph-engine.en.md)):
 
 ```mermaid
 flowchart TB
-    L4["Layer 4: Protocol & CLI — src/cli/ (CommandResult v2) · src/mcp/ (17 canonical tools + framed IPC jobs)"]
-    L3["Layer 3: App Facade & Domains — src/app/ · parity · corpus · replay · memory · verdict/seam · heal · diagnose · impact · bootstrap"]
-    L2["Layer 2: Authoritative Kernel SSoT — src/kernel/ (target-guard · schema-validator · diff-oracle · gate/ SymbolTable + G101..G118)"]
-    L1["Layer 1: Zero-Dep Core Leaves — src/core/ (version · outcome · config · stream-sse · redact v3 · glob · proc) · src/types/*.d.ts"]
+    L4["Layer 4: Protocol & CLI — src/cli/ (CommandResult v2) · src/mcp/ (17 canonical tools + graph-summary resource + framed IPC)"]
+    L3["Layer 3: App Facade & Domains — src/app/ · codemap v5 (L0/L1/L2) · impact v3 (Global Infra + pipe-sharded-v1) · parity · memory · verdict · mcp-hub (8 pillars)"]
+    L2["Layer 2: Authoritative Kernel SSoT — src/kernel/ (target-guard · schema-validator · diff-oracle · gate/ SymbolTable + G101..G118 + mcp.lock/engine-manifest lock)"]
+    L1["Layer 1: Zero-Dep Core Leaves — src/core/ (version codeMap=5 · outcome · config · stream-sse · redact v3 · glob · proc) · src/types/*.d.ts"]
+    CBM["Optional L1 Pinned Sidecar (Out-of-Workspace Short Path) — DeusData/codebase-memory-mcp@0.12.1 (SHA-256 + --ui=false)"]
     TPL["Scaffold Distribution Mirror (one-way) — templates/playwright-qa/support/ (@generated + sha256 stamp)"]
 
     L4 --> L3 --> L2 --> L1
     L4 --> L2
+    L3 -. "SPI + env scrub + metadata sanitization" .-> CBM
     L2 -. "npm run sync:vendor (CI byte-parity enforced)" .-> TPL
 ```
 
@@ -101,19 +104,20 @@ flowchart TB
 ### Requirements & Supply-Chain Security
 
 - **Node.js**: `>= 22.12.0` (`24 LTS` or `26 LTS` recommended) on Windows PowerShell (`pwsh`), macOS, or Linux.
-- **Zero Runtime Dependencies**: Root `package.json` carries zero runtime `dependencies`. Always invoke pinned `npx ai-test-workbench@6.5.0 <cmd>`, global short alias `aitw <cmd>` (`npm i -g ai-test-workbench@6.5.0`), or local source `node tools/aitest.mjs <cmd>`.
+- **Zero Runtime Dependencies**: Root `package.json` carries zero runtime `dependencies`. Always invoke pinned `npx ai-test-workbench@6.6.0 <cmd>`, global short alias `aitw <cmd>` (`npm i -g ai-test-workbench@6.6.0`), or local source `node tools/aitest.mjs <cmd>`.
+- **Optional Graph Sidecar Engine**: L0 zero-dep indexing works out of the box. For million-LOC symbol-level call-graph narrowing, a human installs the pinned sidecar via local CLI `mcp install-engine --engine codebase-memory-mcp` (supports offline `--from-file` / `--mirror-url` / `--expected-sha256` and `N-1` rollback; never auto-downloaded).
 
 ### Register Native MCP Server (`stdio` / `/mcp` / `/sse`)
 
 - **Claude Code**:
   ```bash
-  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.5.0 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
+  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.6.0 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
   ```
 - **Codex CLI** (`.codex/config.toml`):
   ```toml
   [mcp_servers.ai-test-workbench]
   command = "npx"
-  args = ["--package=ai-test-workbench@6.5.0", "ai-test-workbench", "mcp-serve"]
+  args = ["--package=ai-test-workbench@6.6.0", "ai-test-workbench", "mcp-serve"]
   ```
 - **Cursor / Windsurf / Antigravity / Gemini CLI** (`.mcp.json`):
   ```json
@@ -121,42 +125,46 @@ flowchart TB
     "mcpServers": {
       "ai-test-workbench": {
         "command": "npx",
-        "args": ["--package=ai-test-workbench@6.5.0", "ai-test-workbench", "mcp-serve"]
+        "args": ["--package=ai-test-workbench@6.6.0", "ai-test-workbench", "mcp-serve"]
       }
     }
   }
   ```
 - **Streamable HTTP (`/mcp`) & Legacy SSE (`/sse`)**:
   ```bash
-  npx ai-test-workbench@6.5.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
+  npx ai-test-workbench@6.6.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
   ```
 
-### Official MCP Conformance & 3-Transport Interoperability
+### Official MCP & External Graph Sidecar Conformance
 
-- Rationale and re-evaluation triggers for the zero-dependency MCP protocol layer live in [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md).
-- Isolated under `conformance/` (excluded from the npm tarball, enforced by CI `mcp-conformance`):
+- Rationale and re-evaluation triggers live in [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md) and [ADR-0007](./docs/adr/0007-external-code-graph-engine.en.md).
+- Isolated under `conformance/` (excluded from the npm tarball, enforced by CI):
   - **`@modelcontextprotocol/conformance@0.1.16`** (Streamable HTTP `/mcp`, `active` suite — 30 scenarios): `8/8` protocol-level scenarios pass; `22` inapplicable/deferred scenarios are recorded in [`conformance/expected-failures.json`](./conformance/expected-failures.json) with `0` unlisted failures.
   - **`@modelcontextprotocol/sdk@1.32.2` Reference `Client`** (`5/5` suites pass): covers `stdio`, Streamable HTTP (`/mcp`), and Legacy SSE (`/sse` + `/messages`), verifying `2024-11-05`..`2025-11-25` version negotiation, exact 17 canonical tools with valid JSON Schemas, `structuredContent`, `notifications/progress`, and `AbortController` cancellation.
+  - **`conformance/graph-engine/`** (`8/8` live pass): verifies `DeusData/codebase-memory-mcp@0.12.1` against a CJK-path multi-repo fixture covering `Controller → Service → ServiceImpl → Mapper/XML + Feign` chains with byte-identical repeatability.
 
 ### Standard CLI Workflow & Local Verification
 
 ```bash
-# 1. Readiness check, initialization, and hash-safe template upgrades
-npx ai-test-workbench@6.5.0 doctor
-npx ai-test-workbench@6.5.0 init --name my-app --target "/path/to/your-repo" --loop codex
-npx ai-test-workbench@6.5.0 upgrade --target "/path/to/your-repo" --dry-run
+# 1. Readiness check, initialization, and hash-safe template / graph-engine pin checks
+npx ai-test-workbench@6.6.0 doctor
+npx ai-test-workbench@6.6.0 init --name my-app --target "/path/to/your-repo" --loop codex
+npx ai-test-workbench@6.6.0 upgrade --target "/path/to/your-repo" --dry-run
+npx ai-test-workbench@6.6.0 upgrade --target "/path/to/your-repo" --scope engines --dry-run
 
-# 2. Session capture -> read-only exploration -> living code map -> pinned external MCPs
-npx ai-test-workbench@6.5.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
-npx ai-test-workbench@6.5.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
-npx ai-test-workbench@6.5.0 map --target "/path/to/your-repo"
-npx ai-test-workbench@6.5.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.5.0 mcp doctor --target "/path/to/your-repo" --lock
+# 2. Session capture -> read-only exploration -> CodeMap v5 sync/query -> 8-pillar MCP & sidecar install
+npx ai-test-workbench@6.6.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
+npx ai-test-workbench@6.6.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
+npx ai-test-workbench@6.6.0 mcp install-engine --target "/path/to/your-repo" --engine codebase-memory-mcp
+npx ai-test-workbench@6.6.0 map --target "/path/to/your-repo" --engine auto
+npx ai-test-workbench@6.6.0 map --target "/path/to/your-repo" --query OrderController
+npx ai-test-workbench@6.6.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.6.0 mcp doctor --target "/path/to/your-repo" --lock
 
 # 3. Performance SLOs, dual-target parity, memory distiller/sweeper, and one-call pre-merge verdict
-npx ai-test-workbench@6.5.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
-npx ai-test-workbench@6.5.0 parity --target "/path/to/your-repo" --baseline-url http://127.0.0.1:4100 --candidate-url http://127.0.0.1:4200 --privacy-mode shape-only
-npx ai-test-workbench@6.5.0 learn --target "/path/to/your-repo" --action distill --json
-npx ai-test-workbench@6.5.0 verify-change --target "/path/to/your-repo" --base origin/main
+npx ai-test-workbench@6.6.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
+npx ai-test-workbench@6.6.0 parity --target "/path/to/your-repo" --baseline-url http://127.0.0.1:4100 --candidate-url http://127.0.0.1:4200 --privacy-mode shape-only
+npx ai-test-workbench@6.6.0 learn --target "/path/to/your-repo" --action distill --json
+npx ai-test-workbench@6.6.0 verify-change --target "/path/to/your-repo" --base origin/main
 ```
 
 Reproduce the full repository gate locally (zero external servers):
@@ -181,8 +189,8 @@ The table below is auto-generated from `src/mcp/registry.mjs` by `scripts/genera
 | `aitest_init` | Discovery & Setup | No | Initialize Isolated QA Workspace & Governance Lock |
 | `aitest_bootstrap` | Discovery & Setup | No | Zero-to-One Autonomous Loopback Bootstrapper |
 | `aitest_explore` | Discovery & Setup | No | Zero-to-One Default-Deny Read-Only Explorer |
-| `aitest_map_sync` | Discovery & Setup | No | Sync Convergent Living Code Map v4 |
-| `aitest_mcp_hub` | Discovery & Setup | No | Manage Pinned 7-Pillar MCP Presets & Supply-Chain Doctor |
+| `aitest_map_sync` | Discovery & Setup | No | Sync Convergent Living Code Map v5 |
+| `aitest_mcp_hub` | Discovery & Setup | No | Manage Pinned 8-Pillar MCP Presets & Supply-Chain Doctor |
 | `aitest_skill_install` | Discovery & Setup | No | Install Portable Agent Skill into Project |
 | `aitest_verify_change` | Verification & Gates | No | One-Call Agent Change Verification & Attested Verdict |
 | `aitest_impact` | Verification & Gates | Yes | Compute Dependency-Graph Diff-Impact Scope (v2) |
@@ -202,10 +210,11 @@ The following privileged or interactive commands are **local CLI only and never 
 
 | CLI Command | Responsibility & Security Boundary |
 |---|---|
-| `governance status \| verify \| approve --by <human>` | Inspect or human-approve `.aitest/governance.lock` (blocks MCP subprocesses and bot approver identities) |
-| `attest verify --file <attestation.json>` | Offline zero-dep verification of in-toto Statement v1, SHA-256 bindings, and Sigstore T2 issuer identity |
+| `governance status \| verify \| approve --by <human>` | Inspect or human-approve `.aitest/governance.lock` (sealing `.aitest/mcp.lock` and `.aitest/engine-manifest.json`; blocks MCP subprocesses and bot approvers) |
+| `mcp install-engine --engine codebase-memory-mcp` | Human-CLI installer for pinned local graph sidecars (verifies 6-platform SHA-256, blocks Zip-Slip, supports offline `--from-file` / `--mirror-url` / `--expected-sha256` & `N-1` rollback) |
+| `attest verify --file <attestation.json>` | Offline zero-dep verification of in-toto Statement v1, SHA-256 bindings, `scope.graphEngine`, and Sigstore T2 issuer identity |
 | `auth-login [--cdp-url <http://127.0.0.1:9222>]` | Headed human login capture for OTP / SSO / QR flows (never bypasses CAPTCHAs), stored at `0o600` |
-| `upgrade [--dry-run] [--force]` | Three-way hash-safe upgrade via `.aitest/template-manifest.json`, preserving user-modified files |
+| `upgrade [--scope engines\|all] [--dry-run] [--force]` | Three-way hash-safe upgrade via `.aitest/template-manifest.json` and graph-engine pin check (never auto-resigns `governance.lock`) |
 | `update-agents` | SHA-256 manifest-protected update of official Playwright Test Agents definitions |
 
 ---
@@ -214,10 +223,10 @@ The following privileged or interactive commands are **local CLI only and never 
 
 | Topic | Simplified Chinese (Default) | English |
 |---|---|---|
-| **v5 → v6 Upgrade & Migration Guide** | [docs/upgrade.md](./docs/upgrade.md) | [docs/upgrade.en.md](./docs/upgrade.en.md) |
+| **v5 → v6.6 Upgrade & Migration Guide** | [docs/upgrade.md](./docs/upgrade.md) | [docs/upgrade.en.md](./docs/upgrade.en.md) |
 | **Governance & 4-Layer Gate Kernel** | [docs/governance.md](./docs/governance.md) | [docs/governance.en.md](./docs/governance.en.md) |
 | **v6 Refactor Assessment & Benchmarks** | [v6-refactor-assessment.md](./docs/review/v6-refactor-assessment.md) · [v6 Holdout (ZH)](./bench/real-world/results/SUMMARY-v6-holdout.md) · [Pilot (ZH)](./bench/real-world/results/SUMMARY.md) · [Pre-Reg (ZH)](./bench/real-world/PREREGISTRATION.md) | [v6-refactor-assessment.en.md](./docs/review/v6-refactor-assessment.en.md) · [v6 Holdout Summary](./bench/real-world/results/SUMMARY-v6-holdout.en.md) · [Pilot Summary](./bench/real-world/results/SUMMARY.en.md) · [Pre-Registration](./bench/real-world/PREREGISTRATION.en.md) |
-| **Architecture Decision Records (ADR-0001..0006)** | [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) · [ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.md) · [ADR-0003](./docs/adr/0003-strict-checkjs-type-safety.md) · [ADR-0004](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.md) · [ADR-0005](./docs/adr/0005-mcp-surface-outcome-and-config.md) · [ADR-0006](./docs/adr/0006-differential-parity-oracle-and-shape-fingerprints.md) | [ADR-0001 Zero-Dep MCP](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md) · [ADR-0002 Kernel SSoT & Upgrade](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.en.md) · [ADR-0003 Strict checkJs](./docs/adr/0003-strict-checkjs-type-safety.en.md) · [ADR-0004 AST Gate & FPR](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.en.md) · [ADR-0005 MCP/Outcome/Config](./docs/adr/0005-mcp-surface-outcome-and-config.en.md) · [ADR-0006 Differential Parity Oracle](./docs/adr/0006-differential-parity-oracle-and-shape-fingerprints.en.md) |
+| **Architecture Decision Records (ADR-0001..0007)** | [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) · [ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.md) · [ADR-0003](./docs/adr/0003-strict-checkjs-type-safety.md) · [ADR-0004](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.md) · [ADR-0005](./docs/adr/0005-mcp-surface-outcome-and-config.md) · [ADR-0006](./docs/adr/0006-differential-parity-oracle-and-shape-fingerprints.md) · [ADR-0007](./docs/adr/0007-external-code-graph-engine.md) | [ADR-0001 Zero-Dep MCP](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md) · [ADR-0002 Kernel SSoT & Upgrade](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.en.md) · [ADR-0003 Strict checkJs](./docs/adr/0003-strict-checkjs-type-safety.en.md) · [ADR-0004 AST Gate & FPR](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.en.md) · [ADR-0005 MCP/Outcome/Config](./docs/adr/0005-mcp-surface-outcome-and-config.en.md) · [ADR-0006 Differential Parity Oracle](./docs/adr/0006-differential-parity-oracle-and-shape-fingerprints.en.md) · [ADR-0007 Graph Sidecar & Diff-Impact v3](./docs/adr/0007-external-code-graph-engine.en.md) |
 | **AI Agent Onboarding & Protocol** | [quickstart](./docs/ai-agent-quickstart.md) · [AGENTS.md](./AGENTS.md) · [CLAUDE.md](./CLAUDE.md) · [MCP Protocol (ZH)](./skills/ai-test-workbench/references/mcp-server-protocol.md) · [llms.txt](./llms.txt) | [quickstart.en](./docs/ai-agent-quickstart.en.md) · [AGENTS.en.md](./AGENTS.en.md) · [MCP Protocol](./skills/ai-test-workbench/references/mcp-server-protocol.en.md) |
 | **Architecture, Versions & History** | [ARCHITECTURE.md](./ARCHITECTURE.md) · [VERSION.md](./VERSION.md) · [v5 Historical Scorecard](./docs/history/v5-verification-scorecard.md) · [Agentic Design (ZH)](./bench/agentic/DESIGN.md) | [ARCHITECTURE.en.md](./ARCHITECTURE.en.md) · [VERSION.en.md](./VERSION.en.md) · [v5 Historical Scorecard (EN)](./docs/history/v5-verification-scorecard.en.md) · [Agentic Design](./bench/agentic/DESIGN.en.md) |
 | **Adapter / Security / Troubleshooting / Demo / Community** | [adapter](./docs/project-adapter.md) · [security](./docs/security.md) · [troubleshooting](./docs/troubleshooting.md) · [demo](./examples/demo-webapp/README.md) · [CONTRIBUTING](./CONTRIBUTING.md) · [SECURITY](./SECURITY.md) | [adapter.en](./docs/project-adapter.en.md) · [security.en](./docs/security.en.md) · [troubleshooting.en](./docs/troubleshooting.en.md) · [demo.en](./examples/demo-webapp/README.en.md) · [CONTRIBUTING.en](./CONTRIBUTING.en.md) · [SECURITY.en](./SECURITY.en.md) |
