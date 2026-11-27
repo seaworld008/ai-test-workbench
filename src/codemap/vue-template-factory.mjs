@@ -2,7 +2,7 @@
 import { normalizeRoutePath, normalizeSlash } from './route-matcher.mjs';
 import { findBalancedClose, parseStaticImports, stripJsComments } from './vue-extractor.mjs';
 
-const WRAPPER_MODULE_RE = /(?:^|\/)(?:utils|config|request|http|lib|core)\/.*\.(?:js|ts|mjs)$/i;
+const WRAPPER_MODULE_RE = /(?:^|\/)(?:utils|config|request|http|lib|core)\/.*\.(?:js|ts|mjs|cjs)$/i;
 const ENDPOINT_API_DIR_RE = /(?:^|\/)api\//i;
 const URL_PARAM_RHS_RE = /^(?:url|path|[a-zA-Z_$][a-zA-Z0-9_$]*\.(?:url|path))\b/;
 
@@ -41,18 +41,84 @@ export const toKebabCase = (str) => String(str || '').replace(/\B([A-Z])/g, '-$1
 export const toPascalCase = (str) =>
   String(str || '').split(/[-_\s]+/).filter(Boolean).map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join('');
 
+/** @param {string} rawExpr @param {Record<string, string>} consts @param {string | null} stopParam @returns {string | null} */
+function evalStaticPrefixOrString(rawExpr, consts, stopParam) {
+  const expr = rawExpr.trim().replace(/;$/, '').replace(/\s+as\s+[A-Za-z_$][A-Za-z0-9_$.<>[\]]*$/, '').trim();
+  if (!expr) return null;
+  if (expr.startsWith('`') && expr.endsWith('`')) {
+    const tpl = expr.slice(1, -1), paramRe = stopParam ? new RegExp(`^${stopParam}(?:[^A-Za-z0-9_$]|$)`) : null;
+    for (let pos = 0, acc = ''; ; ) {
+      const open = tpl.indexOf('${', pos);
+      if (open < 0) return stopParam ? null : `${acc}${tpl.slice(pos)}`;
+      acc += tpl.slice(pos, open);
+      const close = findBalancedClose(tpl, open + 1, '{', '}');
+      const inner = close >= 0 ? tpl.slice(open + 2, close).trim() : '';
+      if (close < 0) return null;
+      if (paramRe && paramRe.test(inner)) return acc && !/\s/.test(acc) && !acc.includes('${') ? acc : null;
+      if (!Object.hasOwn(consts, inner)) return null;
+      acc += consts[inner]; pos = close + 1;
+    }
+  }
+  if (!expr.includes('+')) return null;
+  let acc = '';
+  for (const p of expr.split('+').map((s) => s.trim()).filter(Boolean)) {
+    if (stopParam && (p === stopParam || p.startsWith(`${stopParam}.`))) return acc && !/\s/.test(acc) ? acc : null;
+    const lm = p.match(/^(['"`])([^'"`\\${}\n]*)\1$/);
+    if (lm) acc += lm[2];
+    else if (Object.hasOwn(consts, p)) acc += consts[p];
+    else return null;
+  }
+  return stopParam ? null : acc || null;
+}
+
 /**
- * Extracts local `const`/`let`/`var` string literal bindings from comment-stripped JS/TS code.
- * @param {string} stripped
- * @returns {Record<string, string>}
+ * Extracts local `const`/`let`/`var` string literal and chained constant bindings from JS/TS source.
+ * @param {string} stripped @param {Record<string, string>} [seedConsts] @returns {Record<string, string>}
  */
-export function extractLocalJsStringConsts(stripped) {
+export function extractLocalJsStringConsts(stripped, seedConsts = {}) {
   /** @type {Record<string, string>} */
-  const out = {};
-  for (const m of stripped.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(['"`])([^'"`\\${}\n]+)\2/g)) {
-    out[m[1]] = m[3];
+  const out = { ...seedConsts };
+  for (const m of stripped.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)(?:\s*:\s*[^=;\n{]+)?\s*=\s*(['"`])([^'"`\\${}\n]+)\2/g)) out[m[1]] = m[3];
+  for (const m of stripped.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)(?:\s*:\s*[^=;\n{]+)?\s*=\s*([^\n;]+)/g)) {
+    const val = Object.hasOwn(out, m[1]) ? null : evalStaticPrefixOrString(m[2], out, null);
+    if (val && !val.includes('\n')) out[m[1]] = val;
   }
   return out;
+}
+
+/**
+ * Recognizes simple 1-arg URL prefix helpers (`const baseUrlApi = (url: string) => \`/api/v1/${url}\``).
+ * @param {string} stripped @param {Record<string, string>} [localConsts] @returns {Record<string, string>}
+ */
+export function extractUrlPrefixHelpers(stripped, localConsts) {
+  const consts = localConsts || extractLocalJsStringConsts(stripped);
+  /** @type {Record<string, string>} */
+  const helpers = {};
+  const addRet = (/** @type {string} */ n, /** @type {string} */ b, /** @type {string} */ p) => {
+    const ret = b.trim().match(/^return\s+([\s\S]+?);?\s*$/);
+    const pref = ret && !ret[1].includes(';') ? evalStaticPrefixOrString(ret[1], consts, p) : null;
+    if (pref) helpers[n] = pref;
+  };
+  for (const m of stripped.matchAll(/\b(?:export\s+(?:default\s+)?)?function(?:\s+([A-Za-z_$][A-Za-z0-9_$]*))?\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)(?:\s*:\s*[^)=,]+)?(?:\s*=\s*['"`][^'"`]*['"`])?\s*\)(?:\s*:\s*[^{]+)?\s*\{/g)) {
+    const fnName = m[1] || (/^\s*export\s+default\b/.test(m[0]) ? 'default' : ''), cl = fnName ? findBalancedClose(stripped, (m.index || 0) + m[0].length - 1, '{', '}') : -1;
+    if (cl > 0) addRet(fnName, stripped.slice((m.index || 0) + m[0].length, cl), m[2]);
+  }
+  for (const m of stripped.matchAll(/(?:^|[^\w$.])(?:(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)(?:\s*:[^=;\n{]+)?\s*=|export\s+(default)|(?:module\.)?exports\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=)\s*(?:\(\s*([A-Za-z_$][A-Za-z0-9_$]*)(?:\s*:\s*[^)=,]+)?(?:\s*=\s*['"`][^'"`]*['"`])?\s*\)(?:\s*:\s*[^=>{;\n]+)?|([A-Za-z_$][A-Za-z0-9_$]*))\s*=>/g)) {
+    const fnName = m[1] || m[2] || m[3], param = m[4] || m[5];
+    let c = (m.index || 0) + m[0].length;
+    while (c < stripped.length && /\s/.test(stripped[c])) c += 1;
+    if (!fnName || !param) continue;
+    if (stripped[c] === '{') { const end = findBalancedClose(stripped, c, '{', '}'); if (end > c) addRet(fnName, stripped.slice(c + 1, end), param); continue; }
+    let i = c;
+    for (; i < stripped.length && stripped[i] !== ';'; i += 1) {
+      if (stripped[i] === "'" || stripped[i] === '"' || stripped[i] === '`') { const q = stripped[i]; i += 1; while (i < stripped.length && stripped[i] !== q) { if (stripped[i] === '\\') i += 1; i += 1; } }
+      else if (stripped[i] === '(' || stripped[i] === '{' || stripped[i] === '[') { const cl = findBalancedClose(stripped, i, stripped[i], stripped[i] === '(' ? ')' : stripped[i] === '{' ? '}' : ']'); if (cl > i) i = cl; }
+      else if (stripped[i] === '\n' && !/\+\s*$/.test(stripped.slice(c, i)) && !/^\s*\+/.test(stripped.slice(i + 1))) break;
+    }
+    const pref = evalStaticPrefixOrString(stripped.slice(c, i), consts, param);
+    if (pref) helpers[fnName] = pref;
+  }
+  return helpers;
 }
 
 /** @param {string} expr @param {Record<string, string>} localConsts @returns {string | null} */
@@ -92,46 +158,26 @@ export function extractAxiosWrapperInfo({ filePath, relFile, text, repoDir, file
 
   for (const m of stripped.matchAll(/\bbaseURL\s*:\s*([^\n,;}{]{1,220})/g)) {
     const resolved = extractPathPrefixFromJsExpr(m[1], localConsts);
-    if (resolved && resolved !== '/') {
-      if (!ownPrefix) ownPrefix = resolved;
-      prefixes.add(resolved);
-    }
+    if (resolved && resolved !== '/') { if (!ownPrefix) ownPrefix = resolved; prefixes.add(resolved); }
   }
-
   /** @type {string | null} */
-  let delegatesToFile = null;
-  /** @type {string | null} */
-  let prependPrefix = null;
-
+  let delegatesToFile = null, prependPrefix = null;
   for (const m of stripped.matchAll(/\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(\s*\{/g)) {
     const spec = identifierToSpec.get(m[1]);
     if (!spec || !(spec.startsWith('./') || spec.startsWith('../') || spec.startsWith('@/'))) continue;
-    const openIdx = (m.index || 0) + m[0].length - 1;
-    const closeIdx = findBalancedClose(stripped, openIdx, '{', '}');
+    const openIdx = (m.index || 0) + m[0].length - 1, closeIdx = findBalancedClose(stripped, openIdx, '{', '}');
     if (closeIdx <= openIdx) continue;
     const body = stripped.slice(openIdx + 1, closeIdx);
-    const concatM =
-      body.match(/\burl\s*:\s*(['"`])(\/[A-Za-z0-9_/-]+)\1\s*\+\s*([^\s,}\n]+)/) ||
-      body.match(/\burl\s*:\s*`(\/[A-Za-z0-9_/-]+)\$\{([^}]+)\}`/);
+    const concatM = body.match(/\burl\s*:\s*(['"`])(\/[A-Za-z0-9_/-]+)\1\s*\+\s*([^\s,}\n]+)/) || body.match(/\burl\s*:\s*`(\/[A-Za-z0-9_/-]+)\$\{([^}]+)\}`/);
     if (!concatM) continue;
-    const rawPrepend = concatM[2] || concatM[1];
-    const rhs = (concatM[3] || concatM[2] || '').trim();
-    if (!rawPrepend.startsWith('/') || rawPrepend.split('/').filter(Boolean).length > 2) continue;
-    if (!URL_PARAM_RHS_RE.test(rhs)) continue;
+    const rawPrepend = concatM[2] || concatM[1], rhs = (concatM[3] || concatM[2] || '').trim();
+    if (!rawPrepend.startsWith('/') || rawPrepend.split('/').filter(Boolean).length > 2 || !URL_PARAM_RHS_RE.test(rhs)) continue;
     const chk = resolveImportCandidate(filePath, spec, repoDir, fileIndex);
-    if (chk.exists && chk.resolvedRel) {
-      delegatesToFile = chk.resolvedRel;
-      prependPrefix = normalizeRoutePath(rawPrepend);
-      break;
-    }
+    if (chk.exists && chk.resolvedRel) { delegatesToFile = chk.resolvedRel; prependPrefix = normalizeRoutePath(rawPrepend); break; }
   }
-
   for (const m of stripped.matchAll(/\bconst\s+[A-Z0-9_]*(?:API_PREFIX|BASE_API|PREFIX)[A-Z0-9_]*\s*=\s*['"`](\/[A-Za-z0-9_/-]+)['"`]/g)) {
     const p = normalizeRoutePath(m[1]);
-    if (p !== '/') {
-      if (!ownPrefix) ownPrefix = p;
-      prefixes.add(p);
-    }
+    if (p !== '/') { if (!ownPrefix) ownPrefix = p; prefixes.add(p); }
   }
   if (!ownPrefix && !delegatesToFile && prefixes.size === 0) return null;
   return { ownPrefix, delegatesToFile, prependPrefix, prefixes: [...prefixes] };
@@ -145,9 +191,7 @@ export function extractAxiosWrapperInfo({ filePath, relFile, text, repoDir, file
 export function resolveChainedAxiosPrefixes(wrapperInfoByFile) {
   /** @type {Record<string, string>} */
   const resolved = {};
-  for (const [file, info] of Object.entries(wrapperInfoByFile || {})) {
-    if (info.ownPrefix) resolved[file] = normalizeRoutePath(info.ownPrefix);
-  }
+  for (const [file, info] of Object.entries(wrapperInfoByFile || {})) if (info.ownPrefix) resolved[file] = normalizeRoutePath(info.ownPrefix);
   for (let pass = 0; pass < 4; pass += 1) {
     let changed = false;
     for (const [file, info] of Object.entries(wrapperInfoByFile || {})) {
@@ -160,10 +204,7 @@ export function resolveChainedAxiosPrefixes(wrapperInfoByFile) {
     if (!changed) break;
   }
   for (const [file, info] of Object.entries(wrapperInfoByFile || {})) {
-    if (!resolved[file]) {
-      const fb = info.prependPrefix || info.prefixes[0] || '';
-      if (fb) resolved[file] = normalizeRoutePath(fb);
-    }
+    if (!resolved[file]) { const fb = info.prependPrefix || info.prefixes[0] || ''; if (fb) resolved[file] = normalizeRoutePath(fb); }
   }
   return resolved;
 }
@@ -178,10 +219,8 @@ export function resolveChainedAxiosPrefixes(wrapperInfoByFile) {
  */
 export function extractCrudFactoryDefinition({ filePath, relFile, text, repoDir, fileIndex, resolveImportCandidate }) {
   if (!/\.(?:js|ts|mjs)$/i.test(relFile) || !/\bcreateCrudApi\b/.test(text)) return null;
-  const stripped = stripJsComments(text);
-  const fnMatch = stripped.match(/\bexport\s+(?:const|function)\s+(createCrudApi)\b/);
+  const stripped = stripJsComments(text), fnMatch = stripped.match(/\bexport\s+(?:const|function)\s+(createCrudApi)\b/);
   if (!fnMatch) return null;
-
   const { identifierToSpec } = parseStaticImports(stripped);
   let clientFile = null;
   for (const [id, spec] of identifierToSpec.entries()) {
@@ -205,24 +244,18 @@ export function extractCrudFactoryDefinition({ filePath, relFile, text, repoDir,
  */
 export function extractCrudFactoryApiCalls(relFile, text, factoryDefs = []) {
   if (!/\bcreateCrudApi\s*\(/.test(text)) return [];
-  const stripped = stripJsComments(text);
-  const def = factoryDefs[0] || null;
+  const stripped = stripJsComments(text), def = factoryDefs[0] || null;
   const specList = def?.endpoints.length ? def.endpoints : DEFAULT_CRUD_FACTORY_ENDPOINTS;
   /** @type {Array<{ method: string, path: string, rawPath: string, file: string, fnName: string, clientFile?: string, generatedBy: string }>} */
   const out = [];
   for (const m of stripped.matchAll(/\bcreateCrudApi\s*\(\s*(['"`])([^'"`]+)\1(?:\s*,\s*(['"`])([^'"`]*)\3)?/g)) {
     const entityName = m[2].trim();
     if (!entityName) continue;
-    const rawPrefix = (m[4] || '/').trim();
-    const suffix = entityName.charAt(0).toUpperCase() + entityName.slice(1);
+    const rawPrefix = (m[4] || '/').trim(), suffix = entityName.charAt(0).toUpperCase() + entityName.slice(1);
     const resourcePath = normalizeRoutePath(`${rawPrefix === '/' ? '' : rawPrefix.replace(/\/+$/, '')}/${toKebabCase(entityName)}`);
     for (const ep of specList) {
       const fullPath = normalizeRoutePath(`${resourcePath}${ep.suffixPath}`);
-      out.push({
-        method: ep.method, path: fullPath, rawPath: fullPath, file: relFile, fnName: `${ep.fnPrefix}${suffix}`,
-        ...(def?.clientFile ? { clientFile: def.clientFile } : {}),
-        generatedBy: 'createCrudApi',
-      });
+      out.push({ method: ep.method, path: fullPath, rawPath: fullPath, file: relFile, fnName: `${ep.fnPrefix}${suffix}`, ...(def?.clientFile ? { clientFile: def.clientFile } : {}), generatedBy: 'createCrudApi' });
     }
   }
   return out;
@@ -238,12 +271,9 @@ export function extractVueTemplateComponents(text) {
   const tags = new Set();
   const tplMatch = text.match(/<template\b[^>]*>([\s\S]*)<\/template>/i);
   if (tplMatch) {
-    const tpl = tplMatch[1].replace(/<!--[\s\S]*?-->/g, ' ');
-    for (const m of tpl.matchAll(/<([A-Za-z][A-Za-z0-9_-]*)(?=[\s/>])/g)) {
-      const rawTag = m[1];
-      const lower = rawTag.toLowerCase();
-      if (STANDARD_HTML_AND_UI_TAGS.has(lower) || /^(?:el|a|van|ant|n|v|t|u|i|svg|fa|icon)-/i.test(lower)) continue;
-      if (/[A-Z]/.test(rawTag) || rawTag.includes('-')) tags.add(toPascalCase(rawTag));
+    for (const m of tplMatch[1].replace(/<!--[\s\S]*?-->/g, ' ').matchAll(/<([A-Za-z][A-Za-z0-9_-]*)(?=[\s/>])/g)) {
+      const rawTag = m[1], lower = rawTag.toLowerCase();
+      if (!STANDARD_HTML_AND_UI_TAGS.has(lower) && !/^(?:el|a|van|ant|n|v|t|u|i|svg|fa|icon)-/i.test(lower) && (/[A-Z]/.test(rawTag) || rawTag.includes('-'))) tags.add(toPascalCase(rawTag));
     }
   }
   /** @type {Record<string, string>} */
@@ -252,12 +282,10 @@ export function extractVueTemplateComponents(text) {
   if (scriptBlocks) {
     const stripped = stripJsComments(scriptBlocks);
     for (const m of stripped.matchAll(/\bcomponents\s*:\s*\{/g)) {
-      const openIdx = (m.index || 0) + m[0].length - 1;
-      const closeIdx = findBalancedClose(stripped, openIdx, '{', '}');
+      const openIdx = (m.index || 0) + m[0].length - 1, closeIdx = findBalancedClose(stripped, openIdx, '{', '}');
       if (closeIdx <= openIdx) continue;
       for (const part of stripped.slice(openIdx + 1, closeIdx).split(',')) {
-        const clean = part.trim();
-        const kv = clean.match(/^['"]?([A-Za-z0-9_$-]+)['"]?\s*:\s*([A-Za-z_$][A-Za-z0-9_$]*)$/);
+        const clean = part.trim(), kv = clean.match(/^['"]?([A-Za-z0-9_$-]+)['"]?\s*:\s*([A-Za-z_$][A-Za-z0-9_$]*)$/);
         if (kv) localComponents[toPascalCase(kv[1])] = kv[2];
         else if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(clean)) localComponents[toPascalCase(clean)] = clean;
       }
@@ -283,15 +311,12 @@ export function extractGlobalVueComponents({ filePath, relFile, text, repoDir, f
   const out = [];
   const seen = new Set();
   for (const m of stripped.matchAll(/\b(?:Vue|app)\s*\.\s*component\s*\(\s*(['"`])([^'"`]+)\1\s*,\s*([A-Za-z_$][A-Za-z0-9_$]*)/g)) {
-    const rawName = m[2].trim();
-    const spec = identifierToSpec.get(m[3].trim());
+    const rawName = m[2].trim(), spec = identifierToSpec.get(m[3].trim());
     if (!spec || !(spec.startsWith('./') || spec.startsWith('../') || spec.startsWith('@/'))) continue;
     const chk = resolveImportCandidate(filePath, spec, repoDir, fileIndex);
     if (!chk.exists || !chk.resolvedRel) continue;
     const key = `${toPascalCase(rawName)}::${chk.resolvedRel}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ name: rawName, kebabName: toKebabCase(rawName), file: chk.resolvedRel, registeredIn: relFile });
+    if (!seen.has(key)) { seen.add(key); out.push({ name: rawName, kebabName: toKebabCase(rawName), file: chk.resolvedRel, registeredIn: relFile }); }
   }
   return out;
 }
@@ -305,18 +330,14 @@ export function extractGlobalVueComponents({ filePath, relFile, text, repoDir, f
 export function resolveVueTemplateRefs(rawVueTemplates, globalComponents) {
   /** @type {Map<string, string>} */
   const globalByPascal = new Map();
-  for (const g of globalComponents || []) {
-    globalByPascal.set(toPascalCase(g.name), g.file);
-    globalByPascal.set(toPascalCase(g.kebabName), g.file);
-  }
+  for (const g of globalComponents || []) { globalByPascal.set(toPascalCase(g.name), g.file); globalByPascal.set(toPascalCase(g.kebabName), g.file); }
   /** @type {Record<string, string[]>} */
   const refs = {};
   for (const item of rawVueTemplates || []) {
     /** @type {Set<string>} */
     const matched = new Set();
     for (const tag of item.templateTags) {
-      const localFile = item.identifierToFile.get(item.localComponents[tag] || tag) || item.identifierToFile.get(tag);
-      const target = localFile || globalByPascal.get(tag);
+      const target = item.identifierToFile.get(item.localComponents[tag] || tag) || item.identifierToFile.get(tag) || globalByPascal.get(tag);
       if (target) matched.add(target);
     }
     if (matched.size > 0) refs[item.relFile] = [...matched];

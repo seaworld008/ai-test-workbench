@@ -4,6 +4,34 @@
 
 本日志遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 与 [语义化版本 (SemVer)](https://semver.org/spec/v2.0.0.html) 规范。
 
+## [6.7.0] - 2026-11-27
+
+### 多语言 Monorepo 自动发现与共享 `.git` 差异重映射
+- **统一嵌套多语言子工程自动发现（`src/init/stack-registry.mjs`、`src/init/planner.mjs`、`src/codemap/spec-indexer.mjs`、`src/impact/java-support.mjs`）**：
+  - 新增 `BUILD_MANIFEST_MARKERS`（覆盖 `package.json`、`pom.xml`、`build.gradle*`、`go.mod`、`pyproject.toml`、`requirements.txt`、`Cargo.toml`、`composer.json`）与 `discoverMonorepoSubProjects`：当根目录无构建清单，或显式 `pnpm-workspace.yaml`/`package.json#workspaces` 且 `dir/src` 下无直接源码文件时，自动发现一级及二级容器目录（`src|apps|packages|services|modules`）下的子工程并做规范路径去重，同时严格守住单仓库边界（如根含 `pom.xml` 或无 `workspaces` 的 `package.json` 保持 `[]`）；
+  - 扩展 `group: 'python'` 技术栈描述符（`Python/FastAPI`、`Python/aiohttp`、`Python/Flask`、`Python/Starlette`、`Python/Django`、`Python`）与 `Pytest` 探测（覆盖根目录与 `siblingRepos`），并在 `detectHostTooling` 聚合 `lockfile`、`packageManager`、`hasExistingTestsDir`、`vueVersion`、`uiLibrary`、`usesVueCli` 与 `mavenModules`；
+  - `collectMultiRepoGitChangedFiles`（`src/impact/graph.mjs`）修复共享单 `.git` 根的 Monorepo 差异重映射：对每个独立 `gitRoot` 仅执行一次 Git 查询，将 `<subRelPrefix>/<inner>` 精确重映射为 `<repoLabel>/<inner>` 并保留子工程外的根路径与 `qa/**`。
+
+### 全栈 CodeMap v5.1：前端 Vue 3 / TypeScript 泛型 HTTP 与后端 Python 多框架 / TypeORM 提取器
+- **前端 Vue 3 模块路由、TS 泛型 HTTP 与跨文件前缀助手（`src/codemap/{vue-extractor,vue-template-factory,vue-api-extractor,adapters,spec-indexer}.mjs`）**：
+  - `vue-extractor.mjs` 支持受 `isRouterFile` 门控的单对象路由导出模块（`export default { ... } satisfies ... / as ...`、`export const ... = { ... }`，需含 `path` + `children`/`component`/`redirect` 以忽略普通配置对象），支持 `LAZY_COMPONENT_VAR_RE` 惰性组件绑定（`const Layout = () => import(...)`），并导出支持 ES6 简写的 `extractTopLevelObjectProps` 与 `parseStaticImports` `importBindings`；
+  - `vue-template-factory.mjs`、`vue-api-extractor.mjs`、`adapters.mjs` 与 `spec-indexer.mjs` 新增并导出 `skipBalancedAngleBrackets`（精准区分 TS 泛型 `<T>` 与比较运算符 `<` / `>`），统一去重解析 4 类 TS/JS HTTP 调用形态（`client.verb<T>(url)`、`client.verb<T>({ url })`、`client(.request)<T>(method, url)`、`client(.request)<T>({ url, method })`），补齐 `.cjs`（`CODE_EXTS` / `FRONTEND_EXTS` / `parseCommonJsRequires`）与遍历顺序无关的跨文件 URL 前缀助手解析（`extractUrlPrefixHelpers` / `resolveCrossFilePrefixHelperCalls`，如 `baseUrlApi`）。
+- **后端 Python 多框架与 TypeORM / `.cjs` 全量适配（`src/codemap/python-extractor.mjs`、`src/codemap/backend-adapters.mjs`）**：
+  - 新增零依赖 `src/codemap/python-extractor.mjs`：提供 O(N) `stripPythonComments` 与 `maskPythonTripleQuotedStrings`（屏蔽注释与 docstring 伪路由，同时保留内联 SQL DDL）、`normalizePythonRoutePath`（规范 `{param:int}`、`<int:id>`、`(?P<id>...)` 与查询串），完整支持 **FastAPI**（`APIRouter(prefix=...)`、`@*.api_route`、`@*.websocket`）、**Flask**（`Blueprint(url_prefix=...)`、`@*.route(..., methods=...)`）、**aiohttp**（`router.add_*`、`add_route`、`web.*`、`@routes.*` / `RouteTableDef`）、**Starlette**（`Mount` 递归前缀、`Route`、`WebSocketRoute`）、**Django**（`urls.py` `path`/`re_path` 并跳过 `admin/`），以及 SQLAlchemy `__tablename__` / Django `db_table` / 内联 `CREATE TABLE` 实体提取；
+  - `backend-adapters.mjs` 将 Python 适配器接入 `extractPythonEndpointsAndEntities`，并为 `node-backend` 新增 `.cjs`、`(app|router|api).all(...) -> ANY` 与 TypeORM `@Entity({ name })` / `@Entity()` `snake_case` 类名推理。
+
+### Diff-Impact v3.1 精准收敛与 Python 反向导入图
+- **非测试文档降噪、构建清单精准拦截与 Python `.py` 反向依赖图（`src/impact.mjs`、`src/impact/{scanner,graph,java-support}.mjs`）**：
+  - `impact.mjs` 在执行 `GLOBAL_INFRA_PATTERNS` 与 `detectGlobalInfraImpact` 之前先过滤非测试类 `.md`/`.txt` 文档；`graph.mjs` 将测试 fixture 模式收敛为 `/^(?:qa\/)?tests\/fixtures\//i`（避免后端 `tests/fixtures/*` 误触发全量回退）并补齐 `pyproject.toml`、`requirements.txt`、`Cargo.toml`/`Cargo.lock`、`go.mod`/`go.sum` 清单守卫；
+  - `scanner.mjs` 与 `graph.mjs` 为 `SOURCE_FILE_RE` 与 `GRAPH_EXTS` 新增 `.py`/`/__init__.py`，实现 `stripPythonComments` 与 `extractPythonImportTargets`（支持 `.` / `..` 相对导入、`__init__.py` 与子包前缀解析），在 `!includeQa` 时跳过非 `src/` 下的测试目录与 Python 虚拟环境/缓存目录；`java-support.mjs` 通过 `resolveImpactRepos` 展开来自配置或 `code-map.meta.sourceRepos` 的单一 Monorepo 根目录并完善孤立 `__init__.py` 桶文件保护。
+
+### 外部图谱侧车数据目录迁移、防泄漏与 CLI / MCP 交互体验升级
+- **`AITEST_DATA_DIR` / `AITEST_CBM_*` 迁移与临时目录零泄漏守卫（`src/codemap/providers/{cbm-client,engine-manifest,registry}.mjs`、`src/jobs/workspace-lock.mjs`、`conformance/graph-engine/run-conformance.mjs`）**：
+  - `engine-manifest.mjs`、`cbm-client.mjs` 与 `buildSafeChildEnv` 白名单全面支持 `AITEST_DATA_DIR`、`AITEST_CBM_BIN_DIR`、`AITEST_CBM_RUNTIME_DIR`、`AITEST_CBM_CACHE_DIR`、`AITEST_CBM_BIN` 与 `AITEST_DISABLE_EXTERNAL_GRAPH`；`registry.mjs` 新增 `isEphemeralTempRepoList`，在 `engine === 'auto'` 时自动跳过 `os.tmpdir()` 临时测试仓库（返回 `builtin-fallback` / `ephemeral-tmpdir-repo-skipped`），防止测试/冒烟运行在持久 CBM 缓存中泄漏残留 SQLite 库。
+- **全局无目标 `mcp engine-status` 与结构化可恢复错误信封（`src/mcp-hub/auditor.mjs`、`src/mcp-hub.mjs`、`src/codemap.mjs`、`src/impact.mjs`）**：
+  - `auditor.mjs` 新增 `inspectGlobalGraphEngineStatus()`，使 `mcp engine-status` 与 `aitest_mcp_hub(action="engine-status")` 在省略 `--target` 或指向未初始化 `qa/` 的目录时均安全返回 `exitCode: 0`（`qaInitialized: false`）与全局二进制/SHA-256 诊断；
+  - `mcp-hub.mjs`、`codemap.mjs` 与 `impact.mjs` 在缺少 `--target` 或未初始化 `qa/` 时统一输出结构化 `blockerKind: "USAGE_ERROR" | "WORKSPACE_NOT_INITIALIZED"` 与 `recoverySteps` / `nextRecommendedActions`。
+
 ## [6.6.0] - 2026-11-27
 
 ### CodeMap v5 三层融合架构、解耦锁版本外部代码图谱侧车与持续升版闭环 ([ADR-0007](./docs/adr/0007-external-code-graph-engine.md))

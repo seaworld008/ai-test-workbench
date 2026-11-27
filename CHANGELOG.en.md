@@ -4,6 +4,34 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.7.0] - 2026-11-27
+
+### Polyglot Monorepo Auto-Discovery & Shared-`.git` Diff Remapping
+- **Unified Nested Polyglot Sub-Project Discovery (`src/init/stack-registry.mjs`, `src/init/planner.mjs`, `src/codemap/spec-indexer.mjs`, `src/impact/java-support.mjs`)**:
+  - Added `BUILD_MANIFEST_MARKERS` (`package.json`, `pom.xml`, `build.gradle*`, `go.mod`, `pyproject.toml`, `requirements.txt`, `Cargo.toml`, `composer.json`) and `discoverMonorepoSubProjects` across depth-1 and depth-2 container folders (`src|apps|packages|services|modules`) whenever a root build manifest is absent or explicit `pnpm-workspace.yaml`/`package.json#workspaces` lacks direct source files under `dir/src`, with canonical path deduplication and strict single-repo preservation;
+  - Expanded `group: 'python'` stack descriptors (`Python/FastAPI`, `Python/aiohttp`, `Python/Flask`, `Python/Starlette`, `Python/Django`, `Python`) and `Pytest` detection across root & `siblingRepos`, while aggregating `lockfile`, `packageManager`, `hasExistingTestsDir`, `vueVersion`, `uiLibrary`, `usesVueCli`, and `mavenModules` in `detectHostTooling`;
+  - Updated `collectMultiRepoGitChangedFiles` (`src/impact/graph.mjs`) to remap shared-`.git` monorepo diffs cleanly (1 git query per distinct `gitRoot`, rewriting `<subRelPrefix>/<inner>` to `<repoLabel>/<inner>` and preserving external paths such as `qa/**` relative to `gitRoot`).
+
+### Full-Stack CodeMap v5.1: Frontend Vue 3 / TS Generic HTTP & Backend Polyglot Extractors
+- **Vue 3 Single-Object Router Modules, Balanced TS Generics & Cross-File Prefix Helpers (`src/codemap/{vue-extractor,vue-template-factory,vue-api-extractor,adapters,spec-indexer}.mjs`)**:
+  - `vue-extractor.mjs` now extracts `isRouterFile`-gated single-object route modules (`export default { ... } satisfies ... / as ...`, `export const ... = { ... }` requiring `path` plus `children`/`component`/`redirect`), captures `LAZY_COMPONENT_VAR_RE` lazy component bindings (`const Layout = () => import(...)`), exports ES6-shorthand-aware `extractTopLevelObjectProps`, and exposes `importBindings` in `parseStaticImports`;
+  - `vue-template-factory.mjs`, `vue-api-extractor.mjs`, `adapters.mjs`, and `spec-indexer.mjs` add exported `skipBalancedAngleBrackets` (distinguishing TS generics `<T>` from `<` / `>` comparisons), deduplicated extraction across all 4 TS/JS HTTP call forms (`.verb<T>(url)`, `.verb<T>({ url })`, `client(.request)<T>(method, url)`, `client(.request)<T>({ url, method })`), `.cjs` CommonJS `require` & `CODE_EXTS` indexing, and walk-order-independent cross-file URL prefix helper resolution (`extractUrlPrefixHelpers` / `resolveCrossFilePrefixHelperCalls`, e.g. `baseUrlApi`).
+- **Python Multi-Framework, ORM/DDL & Node `.cjs` / TypeORM / `.all` Extractors (`src/codemap/python-extractor.mjs`, `src/codemap/backend-adapters.mjs`)**:
+  - Added zero-dep `src/codemap/python-extractor.mjs` featuring O(N) `stripPythonComments` and `maskPythonTripleQuotedStrings` (hiding `#` comments and docstrings while preserving inline SQL DDL), `normalizePythonRoutePath` (`{param:int}`, `<int:id>`, `(?P<id>...)`, query stripping), and endpoint/entity extraction for **FastAPI** (`APIRouter(prefix=...)`, `@*.api_route`, `@*.websocket`), **Flask** (`Blueprint(url_prefix=...)`, `@*.route(..., methods=...)`), **aiohttp** (`router.add_*`, `add_route`, `web.*`, `@routes.*` / `RouteTableDef`), **Starlette** (`Mount` recursive prefixes, `Route`, `WebSocketRoute`), **Django** (`urls.py` `path`/`re_path`, skipping `admin/`), plus SQLAlchemy `__tablename__`, Django `db_table`, and inline `CREATE TABLE` entities;
+  - Wired `python-extractor.mjs` into `backend-adapters.mjs` and extended `node-backend` with `.cjs` support, `(app|router|api).all(...)` -> `ANY`, and TypeORM `@Entity({ name })` / `@Entity()` `snake_case` table inference.
+
+### Diff-Impact v3.1 Precision & Python Reverse-Import Graph
+- **Doc/Fixture Filtering, Polyglot Manifest Guards & Python `.py` Reverse-Import Graph (`src/impact.mjs`, `src/impact/{scanner,graph,java-support}.mjs`)**:
+  - `impact.mjs` filters non-spec `.md`/`.txt` docs before evaluating `GLOBAL_INFRA_PATTERNS` and `detectGlobalInfraImpact`; `graph.mjs` scopes fixture full-fallback patterns to `/^(?:qa\/)?tests\/fixtures\//i` (preventing backend `tests/fixtures/*` false full-suite fallbacks) and adds `pyproject.toml`, `requirements.txt`, `Cargo.toml`/`Cargo.lock`, and `go.mod`/`go.sum` infra guards;
+  - `scanner.mjs` and `graph.mjs` add `.py`/`/__init__.py` to `SOURCE_FILE_RE` & `GRAPH_EXTS`, implement `stripPythonComments` and `extractPythonImportTargets` (relative `.`/`..`, `__init__.py`, and subpath package resolution) while skipping product `tests/` when `!includeQa` and Python venv/cache directories; `java-support.mjs` expands monorepo roots via `resolveImpactRepos` and refines orphan `__init__.py` barrel handling.
+
+### External Graph Sidecar Data-Dir Migration, Leak Prevention & CLI/MCP Ergonomics
+- **`AITEST_DATA_DIR` / `AITEST_CBM_*` Migration & Ephemeral Temp-Repo Leak Guard (`src/codemap/providers/{cbm-client,engine-manifest,registry}.mjs`, `src/jobs/workspace-lock.mjs`, `conformance/graph-engine/run-conformance.mjs`)**:
+  - Added `AITEST_DATA_DIR`, `AITEST_CBM_{BIN_DIR,RUNTIME_DIR,CACHE_DIR,BIN}`, and `AITEST_DISABLE_EXTERNAL_GRAPH` support across `engine-manifest.mjs`, `cbm-client.mjs`, `run-conformance.mjs`, and `buildSafeChildEnv`; `registry.mjs` adds `isEphemeralTempRepoList` so `engine: 'auto'` skips `os.tmpdir()` scratch repos cleanly (`builtin-fallback` / `ephemeral-tmpdir-repo-skipped`) instead of leaking persistent CBM SQLite DBs.
+- **Targetless Global `mcp engine-status` & Structured Recovery Envelopes (`src/mcp-hub/auditor.mjs`, `src/mcp-hub.mjs`, `src/codemap.mjs`, `src/impact.mjs`)**:
+  - Added `inspectGlobalGraphEngineStatus()` so `mcp engine-status` and `aitest_mcp_hub(action="engine-status")` succeed with `exitCode: 0` (`qaInitialized: false`) even without `--target` or against uninitialized workspaces;
+  - Added structured `blockerKind: "USAGE_ERROR" | "WORKSPACE_NOT_INITIALIZED"` with `recoverySteps` and `nextRecommendedActions` across `mcp-hub.mjs`, `codemap.mjs`, and `impact.mjs`.
+
 ## [6.6.0] - 2026-11-27
 
 ### CodeMap v5 Three-Tier Fusion, Decoupled Pinned Sidecar Code Graph Engine & Continuous Upgrade Loop ([ADR-0007](./docs/adr/0007-external-code-graph-engine.en.md))

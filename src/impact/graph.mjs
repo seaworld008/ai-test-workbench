@@ -1,7 +1,6 @@
 // @ts-check
 import fs from 'node:fs';
 import path from 'node:path';
-import { compileGlob } from '../core/glob.mjs';
 import { runProcess } from '../core/proc.mjs';
 import { canonicalFsPath, resolveGitRoot } from '../kernel/gate-kernel.mjs';
 import { addJavaAndXmlReverseEdges, isIgnoredWorkbenchArtifactPath } from './java-support.mjs';
@@ -9,16 +8,19 @@ import {
   DEFAULT_PER_REPO_GRAPH_FILES,
   MAX_GRAPH_FILES,
   buildRepoSourceIndex,
+  extractPythonImportTargets,
   resolveRepoImportFromIndex,
   stripJsCommentsPreserveStrings,
+  stripPythonComments,
 } from './scanner.mjs';
 
-export { MAX_GRAPH_FILES, stripJsCommentsPreserveStrings };
+export { MAX_GRAPH_FILES, stripJsCommentsPreserveStrings, stripPythonComments };
 
 export const GLOBAL_INFRA_PATTERNS = [
   /(^|\/)package\.json$/i,
   /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?)$/i,
   /(^|\/)(pom\.xml|build\.gradle(\.kts)?|composer\.(json|lock))$/i,
+  /(^|\/)(pyproject\.toml|requirements\.txt|Cargo\.(toml|lock)|go\.(mod|sum))$/i,
   /(^|\/)playwright\.config\.[jt]s$/i,
   /(^|\/)eslint\.config\.[mc]?[jt]s$/i,
   /(^|\/)aitest\.config\.json$/i,
@@ -26,7 +28,7 @@ export const GLOBAL_INFRA_PATTERNS = [
   /(^|\/)waivers\.json$/i,
   /(^|\/)tsconfig\.json$/i,
   /(^|\/)support\//i,
-  /(^|\/)tests\/fixtures\//i,
+  /^(?:qa\/)?tests\/fixtures\//i,
   /(^|\/)[^/]+\.setup\.[jt]s$/i,
   /(^|\/)(?:styles?|themes?|i18n|locales)\//i,
   /(^|\/)(?:global|globals|app|index|main|theme|tokens)\.(?:css|scss|less|json)$/i,
@@ -35,39 +37,6 @@ export const GLOBAL_INFRA_PATTERNS = [
 ];
 
 const ROUTER_FILE_RE = /(?:^|\/)(?:[a-z0-9_-]*-)?(?:router|routes)(?:\/|\.|-[a-z])/i;
-
-/** @param {string} pattern @returns {boolean} */
-export function isOverbroadCatchAllGlob(pattern) {
-  const clean = String(pattern || '').trim().replace(/^\.\//, '');
-  return clean === '**' || clean === '*' || clean === '**/*' || clean === 'src/**' || clean === 'src/**/*';
-}
-
-/**
- * @param {string} testsDir
- * @param {string} qaDir
- * @returns {string[]}
- */
-export function listAllSpecFiles(testsDir, qaDir) {
-  /** @type {string[]} */
-  const results = [];
-  if (!fs.existsSync(testsDir)) return results;
-  const walk = (/** @type {string} */ dir) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else if (
-        entry.isFile() &&
-        /\.(?:spec|test)\.[jt]s$/.test(entry.name) &&
-        path.relative(testsDir, full).replace(/\\/g, '/') !== 'seed.spec.ts' &&
-        !entry.name.endsWith('.official.example.ts')
-      ) {
-        results.push(path.relative(qaDir, full).replace(/\\/g, '/'));
-      }
-    }
-  };
-  walk(testsDir);
-  return results.sort();
-}
 
 /** @param {string} repoDir */
 function loadTsConfigPathAliases(repoDir) {
@@ -113,9 +82,17 @@ function populateRepoIntoReverseGraph(repoDir, reverse, routeRegEdges, options) 
     includeQa: Boolean(options.includeQa),
     maxFiles: options.maxFiles ?? DEFAULT_PER_REPO_GRAPH_FILES,
   });
+  const pyRelFiles = index.files.filter((f) => f.rel.endsWith('.py')).map((f) => f.rel);
 
   /** @type {Map<string, Set<string>>} */
   const localReverse = new Map();
+  const addEdge = (/** @type {Map<string, Set<string>>} */ bucket, /** @type {string} */ targetRel, /** @type {string} */ fromRel) => {
+    const pTarget = options.prefix ? `${options.prefix}/${targetRel}` : targetRel;
+    const pFrom = options.prefix ? `${options.prefix}/${fromRel}` : fromRel;
+    let importers = bucket.get(pTarget);
+    if (!importers) { importers = new Set(); bucket.set(pTarget, importers); }
+    importers.add(pFrom);
+  };
   const importRe =
     /(?:import\s+(?:[^'"`;]{0,200}\s+from\s+)?['"`]([^'"`]+)['"`]|export\s+[^'"`;]{0,200}\s+from\s+['"`]([^'"`]+)['"`]|import\s*\(\s*['"`]([^'"`]+)['"`]\s*\)|require\s*\(\s*['"`]([^'"`]+)['"`]\s*\))/g;
 
@@ -125,6 +102,12 @@ function populateRepoIntoReverseGraph(repoDir, reverse, routeRegEdges, options) 
     try { stat = fs.statSync(full); } catch { continue; }
     if (stat.size > 512 * 1024) continue;
     const rawText = fs.readFileSync(full, 'utf8');
+    if (fromRel.endsWith('.py')) {
+      for (const targetRel of extractPythonImportTargets(fromRel, rawText, index, pyRelFiles)) {
+        addEdge(localReverse, targetRel, fromRel);
+      }
+      continue;
+    }
     let jsSource = rawText;
     if (fromRel.endsWith('.vue')) {
       const blocks = [...rawText.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1]);
@@ -139,12 +122,7 @@ function populateRepoIntoReverseGraph(repoDir, reverse, routeRegEdges, options) 
       const isLazyRouterImport = isRouterFile && Boolean(m[3]);
       const targetRel = resolveRepoImportFromIndex(fromRel, spec, pathAliases, index);
       if (!targetRel || targetRel === fromRel) continue;
-      const bucket = isLazyRouterImport ? routeRegEdges : localReverse;
-      const pTarget = options.prefix ? `${options.prefix}/${targetRel}` : targetRel;
-      const pFrom = options.prefix ? `${options.prefix}/${fromRel}` : fromRel;
-      let importers = bucket.get(pTarget);
-      if (!importers) { importers = new Set(); bucket.set(pTarget, importers); }
-      importers.add(pFrom);
+      addEdge(isLazyRouterImport ? routeRegEdges : localReverse, targetRel, fromRel);
     }
   }
 
@@ -185,26 +163,31 @@ export function buildReverseImportGraph(repoDir, options = {}) {
   const validRepos = [...new Set(repos.filter((r) => r && fs.existsSync(r)).map((r) => path.resolve(r)))];
   if (validRepos.length === 0) return reverse;
 
-  const multi = validRepos.length > 1;
-  const usedLabels = new Set();
-  for (const root of validRepos) {
-    let prefix = '';
-    if (multi) {
-      const base = path.basename(root) || 'repo';
-      prefix = base;
-      let idx = 2;
-      while (usedLabels.has(prefix)) { prefix = `${base}-${idx}`; idx += 1; }
-      usedLabels.add(prefix);
-    }
+  for (const { root, label } of assignRepoLabels(validRepos)) {
     const truncated = populateRepoIntoReverseGraph(root, reverse, routeRegEdges, {
       includeQa: options.includeQa,
       maxFiles: options.maxFiles,
-      prefix,
+      prefix: label,
     });
     if (truncated) reverse.truncated = true;
   }
 
   return reverse;
+}
+
+/** @param {string[]} repos */
+function assignRepoLabels(repos) {
+  const multi = repos.length > 1;
+  const used = new Set();
+  return repos.map((root) => {
+    const resolved = path.resolve(root);
+    if (!multi) return { root: resolved, realRoot: canonicalFsPath(resolved), label: '' };
+    const base = path.basename(resolved) || 'repo';
+    let label = base;
+    for (let n = 2; used.has(label); n += 1) label = `${base}-${n}`;
+    used.add(label);
+    return { root: resolved, realRoot: canonicalFsPath(resolved), label };
+  });
 }
 
 /**
@@ -236,76 +219,48 @@ export function findTransitiveDependents(startFile, reverseGraph, maxDepth = 6) 
 }
 
 /**
- * Evaluates Nightly Impact Recall (`coveredFailures / totalFailures`, `I-03`).
- * @param {{ mode: string, specs: string[] }} impactResult
- * @param {string[]} failedSpecFiles
+ * Queries changed & untracked paths relative to `gitRoot` once via `git -c core.quotePath=off ... -z`.
+ * @param {string} gitRoot
+ * @param {string} [baseRef]
+ * @returns {Promise<{ ok: boolean, reason: string | null, rawFiles: string[], validBaseRef: boolean }>}
  */
-export function evaluateImpactRecall(impactResult, failedSpecFiles = []) {
-  const uniqueFailed = [...new Set(failedSpecFiles.map((f) => f.replace(/\\/g, '/')))];
-  if (uniqueFailed.length === 0) return { totalFailures: 0, coveredFailures: 0, missedSpecs: [], recall: 1 };
-  if (impactResult.mode === 'full') {
-    return { totalFailures: uniqueFailed.length, coveredFailures: uniqueFailed.length, missedSpecs: [], recall: 1 };
-  }
-  const selected = new Set([
-    ...impactResult.specs.map((s) => s.replace(/\\/g, '/')),
-    ...uniqueFailed.filter((f) => f.startsWith('tests/smoke/')),
-  ]);
-  const missedSpecs = uniqueFailed.filter((f) => !selected.has(f));
-  const covered = uniqueFailed.length - missedSpecs.length;
-  return {
-    totalFailures: uniqueFailed.length,
-    coveredFailures: covered,
-    missedSpecs,
-    recall: Number((covered / uniqueFailed.length).toFixed(4)),
-  };
-}
-
-/** @param {string} specRel @param {string} stem @returns {boolean} */
-export function specMatchesStemExactSegment(specRel, stem) {
-  const baseNoExt = path.basename(specRel).replace(/\.(?:spec|test)\.[jt]s$/i, '').toLowerCase();
-  const dirSegments = specRel.toLowerCase().split('/').slice(0, -1);
-  if (baseNoExt === stem || dirSegments.includes(stem)) return true;
-  const tokens = baseNoExt.split(/[-_.]+/).filter(Boolean);
-  return tokens.length === 1 && tokens[0] === stem;
-}
-
-/**
- * Loads and validates rules from an impact JSON file.
- * @param {string} filePath
- */
-export function loadAndValidateImpactRules(filePath) {
-  if (!fs.existsSync(filePath)) {
-    return { ok: true, rules: /** @type {Array<{ rawMatch: string, patterns: RegExp[], specs: string[], fullSuite: boolean }>} */ ([]), errorReason: null };
-  }
-  /** @type {Array<{ match?: string | string[], source?: string, specs?: string[], fullSuite?: boolean }>} */
-  let rawRules = [];
-  try {
-    const rawMap = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    rawRules = Array.isArray(rawMap.rules) ? rawMap.rules : [];
-  } catch {
-    return { ok: false, rules: [], errorReason: `Invalid JSON in ${path.basename(filePath)} — falling back to full suite.` };
-  }
-  for (const r of rawRules) {
-    const rawPatterns = /** @type {string[]} */ ((Array.isArray(r.match) ? r.match : [r.source || r.match]).filter(Boolean));
-    if (!r.fullSuite && rawPatterns.some(isOverbroadCatchAllGlob)) {
-      return {
-        ok: false,
-        rules: [],
-        errorReason: `Overbroad wildcard rule (${rawPatterns.join(', ')}) in ${path.basename(filePath)} without fullSuite:true rejected — falling back to full suite.`,
-        via: `overbroad-impact-rule-blocked: ${rawPatterns.join(', ')}`,
-      };
+async function queryGitRootChangedPaths(gitRoot, baseRef = 'HEAD~1') {
+  /** @type {Set<string>} */
+  const rawFiles = new Set();
+  const collectNul = (/** @type {string} */ stdout) => {
+    for (const raw of String(stdout || '').split('\0')) {
+      const trimmed = raw.trim().replace(/\\/g, '/').replace(/^\.\//, '');
+      if (trimmed) rawFiles.add(trimmed);
     }
-  }
-  return {
-    ok: true,
-    errorReason: null,
-    rules: rawRules.map((r) => ({
-      rawMatch: Array.isArray(r.match) ? r.match.join(', ') : String(r.source || r.match || ''),
-      patterns: /** @type {string[]} */ ((Array.isArray(r.match) ? r.match : [r.source || r.match]).filter(Boolean)).map(compileGlob),
-      specs: Array.isArray(r.specs) ? r.specs : [],
-      fullSuite: Boolean(r.fullSuite),
-    })),
   };
+
+  const [verifyRes, branchDiff, headCheck, wtDiffHead, untracked] = await Promise.all([
+    baseRef ? runProcess('git', ['-c', 'core.quotePath=off', 'rev-parse', '--verify', baseRef], { cwd: gitRoot, timeoutMs: 5000 }) : Promise.resolve(null),
+    baseRef ? runProcess('git', ['-c', 'core.quotePath=off', 'diff', '--name-only', '-z', `${baseRef}...HEAD`], { cwd: gitRoot, timeoutMs: 8000 }) : Promise.resolve(null),
+    runProcess('git', ['-c', 'core.quotePath=off', 'rev-parse', '--verify', 'HEAD'], { cwd: gitRoot, timeoutMs: 5000 }),
+    runProcess('git', ['-c', 'core.quotePath=off', 'diff', '--name-only', '-z', 'HEAD'], { cwd: gitRoot, timeoutMs: 8000 }),
+    runProcess('git', ['-c', 'core.quotePath=off', 'ls-files', '--others', '--exclude-standard', '-z'], { cwd: gitRoot, timeoutMs: 8000 }),
+  ]);
+
+  const validBaseRef = Boolean(verifyRes && verifyRes.code === 0);
+  if (validBaseRef && branchDiff && branchDiff.code === 0) collectNul(branchDiff.stdout);
+  if (headCheck.code === 0) {
+    if (wtDiffHead.code === 0) collectNul(wtDiffHead.stdout);
+  } else {
+    const wtDiff = await runProcess('git', ['-c', 'core.quotePath=off', 'diff', '--name-only', '-z'], { cwd: gitRoot, timeoutMs: 8000 });
+    if (wtDiff.code === 0) collectNul(wtDiff.stdout);
+  }
+  if (untracked.code === 0) collectNul(untracked.stdout);
+
+  if (!validBaseRef && rawFiles.size === 0) {
+    return {
+      ok: false,
+      reason: `Cannot resolve base ref "${baseRef}" (e.g. shallow clone or initial commit) and working tree is clean.`,
+      rawFiles: [],
+      validBaseRef: false,
+    };
+  }
+  return { ok: true, reason: null, rawFiles: [...rawFiles], validBaseRef };
 }
 
 /**
@@ -319,108 +274,164 @@ export async function collectGitChangedFiles(repoDir, baseRef = 'HEAD~1', option
   if (!gitRoot) {
     return { ok: false, reason: 'Target is not a git repository.', files: /** @type {string[]} */ ([]), validBaseRef: false };
   }
+  const queried = await queryGitRootChangedPaths(gitRoot, baseRef);
+  if (!queried.ok) {
+    return { ok: false, reason: queried.reason, files: [], validBaseRef: false };
+  }
   const realRepoDir = canonicalFsPath(repoDir);
   /** @type {Set<string>} */
   const files = new Set();
-  const addNulOutput = (/** @type {string} */ stdout) => {
-    for (const raw of String(stdout || '').split('\0')) {
-      const trimmed = raw.trim();
-      if (!trimmed) continue;
-      const abs = path.join(gitRoot, trimmed);
-      const rel = path.relative(realRepoDir, abs).replace(/\\/g, '/');
-      if (rel && !rel.startsWith('..') && !isIgnoredWorkbenchArtifactPath(rel, options.qaRelPrefix || '')) {
-        files.add(rel);
-      }
+  for (const trimmed of queried.rawFiles) {
+    const abs = path.join(gitRoot, trimmed);
+    const rel = path.relative(realRepoDir, abs).replace(/\\/g, '/');
+    if (rel && !rel.startsWith('..') && !isIgnoredWorkbenchArtifactPath(rel, options.qaRelPrefix || '')) {
+      files.add(rel);
     }
-  };
-
-  const [verifyRes, branchDiff, headCheck, wtDiffHead, untracked] = await Promise.all([
-    baseRef ? runProcess('git', ['-c', 'core.quotePath=off', 'rev-parse', '--verify', baseRef], { cwd: gitRoot, timeoutMs: 5000 }) : Promise.resolve(null),
-    baseRef ? runProcess('git', ['-c', 'core.quotePath=off', 'diff', '--name-only', '-z', `${baseRef}...HEAD`], { cwd: gitRoot, timeoutMs: 8000 }) : Promise.resolve(null),
-    runProcess('git', ['-c', 'core.quotePath=off', 'rev-parse', '--verify', 'HEAD'], { cwd: gitRoot, timeoutMs: 5000 }),
-    runProcess('git', ['-c', 'core.quotePath=off', 'diff', '--name-only', '-z', 'HEAD'], { cwd: gitRoot, timeoutMs: 8000 }),
-    runProcess('git', ['-c', 'core.quotePath=off', 'ls-files', '--others', '--exclude-standard', '-z'], { cwd: gitRoot, timeoutMs: 8000 }),
-  ]);
-
-  const validBaseRef = Boolean(verifyRes && verifyRes.code === 0);
-  if (validBaseRef && branchDiff && branchDiff.code === 0) addNulOutput(branchDiff.stdout);
-  if (headCheck.code === 0) {
-    if (wtDiffHead.code === 0) addNulOutput(wtDiffHead.stdout);
-  } else {
-    const wtDiff = await runProcess('git', ['-c', 'core.quotePath=off', 'diff', '--name-only', '-z'], { cwd: gitRoot, timeoutMs: 8000 });
-    if (wtDiff.code === 0) addNulOutput(wtDiff.stdout);
   }
-  if (untracked.code === 0) addNulOutput(untracked.stdout);
-
-  if (!validBaseRef && files.size === 0) {
-    return {
-      ok: false,
-      reason: `Cannot resolve base ref "${baseRef}" (e.g. shallow clone or initial commit) and working tree is clean.`,
-      files: [],
-      validBaseRef: false,
-    };
-  }
-  return { ok: true, reason: null, files: [...files].sort(), validBaseRef };
+  return { ok: true, reason: null, files: [...files].sort(), validBaseRef: queried.validBaseRef };
 }
 
 /**
  * Collects git diffs across multiple repositories, prefixing paths with `<repoBasename>/` when `repos.length > 1`.
+ * When multiple sub-repos share ONE parent `.git` monorepo root, queries git once per `gitRoot` and
+ * remaps `<subRelPrefix>/<innerPath>` -> `<repoLabel>/<innerPath>`, while preserving files outside
+ * any sub-repo (such as `qa/**` or root manifests) relative to `gitRoot`.
  * @param {string[]} repos
  * @param {string} [baseRef]
  * @param {{ qaRelPrefix?: string }} [options]
  */
 export async function collectMultiRepoGitChangedFiles(repos, baseRef = 'HEAD~1', options = {}) {
   if (repos.length <= 1) return collectGitChangedFiles(repos[0], baseRef, options);
-  const results = await Promise.all(repos.map((r) => collectGitChangedFiles(r, baseRef, options)));
-  if (results.some((r) => !r.ok)) {
-    const firstErr = results.find((r) => !r.ok);
+
+  const labeled = assignRepoLabels(repos);
+
+  /** @type {Map<string, Array<{ root: string, realRoot: string, label: string, relSubPrefix: string }>>} */
+  const byGitRoot = new Map();
+  for (const item of labeled) {
+    const gitRoot = resolveGitRoot(item.root);
+    if (!gitRoot) {
+      return { ok: false, reason: 'Target is not a git repository.', files: [], validBaseRef: false };
+    }
+    const rawRel = path.relative(gitRoot, item.realRoot).replace(/\\/g, '/').replace(/\/+$/, '');
+    const relSubPrefix = rawRel && !rawRel.startsWith('..') ? rawRel : '';
+    const arr = byGitRoot.get(gitRoot) || [];
+    arr.push({ ...item, relSubPrefix });
+    byGitRoot.set(gitRoot, arr);
+  }
+
+  const rootEntries = [...byGitRoot.entries()];
+  const rootResults = await Promise.all(rootEntries.map(([gitRoot]) => queryGitRootChangedPaths(gitRoot, baseRef)));
+  if (rootResults.some((r) => !r.ok)) {
+    const firstErr = rootResults.find((r) => !r.ok);
     return { ok: false, reason: firstErr?.reason || 'One or more source repos are not git repositories.', files: [], validBaseRef: false };
   }
-  const usedLabels = new Set();
+
+  const qaRelPrefix = options.qaRelPrefix || '';
   /** @type {string[]} */
   const merged = [];
-  repos.forEach((root, idx) => {
-    const base = path.basename(root) || 'repo';
-    let label = base;
-    let n = 2;
-    while (usedLabels.has(label)) { label = `${base}-${n}`; n += 1; }
-    usedLabels.add(label);
-    for (const f of results[idx].files) merged.push(`${label}/${f}`);
+
+  rootEntries.forEach(([, repoEntries], idx) => {
+    const nested = repoEntries
+      .filter((e) => e.relSubPrefix.length > 0)
+      .sort((a, b) => b.relSubPrefix.length - a.relSubPrefix.length);
+    const nonNested = repoEntries.filter((e) => e.relSubPrefix.length === 0);
+
+    for (const gitRel of rootResults[idx].rawFiles) {
+      const hit = nested.find((e) => gitRel === e.relSubPrefix || gitRel.startsWith(`${e.relSubPrefix}/`));
+      if (hit) {
+        const innerRel = gitRel === hit.relSubPrefix ? '' : gitRel.slice(hit.relSubPrefix.length + 1);
+        if (!innerRel) continue;
+        const remapped = `${hit.label}/${innerRel}`;
+        if (!isIgnoredWorkbenchArtifactPath(gitRel, qaRelPrefix) && !isIgnoredWorkbenchArtifactPath(remapped, qaRelPrefix)) {
+          merged.push(remapped);
+        }
+      } else if (nonNested.length > 0) {
+        if (isIgnoredWorkbenchArtifactPath(gitRel, qaRelPrefix)) continue;
+        for (const entry of nonNested) merged.push(`${entry.label}/${gitRel}`);
+      } else if (!isIgnoredWorkbenchArtifactPath(gitRel, qaRelPrefix)) {
+        merged.push(gitRel);
+      }
+    }
   });
+
   return {
     ok: true,
     reason: null,
     files: [...new Set(merged)].sort(),
-    validBaseRef: results.every((r) => r.validBaseRef),
+    validBaseRef: rootResults.every((r) => r.validBaseRef),
   };
 }
 
-/** @param {string} qaDir @param {string} repoDir @param {string[]} allSpecs */
-export function buildReqIdToSpecMap(qaDir, repoDir, allSpecs) {
-  /** @type {Map<string, Set<string>>} */
-  const reqToSpecs = new Map();
-  const reqRe = /\bREQ-[A-Za-z0-9_-]+\b/g;
-  for (const spRel of allSpecs) {
-    const abs = path.join(qaDir, spRel);
-    if (!fs.existsSync(abs)) continue;
-    const text = fs.readFileSync(abs, 'utf8');
-    for (const m of text.matchAll(reqRe)) {
-      const id = m[0].toUpperCase();
-      let set = reqToSpecs.get(id);
-      if (!set) { set = new Set(); reqToSpecs.set(id, set); }
-      set.add(spRel);
-    }
-  }
-  return reqToSpecs;
-}
+/**
+ * Remaps explicit `--files` / `options.files` paths for multi-repo / shared-`.git` monorepo workspaces
+ * into `<repoLabel>/<innerPath>` (matching `collectMultiRepoGitChangedFiles` / `buildReverseImportGraph`).
+ * @param {string[] | undefined | null} rawFiles
+ * @param {string[] | undefined | null} repos
+ * @param {string} [effectiveRepoDir]
+ * @returns {string[]}
+ */
+export function remapMultiRepoFilePaths(rawFiles, repos, effectiveRepoDir = '') {
+  const input = Array.isArray(rawFiles) ? rawFiles : [];
+  if (!Array.isArray(repos) || repos.length <= 1) return [...input];
+  const uniqueRepos = [...new Set(repos.filter(Boolean).map((r) => path.resolve(r)))];
+  if (uniqueRepos.length <= 1) return [...input];
 
-/** @param {string} absFilePath @returns {string[]} */
-export function extractReqIdsFromFile(absFilePath) {
-  if (!fs.existsSync(absFilePath)) return [];
-  try {
-    const text = fs.readFileSync(absFilePath, 'utf8');
-    return [...new Set([...text.matchAll(/\bREQ-[A-Za-z0-9_-]+\b/g)].map((m) => m[0].toUpperCase()))];
-  } catch {
-    return [];
+  const realEffective = effectiveRepoDir ? canonicalFsPath(effectiveRepoDir) : '';
+  const baseDirsSet = new Set(realEffective ? [realEffective] : []);
+  const entries = assignRepoLabels(uniqueRepos).map(({ root, realRoot, label }) => {
+    const gitRoot = resolveGitRoot(root);
+    const realGitRoot = gitRoot ? canonicalFsPath(gitRoot) : '';
+    if (realGitRoot) baseDirsSet.add(realGitRoot);
+    /** @type {string[]} */
+    const relPrefixes = [];
+    for (const baseDir of [realEffective, realGitRoot]) {
+      if (!baseDir) continue;
+      const rel = path.relative(baseDir, realRoot).replace(/\\/g, '/').replace(/\/+$/, '');
+      if (rel && !rel.startsWith('..') && !path.isAbsolute(rel) && !relPrefixes.includes(rel)) relPrefixes.push(rel);
+    }
+    return { realRoot: realRoot.replace(/\\/g, '/').replace(/\/+$/, ''), label, relPrefixes };
+  });
+
+  const knownLabels = new Set(entries.map((e) => e.label));
+  const entriesByRealRoot = [...entries].sort((a, b) => b.realRoot.length - a.realRoot.length);
+  const prefixRules = entries
+    .flatMap((e) => e.relPrefixes.map((prefix) => ({ prefix, label: e.label })))
+    .sort((a, b) => b.prefix.length - a.prefix.length);
+  const baseDirs = [...baseDirsSet];
+  const isWin = process.platform === 'win32';
+  const eqOrStarts = (/** @type {string} */ a, /** @type {string} */ b) =>
+    isWin ? a.toLowerCase() === b.toLowerCase() || a.toLowerCase().startsWith(`${b.toLowerCase()}/`) : a === b || a.startsWith(`${b}/`);
+  const remapRel = (/** @type {string} */ relNorm) => {
+    const hit = prefixRules.find((r) => eqOrStarts(relNorm, r.prefix));
+    if (!hit) return relNorm;
+    const inner = relNorm.length === hit.prefix.length ? '' : relNorm.slice(hit.prefix.length + 1);
+    return inner ? `${hit.label}/${inner}` : hit.label;
+  };
+
+  /** @type {string[]} */
+  const out = [];
+  for (const raw of input) {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed) continue;
+    const norm = trimmed.replace(/\\/g, '/').replace(/^\.\//, '');
+    if (!norm) continue;
+    const slashIdx = norm.indexOf('/');
+    if (slashIdx > 0 && knownLabels.has(norm.slice(0, slashIdx))) { out.push(norm); continue; }
+    if (path.isAbsolute(trimmed)) {
+      const realRaw = canonicalFsPath(trimmed).replace(/\\/g, '/');
+      const rootHit = entriesByRealRoot.find((e) => eqOrStarts(realRaw, e.realRoot));
+      if (rootHit) {
+        const inner = realRaw.length === rootHit.realRoot.length ? '' : realRaw.slice(rootHit.realRoot.length + 1);
+        out.push(inner ? `${rootHit.label}/${inner}` : rootHit.label);
+        continue;
+      }
+      const baseHit = baseDirs
+        .map((b) => path.relative(b, realRaw).replace(/\\/g, '/').replace(/^\.\//, ''))
+        .find((rel) => rel && !rel.startsWith('..') && !path.isAbsolute(rel));
+      out.push(baseHit ? remapRel(baseHit) : norm);
+      continue;
+    }
+    out.push(remapRel(norm));
   }
+  return out;
 }

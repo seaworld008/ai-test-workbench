@@ -1,7 +1,75 @@
 // @ts-check
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { createCbmGraphProvider } from './cbm-adapter.mjs';
 import { compareCodeUnit, createFallbackGraphSnapshot } from './cbm-normalizer.mjs';
 import { DEFAULT_GRAPH_ENGINE_ID } from './engine-manifest.mjs';
+
+/**
+ * Resolves a path (following existing symlinks/8.3 aliases) for containment checks.
+ * @param {string} targetPath
+ * @returns {string}
+ */
+function canonicalComparePath(targetPath) {
+  const resolved = path.resolve(targetPath);
+  let real = resolved;
+  try {
+    if (fs.existsSync(resolved)) {
+      real = typeof fs.realpathSync.native === 'function' ? fs.realpathSync.native(resolved) : fs.realpathSync(resolved);
+    }
+  } catch {
+    real = resolved;
+  }
+  return process.platform === 'win32' ? real.toLowerCase() : real;
+}
+
+/**
+ * Returns true when every repository path resides under `os.tmpdir()` (ephemeral test/smoke scratch repos).
+ * @param {Array<string | { path: string; label?: string; role?: string }>} repoSpecs
+ * @returns {boolean}
+ */
+export function isEphemeralTempRepoList(repoSpecs) {
+  if (!Array.isArray(repoSpecs) || repoSpecs.length === 0) return false;
+  const tmpCanon = canonicalComparePath(os.tmpdir());
+  const tmpPrefix = tmpCanon.endsWith(path.sep) ? tmpCanon : `${tmpCanon}${path.sep}`;
+  let count = 0;
+  for (const item of repoSpecs) {
+    const rawPath = typeof item === 'string' ? item : item?.path;
+    if (!rawPath || typeof rawPath !== 'string') return false;
+    const repoCanon = canonicalComparePath(rawPath);
+    if (repoCanon !== tmpCanon && !repoCanon.startsWith(tmpPrefix)) return false;
+    count += 1;
+  }
+  return count > 0;
+}
+
+/**
+ * Returns an optional external-skip reason when `engine === 'auto'` should stay on `builtin-fallback`.
+ * Prevents throwaway `os.tmpdir()` test/smoke/demo runs from leaking permanent SQLite DBs into CBM cache.
+ * @param {string} engine
+ * @param {string} targetProviderId
+ * @param {Array<string | { path: string; label?: string; role?: string }>} repoSpecs
+ * @param {Record<string, any>} ctx
+ * @returns {string | null}
+ */
+function resolveAutoSkipReason(engine, targetProviderId, repoSpecs, ctx) {
+  if (engine !== 'auto') return null;
+  const disabledFlag = String(ctx?.env?.AITEST_DISABLE_EXTERNAL_GRAPH ?? process.env.AITEST_DISABLE_EXTERNAL_GRAPH ?? '').trim();
+  if (disabledFlag === '1') return 'external-graph-disabled-by-env';
+  if (
+    targetProviderId === DEFAULT_GRAPH_ENGINE_ID &&
+    !ctx?.clientFactory &&
+    !ctx?.runProcessImpl &&
+    !ctx?.binaryPath &&
+    !ctx?.binBaseDir &&
+    ctx?.allowTempRepos !== true &&
+    isEphemeralTempRepoList(repoSpecs)
+  ) {
+    return 'ephemeral-tmpdir-repo-skipped';
+  }
+  return null;
+}
 
 /**
  * @typedef {{
@@ -100,6 +168,10 @@ export async function resolveGraphSnapshot(repoSpecs, options = {}) {
   }
 
   const targetProviderId = engine === 'auto' ? options.providerId || DEFAULT_GRAPH_ENGINE_ID : engine;
+  const skipReason = resolveAutoSkipReason(engine, targetProviderId, repoSpecs, ctx);
+  if (skipReason) {
+    return createFallbackGraphSnapshot(skipReason, { provider: 'builtin' });
+  }
   const provider = getGraphProvider(targetProviderId);
   if (!provider) {
     const reason = `Graph provider "${targetProviderId}" is not registered.`;
@@ -138,21 +210,27 @@ export async function resolveGraphSnapshot(repoSpecs, options = {}) {
  */
 export async function queryGraphComposite(query, repoSpecs, options = {}) {
   const engine = String(options.engine || 'auto').trim();
+  const ctx = options.ctx || {};
+  const makeFallbackQuery = (/** @type {string} */ degradedReason, providerName = 'builtin') => ({
+    ok: false,
+    provider: providerName,
+    mode: /** @type {'builtin-fallback'} */ ('builtin-fallback'),
+    query,
+    degradedReason,
+    symbols: [],
+    hotspots: [],
+    callers: {},
+    callees: {},
+    truncated: false,
+  });
   if (engine === 'builtin') {
-    return {
-      ok: false,
-      provider: 'builtin',
-      mode: 'builtin-fallback',
-      query,
-      degradedReason: 'builtin-engine-requested',
-      symbols: [],
-      hotspots: [],
-      callers: {},
-      callees: {},
-      truncated: false,
-    };
+    return makeFallbackQuery('builtin-engine-requested');
   }
   const targetProviderId = engine === 'auto' ? options.providerId || DEFAULT_GRAPH_ENGINE_ID : engine;
+  const skipReason = resolveAutoSkipReason(engine, targetProviderId, repoSpecs, ctx);
+  if (skipReason) {
+    return makeFallbackQuery(skipReason);
+  }
   const provider = getGraphProvider(targetProviderId);
   if (!provider || typeof provider.queryComposite !== 'function') {
     return {

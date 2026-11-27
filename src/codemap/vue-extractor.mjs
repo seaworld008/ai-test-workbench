@@ -11,6 +11,10 @@ const ROUTER_FILE_RE = /(?:^|\/)(?:[a-z0-9_-]*-)?(?:router|routes)(?:\/|\.|-[a-z
 const EXPLICIT_ROUTES_START_RE =
   /(?:export\s+default\s*|(?:\b(?:constantRoutes|asyncRoutes|dynamicRoutes|staticRoutes|publicRoutes|routes|[A-Za-z_$][A-Za-z0-9_$]*Routes)\s*(?::\s*[^=\n;{]+)?=\s*)|\broutes\s*:\s*)\[/g;
 const ROUTER_ANY_ARRAY_START_RE = /(?:export\s+default\s*|(?:\b[A-Za-z_$][A-Za-z0-9_$]*\s*(?::\s*[^=\n;{]+)?=\s*)|\broutes\s*:\s*)\[/g;
+const ROUTER_SINGLE_OBJ_START_RE =
+  /(?:export\s+default\s*|(?:\b(?:export\s+)?(?:const|let|var)\s+[A-Za-z_$][A-Za-z0-9_$]*(?:\s*:\s*[^=\n;{]+)?\s*=\s*))\{/g;
+const LAZY_COMPONENT_VAR_RE =
+  /\b(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)(?:\s*:\s*(?:=>|[^=;\n{])+)?\s*=\s*(?:defineAsyncComponent\s*\(\s*)?(?:async\s*)?\(\s*\)(?:\s*:\s*[^=>{;\n]+)?\s*=>\s*(?:\{\s*return\s+)?\bimport\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/g;
 
 /**
  * Linear O(N) JS/TS comment stripper preserving string, template, and regex literals.
@@ -177,7 +181,7 @@ function joinRoutePath(parentPath, childPath) {
  * @param {string} objBody
  * @returns {Record<string, string>}
  */
-function extractTopLevelObjectProps(objBody) {
+export function extractTopLevelObjectProps(objBody) {
   /** @type {Record<string, string>} */
   const props = {};
   let i = 0;
@@ -218,6 +222,8 @@ function extractTopLevelObjectProps(objBody) {
           const closeBrace = findBalancedClose(objBody, i, '{', '}');
           i = closeBrace >= 0 ? closeBrace + 1 : len;
         }
+      } else if (key && (i >= len || objBody[i] === ',')) {
+        props[key] = key;
       }
       continue;
     }
@@ -270,35 +276,32 @@ export function parseStaticImports(stripped) {
   const identifierToSpec = new Map();
   /** @type {Record<string, string[]>} */
   const namedImportsBySpec = {};
-  const addNamed = (/** @type {string} */ spec, /** @type {string} */ name) => {
+  /** @type {Map<string, { spec: string, importedName: string }>} */
+  const importBindings = new Map();
+  const bind = (/** @type {string} */ local, /** @type {string} */ spec, /** @type {string} */ orig) => {
+    identifierToSpec.set(local, spec);
+    importBindings.set(local, { spec, importedName: orig });
     const arr = namedImportsBySpec[spec] || (namedImportsBySpec[spec] = []);
-    if (!arr.includes(name)) arr.push(name);
+    if (!arr.includes(orig)) arr.push(orig);
   };
   const parseNamedClause = (/** @type {string} */ inner, /** @type {string} */ spec) => {
     for (const item of inner.split(',')) {
       const m = item.trim().match(/^([A-Za-z_$][A-Za-z0-9_$]*)(?:\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*))?$/);
-      if (!m) continue;
-      identifierToSpec.set(m[2] || m[1], spec);
-      addNamed(spec, m[1]);
+      if (m) bind(m[2] || m[1], spec, m[1]);
     }
   };
-
   for (const m of stripped.matchAll(/\bimport\s+([\s\S]{1,400}?)\s+from\s*['"]([^'"]+)['"]/g)) {
-    const clause = m[1].trim();
-    const spec = m[2].trim();
+    const clause = m[1].trim(), spec = m[2].trim();
     specs.push(spec);
     if (clause.startsWith('*')) {
       const ns = clause.match(/\*\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*)/);
-      if (ns) { identifierToSpec.set(ns[1], spec); addNamed(spec, '*'); }
+      if (ns) bind(ns[1], spec, '*');
     } else if (clause.startsWith('{')) {
       parseNamedClause(clause.slice(1, clause.lastIndexOf('}')), spec);
     } else {
       const commaIdx = clause.indexOf(',');
       const defName = (commaIdx >= 0 ? clause.slice(0, commaIdx) : clause).trim();
-      if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(defName)) {
-        identifierToSpec.set(defName, spec);
-        addNamed(spec, 'default');
-      }
+      if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(defName)) bind(defName, spec, 'default');
       if (commaIdx >= 0) {
         const rest = clause.slice(commaIdx + 1).trim();
         if (rest.startsWith('{')) parseNamedClause(rest.slice(1, rest.lastIndexOf('}')), spec);
@@ -308,8 +311,7 @@ export function parseStaticImports(stripped) {
   for (const m of stripped.matchAll(/\bimport\s*['"]([^'"]+)['"]/g)) specs.push(m[1].trim());
   for (const m of stripped.matchAll(/\bexport\s+(?:\*|\{[^}]{0,300}\})\s+from\s*['"]([^'"]+)['"]/g)) specs.push(m[1].trim());
   for (const m of stripped.matchAll(/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) specs.push(m[1].trim());
-
-  return { specs: [...new Set(specs)], identifierToSpec, namedImportsBySpec };
+  return { specs: [...new Set(specs)], identifierToSpec, namedImportsBySpec, importBindings };
 }
 
 /**
@@ -333,6 +335,9 @@ export function extractVueRouterRoutes({ filePath, relFile, text, repoDir, fileI
   const isRouterFile = ROUTER_FILE_RE.test(relFile);
   const stripped = stripJsComments(text);
   const { identifierToSpec } = parseStaticImports(stripped);
+  for (const m of stripped.matchAll(LAZY_COMPONENT_VAR_RE)) {
+    if (!identifierToSpec.has(m[1])) identifierToSpec.set(m[1], m[2]);
+  }
   const startRe = isRouterFile ? ROUTER_ANY_ARRAY_START_RE : EXPLICIT_ROUTES_START_RE;
   startRe.lastIndex = 0;
 
@@ -379,12 +384,9 @@ export function extractVueRouterRoutes({ filePath, relFile, text, repoDir, fileI
       let targetFile = relFile;
       let isLayout = false;
       if (props.component) {
-        const lazyMatch =
-          props.component.match(/\bimport\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/) ||
-          props.component.match(/\brequire\s*\(\s*\[\s*['"`]([^'"`]+)['"`]/);
-        if (lazyMatch) {
-          importSpec = lazyMatch[1];
-        } else if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(props.component)) {
+        const lazyMatch = props.component.match(/\bimport\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/) || props.component.match(/\brequire\s*\(\s*\[\s*['"`]([^'"`]+)['"`]/);
+        if (lazyMatch) importSpec = lazyMatch[1];
+        else if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(props.component)) {
           if (LAYOUT_COMPONENT_RE.test(props.component)) isLayout = true;
           importSpec = identifierToSpec.get(props.component) || null;
         }
@@ -394,35 +396,19 @@ export function extractVueRouterRoutes({ filePath, relFile, text, repoDir, fileI
             targetFile = chk.resolvedRel;
             if (LAYOUT_COMPONENT_RE.test(chk.resolvedRel)) isLayout = true;
           }
-          if (!chk.exists && rawPath !== null && !isLayout) {
-            brokenImports.push({
-              route: currentPath,
-              routerFile: relFile,
-              importSpec,
-              expectedFile: chk.resolvedRel,
-            });
-          }
+          if (!chk.exists && rawPath !== null && !isLayout) brokenImports.push({ route: currentPath, routerFile: relFile, importSpec, expectedFile: chk.resolvedRel });
         }
       }
 
       const shouldEmitSelf = rawPath !== null && (!hasChildren || (!isLayout && (Boolean(importSpec) || Boolean(props.component))));
       if (shouldEmitSelf && (!hasChildren || !isLayout)) {
         const key = `${currentPath}::${targetFile}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          routes.push({ route: currentPath, file: targetFile, kind: 'router-config' });
-        }
+        if (!seen.has(key)) { seen.add(key); routes.push({ route: currentPath, file: targetFile, kind: 'router-config' }); }
       } else if (isLayout && hasChildren && rawPath !== null && currentPath !== '/' && targetFile !== relFile) {
         const key = `layout::${currentPath}::${targetFile}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          routes.push({ route: currentPath, file: targetFile, kind: 'router-layout' });
-        }
+        if (!seen.has(key)) { seen.add(key); routes.push({ route: currentPath, file: targetFile, kind: 'router-layout' }); }
       }
-
-      if (hasChildren) {
-        walkRouteArray(props.children, rawPath !== null ? currentPath : parentPath);
-      }
+      if (hasChildren) walkRouteArray(props.children, rawPath !== null ? currentPath : parentPath);
     }
   };
 
@@ -434,7 +420,19 @@ export function extractVueRouterRoutes({ filePath, relFile, text, repoDir, fileI
     scannedRanges.push([arrStart, arrEnd]);
     walkRouteArray(stripped.slice(arrStart, arrEnd + 1), '');
   }
-
+  if (isRouterFile) {
+    ROUTER_SINGLE_OBJ_START_RE.lastIndex = 0;
+    for (const m of stripped.matchAll(ROUTER_SINGLE_OBJ_START_RE)) {
+      const objStart = (m.index || 0) + m[0].length - 1;
+      if (scannedRanges.some(([s, e]) => objStart >= s && objStart <= e)) continue;
+      const objEnd = findBalancedClose(stripped, objStart, '{', '}');
+      if (objEnd <= objStart) continue;
+      const topProps = extractTopLevelObjectProps(stripped.slice(objStart + 1, objEnd));
+      if (!Object.hasOwn(topProps, 'path') || (!Object.hasOwn(topProps, 'children') && !Object.hasOwn(topProps, 'component') && !Object.hasOwn(topProps, 'redirect'))) continue;
+      scannedRanges.push([objStart, objEnd]);
+      walkRouteArray(`[${stripped.slice(objStart, objEnd + 1)}]`, '');
+    }
+  }
   return { routes, brokenImports };
 }
 

@@ -36,16 +36,19 @@ import {
   isWindows83ShortNameAliasOnly,
   resolveIsolatedEngineDirs,
   resolvePlatformAsset,
+  resolveWindowsDriveFallbackDirs,
   validateRuntimeDirSafety,
 } from '../../src/codemap/providers/engine-manifest.mjs';
 import {
   getGraphProvider,
+  isEphemeralTempRepoList,
   listGraphProviders,
   queryGraphComposite,
   registerGraphProvider,
   resolveGraphSnapshot,
   unregisterGraphProvider,
 } from '../../src/codemap/providers/registry.mjs';
+import { buildSafeChildEnv } from '../../src/jobs/workspace-lock.mjs';
 
 function makeTempDir(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -424,7 +427,7 @@ test('engine-installer: SHA-256 verification, zip-slip blocking, offline --from-
     assert.equal(mirrorInstalled.sourceMode, 'mirror');
 
     // 3. resolveInstalledEngineBinary & probeEngineHealth diagnostics
-    const resolved = resolveInstalledEngineBinary('codebase-memory-mcp', { qaDir, binBaseDir, runtimeDir, cacheDir });
+    const resolved = resolveInstalledEngineBinary('codebase-memory-mcp', { qaDir, binBaseDir, runtimeDir, cacheDir, env: {} });
     assert.equal(resolved.found, true);
     assert.equal(resolved.source, 'engine-manifest');
 
@@ -433,6 +436,7 @@ test('engine-installer: SHA-256 verification, zip-slip blocking, offline --from-
       binBaseDir,
       runtimeDir,
       cacheDir,
+      env: {},
       runProcessImpl: async () => ({ code: 0, signal: null, timedOut: false, cancelled: false, stdout: 'codebase-memory-mcp 0.12.1\n', stderr: '' }),
     });
     assert.equal(healthyProbe.ok, true);
@@ -446,6 +450,7 @@ test('engine-installer: SHA-256 verification, zip-slip blocking, offline --from-
       runtimeDir: 'C:\\work\\dev\\AppData\\Local\\aitw\\rt',
       cacheDir: 'C:\\work\\dev\\AppData\\Local\\aitw\\cbm',
       platform: 'win32',
+      env: {},
     });
     assert.equal(avProbe.ok, false);
     assert.equal(avProbe.blockerKind, 'AV_QUARANTINE_SUSPECTED');
@@ -687,5 +692,75 @@ test('cbm-adapter, registry & conformance runner: end-to-end syncRepos, queryCom
   } finally {
     unregisterGraphProvider(customId);
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('v6.6.1 data dir migration: AITEST_DATA_DIR / AITEST_CBM_* env support, child env allowlist, and ephemeral tmpdir skip guard', async () => {
+  const customWin = resolveIsolatedEngineDirs('codebase-memory-mcp', '0.12.1', {
+    platform: 'win32',
+    env: {
+      AITEST_DATA_DIR: 'E:\\data\\aitw',
+      AITEST_CBM_BIN_DIR: 'E:\\data\\aitw\\bin\\cbm',
+      LOCALAPPDATA: 'C:\\Users\\dev\\AppData\\Local',
+      USERPROFILE: 'C:\\Users\\dev',
+    },
+    checkFs: false,
+  });
+  assert.equal(customWin.runtimeDir, 'E:\\data\\aitw\\rt');
+  assert.equal(customWin.cacheDir, 'E:\\data\\aitw\\cbm');
+  assert.equal(customWin.binaryPath, 'E:\\data\\aitw\\bin\\cbm\\0.12.1\\codebase-memory-mcp.exe');
+
+  const fbCustom = resolveWindowsDriveFallbackDirs({ AITEST_DATA_DIR: 'E:\\data\\aitw' });
+  assert.equal(fbCustom.runtimeDir, 'E:\\data\\aitw\\rt');
+  assert.equal(fbCustom.cacheDir, 'E:\\data\\aitw\\cbm');
+
+  const childEnv = buildSafeChildEnv({
+    AITEST_DATA_DIR: 'E:\\data\\aitw',
+    AITEST_CBM_BIN_DIR: 'E:\\data\\aitw\\bin\\cbm',
+    AITEST_CBM_RUNTIME_DIR: 'E:\\data\\aitw\\rt',
+    AITEST_CBM_CACHE_DIR: 'E:\\data\\aitw\\cbm',
+    AITEST_CBM_BIN: 'E:\\data\\aitw\\bin\\cbm\\0.12.1\\codebase-memory-mcp.exe',
+    AITEST_DISABLE_EXTERNAL_GRAPH: '1',
+    MY_SECRET_TOKEN: 'drop-me',
+  });
+  assert.equal(childEnv.AITEST_DATA_DIR, 'E:\\data\\aitw');
+  assert.equal(childEnv.AITEST_CBM_BIN_DIR, 'E:\\data\\aitw\\bin\\cbm');
+  assert.equal(childEnv.AITEST_CBM_RUNTIME_DIR, 'E:\\data\\aitw\\rt');
+  assert.equal(childEnv.AITEST_CBM_CACHE_DIR, 'E:\\data\\aitw\\cbm');
+  assert.equal(childEnv.AITEST_CBM_BIN, 'E:\\data\\aitw\\bin\\cbm\\0.12.1\\codebase-memory-mcp.exe');
+  assert.equal(childEnv.AITEST_DISABLE_EXTERNAL_GRAPH, '1');
+  assert.equal(childEnv.MY_SECRET_TOKEN, undefined);
+
+  // Guard prevents live external CBM DB leaks on throwaway os.tmpdir() repos when engine === 'auto'
+  const tmpRepo = makeTempDir('aitw-ephemeral-guard-');
+  try {
+    assert.equal(isEphemeralTempRepoList([tmpRepo]), true);
+    assert.equal(isEphemeralTempRepoList([process.cwd()]), false);
+
+    const skippedSync = await resolveGraphSnapshot([tmpRepo], { engine: 'auto' });
+    assert.equal(skippedSync.meta.mode, 'builtin-fallback');
+    assert.equal(skippedSync.meta.provider, 'builtin');
+    assert.equal(skippedSync.meta.degradedReason, 'ephemeral-tmpdir-repo-skipped');
+
+    const skippedQuery = await queryGraphComposite('OrderController', [tmpRepo], { engine: 'auto' });
+    assert.equal(skippedQuery.ok, false);
+    assert.equal(skippedQuery.degradedReason, 'ephemeral-tmpdir-repo-skipped');
+
+    const envDisabled = await resolveGraphSnapshot([process.cwd()], {
+      engine: 'auto',
+      ctx: { env: { AITEST_DISABLE_EXTERNAL_GRAPH: '1' } },
+    });
+    assert.equal(envDisabled.meta.mode, 'builtin-fallback');
+    assert.equal(envDisabled.meta.degradedReason, 'external-graph-disabled-by-env');
+
+    // Explicit engine: 'codebase-memory-mcp' (with missing binary override) still invokes provider even on tmpdir
+    const explicitTmp = await resolveGraphSnapshot([tmpRepo], {
+      engine: 'codebase-memory-mcp',
+      ctx: { binaryPath: path.join(tmpRepo, 'missing.exe'), runtimeDir: path.join(tmpRepo, 'rt'), cacheDir: path.join(tmpRepo, 'cbm') },
+    });
+    assert.equal(explicitTmp.meta.mode, 'builtin-fallback');
+    assert.match(explicitTmp.meta.degradedReason || '', /not installed/i);
+  } finally {
+    fs.rmSync(tmpRepo, { recursive: true, force: true });
   }
 });

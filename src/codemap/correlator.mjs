@@ -4,9 +4,15 @@ import path from 'node:path';
 
 /**
  * @typedef {{ table: string, file: string, tblLower: string, singular: string, plural: string, compactStem: string, wordRe: RegExp }} CompiledDbEntityMatcher
+ * @typedef {{ byFile: Map<string, string[]>, byCompactStem: Map<string, string[]>, bySegment: Map<string, string[]>, byWordToken: Map<string, string[]>, dottedMatchers: CompiledDbEntityMatcher[], textTokenCache: WeakMap<object, Map<string, { text: string, tables: string[] }>> }} CompiledDbEntityIndex
  * @typedef {import('./backend-adapters.mjs').JavaFileMeta & { genericEntityTypes?: string[], implementsTypes?: string[], isFeignClient?: boolean, isDubboService?: boolean, isApiImpl?: boolean, isUtilityHub?: boolean }} ExtendedJavaFileMeta
  * @typedef {{ controllerFile: string, services: string[], mappers: string[], tables: string[], crossServiceTargets: string[] }} ControllerDbChain
  */
+
+/** @type {WeakMap<CompiledDbEntityMatcher[], CompiledDbEntityIndex>} */
+const ENTITY_INDEX_CACHE = new WeakMap();
+const WORD_TOKEN_ONLY_RE = /^[A-Za-z0-9_]+$/;
+const NON_WORD_CHAR_RE = /[^A-Za-z0-9_]/;
 
 const JAVA_STEM_SUFFIX_RE = /(?:Controller|ServiceImpl|Service|Mapper|Manager|DO|Entity|PO|VO|ReqVO|RespVO|DTO)$/i;
 const AMBIGUOUS_STEMS = new Set(['base', 'common', 'system', 'admin', 'index', 'main', 'user', 'data', 'auth', 'dict', 'dictdata', 'info', 'config', 'type', 'record']);
@@ -50,29 +56,102 @@ export function computeTopologySnapshotId(topology) {
   return `snap_${crypto.createHash('sha256').update(raw).digest('hex').slice(0, 12)}`;
 }
 
+/** @param {Map<string, string[]>} map @param {string} key @param {string} table */
+function pushIndexTable(map, key, table) {
+  let list = map.get(key);
+  if (!list) { list = []; map.set(key, list); }
+  if (!list.includes(table)) list.push(table);
+}
+
 /**
- * Pre-compiles DB entity matchers ONCE per merge.
+ * Pre-compiles DB entity matchers and O(1) lookup indexes ONCE per merge.
  * @param {Array<{ table: string, file: string }>} dbEntities
  * @returns {CompiledDbEntityMatcher[]}
  */
 export function compileDbEntityMatchers(dbEntities) {
   /** @type {CompiledDbEntityMatcher[]} */
   const compiled = [];
+  /** @type {CompiledDbEntityIndex} */
+  const index = {
+    byFile: new Map(),
+    byCompactStem: new Map(),
+    bySegment: new Map(),
+    byWordToken: new Map(),
+    dottedMatchers: [],
+    textTokenCache: new WeakMap(),
+  };
+
   for (const entity of dbEntities || []) {
     if (!entity || !entity.table) continue;
     const table = String(entity.table);
+    const file = entity.file || '';
     const tblLower = table.toLowerCase();
-    compiled.push({
+    const singular = tblLower.endsWith('s') ? tblLower.slice(0, -1) : tblLower;
+    const plural = tblLower.endsWith('s') ? tblLower : `${tblLower}s`;
+    const compactStem = tblLower.replace(/_/g, '');
+    const item = {
       table,
-      file: entity.file || '',
+      file,
       tblLower,
-      singular: tblLower.endsWith('s') ? tblLower.slice(0, -1) : tblLower,
-      plural: tblLower.endsWith('s') ? tblLower : `${tblLower}s`,
-      compactStem: tblLower.replace(/_/g, ''),
+      singular,
+      plural,
+      compactStem,
       wordRe: new RegExp(`\\b${escapeRegExp(table)}\\b`, 'i'),
-    });
+    };
+    compiled.push(item);
+
+    pushIndexTable(index.byFile, file, table);
+    pushIndexTable(index.byCompactStem, compactStem, table);
+    pushIndexTable(index.bySegment, tblLower, table);
+    pushIndexTable(index.bySegment, singular, table);
+    pushIndexTable(index.bySegment, plural, table);
+    if (!AMBIGUOUS_STEMS.has(tblLower)) {
+      if (WORD_TOKEN_ONLY_RE.test(table)) pushIndexTable(index.byWordToken, tblLower, table);
+      else if (NON_WORD_CHAR_RE.test(table)) index.dottedMatchers.push(item);
+    }
   }
+  ENTITY_INDEX_CACHE.set(compiled, index);
   return compiled;
+}
+
+/**
+ * Tokenizes a backend file once per `backendFileTexts` map and looks up unique tokens in `byWordToken`.
+ * @param {CompiledDbEntityIndex} index
+ * @param {Record<string, string>} backendFileTexts
+ * @param {string} bf
+ * @returns {string[]}
+ */
+function resolveTextMatchedTables(index, backendFileTexts, bf) {
+  if (!backendFileTexts || typeof backendFileTexts !== 'object') return [];
+  const text = backendFileTexts[bf];
+  if (!text) return [];
+  let fileCache = index.textTokenCache.get(backendFileTexts);
+  if (!fileCache) { fileCache = new Map(); index.textTokenCache.set(backendFileTexts, fileCache); }
+  const cached = fileCache.get(bf);
+  if (cached && cached.text === text) return cached.tables;
+
+  /** @type {Set<string>} */
+  const hits = new Set();
+  if (index.byWordToken.size > 0) {
+    const tokens = text.match(/[A-Za-z0-9_]+/g);
+    if (tokens) {
+      /** @type {Set<string>} */
+      const seenTokens = new Set();
+      for (let i = 0; i < tokens.length; i += 1) {
+        const tok = tokens[i].toLowerCase();
+        if (seenTokens.has(tok)) continue;
+        seenTokens.add(tok);
+        const tbls = index.byWordToken.get(tok);
+        if (tbls) for (const t of tbls) hits.add(t);
+      }
+    }
+  }
+  for (const dm of index.dottedMatchers) {
+    if (!hits.has(dm.table) && dm.wordRe.test(text)) hits.add(dm.table);
+  }
+  const tables = [...hits];
+  fileCache.set(bf, { text, tables });
+  return tables;
 }
 
 /**
@@ -313,6 +392,19 @@ export function correlateDbTablesForRoute(entry, dbEntities, backendFileTexts = 
     for (const bf of linkedFiles) {
       for (const tbl of javaDbChain.resolveTablesForBackendFile(bf)) matched.add(tbl);
     }
+  }
+
+  const index = ENTITY_INDEX_CACHE.get(matchers);
+  if (index) {
+    const addAll = (/** @type {string[] | undefined} */ tbls) => { if (tbls) for (const t of tbls) matched.add(t); };
+    for (const bf of linkedFiles) {
+      addAll(index.byFile.get(bf));
+      addAll(resolveTextMatchedTables(index, backendFileTexts, bf));
+    }
+    for (const stem of backendStems) addAll(index.byCompactStem.get(stem));
+    for (const seg of routeSegmentSet) addAll(index.bySegment.get(seg));
+    for (const seg of apiSegmentSet) addAll(index.bySegment.get(seg));
+    return [...matched];
   }
 
   for (const entity of matchers) {

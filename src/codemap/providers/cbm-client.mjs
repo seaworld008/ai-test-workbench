@@ -194,19 +194,27 @@ export function runCbmProcess(binaryPath, args, opts) {
  */
 export function createCbmClient(options) {
   const execCbm = options.processRunner || runCbmProcess;
+  const baseEnv = options.baseEnv || process.env;
   const dirs = resolveIsolatedEngineDirs(DEFAULT_GRAPH_ENGINE_ID, undefined, {
-    runtimeDir: options.runtimeDir, cacheDir: options.cacheDir, env: options.baseEnv,
+    runtimeDir: options.runtimeDir, cacheDir: options.cacheDir, env: baseEnv,
   });
   const isLiveWin = process.platform === 'win32' && !options.processRunner;
-  const winFallback = resolveWindowsDriveFallbackDirs(options.baseEnv || process.env);
+  const winFallback = resolveWindowsDriveFallbackDirs(baseEnv);
   let runtimeDir = options.runtimeDir || dirs.runtimeDir;
   let cacheDir = options.cacheDir || dirs.cacheDir;
   let usingDriveFallback = false;
 
-  if (isLiveWin && (hasUntrustedWindowsAncestorAcl(runtimeDir, options.baseEnv) || hasUntrustedWindowsAncestorAcl(cacheDir, options.baseEnv))) {
+  const sameAsFallback =
+    path.win32.normalize(winFallback.runtimeDir).toLowerCase() === path.win32.normalize(runtimeDir).toLowerCase() &&
+    path.win32.normalize(winFallback.cacheDir).toLowerCase() === path.win32.normalize(cacheDir).toLowerCase();
+  const hasExplicitDirConfig = Boolean(
+    options.runtimeDir || options.cacheDir || baseEnv.AITEST_DATA_DIR || baseEnv.AITEST_CBM_RUNTIME_DIR || baseEnv.AITEST_CBM_CACHE_DIR
+  );
+
+  if (isLiveWin && !sameAsFallback && !hasExplicitDirConfig && (hasUntrustedWindowsAncestorAcl(runtimeDir, baseEnv) || hasUntrustedWindowsAncestorAcl(cacheDir, baseEnv))) {
     try {
-      hardenWindowsOwnerOnlyDir(winFallback.runtimeDir, options.baseEnv);
-      hardenWindowsOwnerOnlyDir(winFallback.cacheDir, options.baseEnv);
+      hardenWindowsOwnerOnlyDir(winFallback.runtimeDir, baseEnv);
+      hardenWindowsOwnerOnlyDir(winFallback.cacheDir, baseEnv);
       runtimeDir = winFallback.runtimeDir;
       cacheDir = winFallback.cacheDir;
       usingDriveFallback = true;
@@ -222,14 +230,14 @@ export function createCbmClient(options) {
   /** @param {string} [allowedRoot] */
   const makeEnv = (allowedRoot) => {
     if (isLiveWin) {
-      hardenWindowsOwnerOnlyDir(runtimeDir, options.baseEnv);
-      hardenWindowsOwnerOnlyDir(cacheDir, options.baseEnv);
+      hardenWindowsOwnerOnlyDir(runtimeDir, baseEnv);
+      hardenWindowsOwnerOnlyDir(cacheDir, baseEnv);
     } else {
       fs.mkdirSync(runtimeDir, { recursive: true });
       fs.mkdirSync(cacheDir, { recursive: true });
     }
     return buildCbmChildEnv({
-      runtimeDir, cacheDir, allowedRoot: allowedRoot || options.allowedRoot, maxRssMb: options.maxRssMb, baseEnv: options.baseEnv,
+      runtimeDir, cacheDir, allowedRoot: allowedRoot || options.allowedRoot, maxRssMb: options.maxRssMb, baseEnv,
     });
   };
 
@@ -255,10 +263,10 @@ export function createCbmClient(options) {
       timeoutMs: callOpts.timeoutMs ?? defaultTimeoutMs,
       maxOutputBytes,
     });
-    if (!res.ok && isLiveWin && !usingDriveFallback && isWindowsAncestorAclError(`${res.stderr}\n${res.stdout}\n${res.error || ''}`)) {
+    if (!res.ok && isLiveWin && !usingDriveFallback && !sameAsFallback && isWindowsAncestorAclError(`${res.stderr}\n${res.stdout}\n${res.error || ''}`)) {
       try {
-        hardenWindowsOwnerOnlyDir(winFallback.runtimeDir, options.baseEnv);
-        hardenWindowsOwnerOnlyDir(winFallback.cacheDir, options.baseEnv);
+        hardenWindowsOwnerOnlyDir(winFallback.runtimeDir, baseEnv);
+        hardenWindowsOwnerOnlyDir(winFallback.cacheDir, baseEnv);
         runtimeDir = winFallback.runtimeDir;
         cacheDir = winFallback.cacheDir;
         usingDriveFallback = true;

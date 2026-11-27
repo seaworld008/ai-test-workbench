@@ -55,11 +55,14 @@ export async function runGraphEngineConformance(options = {}) {
   let shortBase = '';
   let ownsShortBase = false;
   if (isLiveWin) {
-    const drive = String(process.env.SystemDrive || 'C:').trim().replace(/\\+$/, '') || 'C:';
-    const candidate = `${drive}\\aitw-cf`;
+    const dataDir = String(process.env.AITEST_DATA_DIR || '').trim();
+    const candidate = dataDir
+      ? path.win32.join(dataDir, `cf-${process.pid}`)
+      : `${String(process.env.SystemDrive || 'C:').trim().replace(/\\+$/, '') || 'C:'}\\aitw-cf-${process.pid}`;
     try {
       hardenWindowsOwnerOnlyDir(candidate);
       shortBase = candidate;
+      ownsShortBase = true;
     } catch {
       shortBase = '';
     }
@@ -211,7 +214,7 @@ export async function runGraphEngineConformance(options = {}) {
   } finally {
     if (ownsShortBase) {
       try {
-        fs.rmSync(shortBase, { recursive: true, force: true, maxRetries: 3, retryDelay: 150 });
+        fs.rmSync(shortBase, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
       } catch {
         // Ignore transient Windows daemon lock handles during temp directory cleanup.
       }

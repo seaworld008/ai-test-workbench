@@ -23,12 +23,28 @@ export function isWindowsAncestorAclError(text) {
 }
 
 /**
- * Resolves 1-level drive-root fallback directories (`C:\aitw-rt`, `C:\aitw-cbm`) on Windows
+ * Resolves fallback directories on Windows: honors `AITEST_DATA_DIR` / `AITEST_CBM_RUNTIME_DIR` /
+ * `AITEST_CBM_CACHE_DIR` first, otherwise falls back to 1-level drive-root dirs (`C:\aitw-rt`, `C:\aitw-cbm`)
  * to bypass untrusted ancestor ACEs on `C:\Users\<user>` (e.g. `CodexSandboxUsers`).
  * @param {NodeJS.ProcessEnv} [env]
  */
 export function resolveWindowsDriveFallbackDirs(env = process.env) {
+  const customDataDir = String(env.AITEST_DATA_DIR || '').trim();
+  const explicitRuntime = String(env.AITEST_CBM_RUNTIME_DIR || '').trim();
+  const explicitCache = String(env.AITEST_CBM_CACHE_DIR || '').trim();
+  if (customDataDir) {
+    return {
+      runtimeDir: explicitRuntime || path.win32.join(customDataDir, 'rt'),
+      cacheDir: explicitCache || path.win32.join(customDataDir, 'cbm'),
+    };
+  }
   const drive = String(env.SystemDrive || 'C:').trim().replace(/\\+$/, '') || 'C:';
+  if (explicitRuntime || explicitCache) {
+    return {
+      runtimeDir: explicitRuntime || `${drive}\\aitw-rt`,
+      cacheDir: explicitCache || `${drive}\\aitw-cbm`,
+    };
+  }
   return {
     runtimeDir: `${drive}\\aitw-rt`,
     cacheDir: `${drive}\\aitw-cbm`,
@@ -317,33 +333,47 @@ export function resolveIsolatedEngineDirs(id = DEFAULT_GRAPH_ENGINE_ID, version 
   const binaryName = platform === 'win32' ? `${id}.exe` : id;
   const shortKey = id === DEFAULT_GRAPH_ENGINE_ID ? 'cbm' : id.replace(/[^a-z0-9_-]/gi, '').slice(0, 12) || 'eng';
 
+  const hasExplicitEnv = Boolean(overrides.env);
+  const allowHostDataEnv = hasExplicitEnv || !overrides.platform || overrides.platform === process.platform;
+  const customDataDir = allowHostDataEnv ? String(env.AITEST_DATA_DIR || '').trim() : '';
+  const customBinDir = allowHostDataEnv ? String(env.AITEST_CBM_BIN_DIR || '').trim() : '';
+
   let binBaseDir = '';
   let primaryRuntimeDir = '';
   let fallbackRuntimeDir = '';
   let defaultCacheDir = '';
 
-  if (platform === 'win32') {
+  if (customDataDir) {
+    binBaseDir = overrides.binBaseDir || customBinDir || pathApi.join(customDataDir, 'bin', shortKey);
+    primaryRuntimeDir = pathApi.join(customDataDir, 'rt');
+    fallbackRuntimeDir = pathApi.join(customDataDir, 'rt');
+    defaultCacheDir = pathApi.join(customDataDir, shortKey);
+  } else if (platform === 'win32') {
     const localAppData = String(env.LOCALAPPDATA || '').trim() || pathApi.join(homeDir, 'AppData', 'Local');
-    binBaseDir = overrides.binBaseDir || pathApi.join(localAppData, 'aitw', 'bin', shortKey);
+    binBaseDir = overrides.binBaseDir || customBinDir || pathApi.join(localAppData, 'aitw', 'bin', shortKey);
     primaryRuntimeDir = pathApi.join(localAppData, 'aitw', 'rt');
     fallbackRuntimeDir = pathApi.join(homeDir, '.aitw', 'rt');
     defaultCacheDir = pathApi.join(localAppData, 'aitw', shortKey);
   } else if (platform === 'darwin') {
-    binBaseDir = overrides.binBaseDir || pathApi.join(homeDir, 'Library', 'Caches', 'aitw', 'bin', shortKey);
+    binBaseDir = overrides.binBaseDir || customBinDir || pathApi.join(homeDir, 'Library', 'Caches', 'aitw', 'bin', shortKey);
     primaryRuntimeDir = `/private/tmp/aitw-rt-${uid}`;
     fallbackRuntimeDir = `/tmp/aitw-rt-${uid}`;
     defaultCacheDir = pathApi.join(homeDir, 'Library', 'Caches', 'aitw', shortKey);
   } else {
     const xdgCache = String(env.XDG_CACHE_HOME || '').trim() || pathApi.join(homeDir, '.cache');
     const xdgRuntime = String(env.XDG_RUNTIME_DIR || '').trim();
-    binBaseDir = overrides.binBaseDir || pathApi.join(xdgCache, 'aitw', 'bin', shortKey);
+    binBaseDir = overrides.binBaseDir || customBinDir || pathApi.join(xdgCache, 'aitw', 'bin', shortKey);
     primaryRuntimeDir = xdgRuntime ? pathApi.join(xdgRuntime, `aitw-rt-${uid}`) : `/tmp/aitw-rt-${uid}`;
     fallbackRuntimeDir = `/tmp/aitw-rt-${uid}`;
     defaultCacheDir = pathApi.join(xdgCache, 'aitw', shortKey);
   }
 
-  const explicitRuntime = String(overrides.runtimeDir || env.AITEST_CBM_RUNTIME_DIR || '').trim();
-  const explicitCache = String(overrides.cacheDir || env.AITEST_CBM_CACHE_DIR || '').trim();
+  const explicitRuntime = allowHostDataEnv
+    ? String(overrides.runtimeDir || env.AITEST_CBM_RUNTIME_DIR || '').trim()
+    : String(overrides.runtimeDir || '').trim();
+  const explicitCache = allowHostDataEnv
+    ? String(overrides.cacheDir || env.AITEST_CBM_CACHE_DIR || '').trim()
+    : String(overrides.cacheDir || '').trim();
   let runtimeDir = explicitRuntime || primaryRuntimeDir;
   let safety = validateRuntimeDirSafety(runtimeDir, { platform, checkFs: overrides.checkFs });
   if (!explicitRuntime && !safety.safe && fallbackRuntimeDir) {

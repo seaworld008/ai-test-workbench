@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "workbenchVersion": "6.6.0",
-  "gateKernelVersion": "6.6.0",
+  "workbenchVersion": "6.7.0",
+  "gateKernelVersion": "6.7.0",
   "sourceFiles": {
     "core/config-schema.mjs": "sha256:f2db6385a55f6de4ad7b0cb751fc8b5773920ffb2c55513dd2495d3a29441278",
     "core/config.mjs": "sha256:cde735d175d3281491b4609e9379cd88bc470e342c9a41106278112efd25436f",
@@ -10,7 +10,7 @@
     "core/playwright-results.mjs": "sha256:dd717d8485ffd97c3841bbcdfb378158d253d86e5561af4fa6a13bcc49e168e3",
     "core/runtime-config.mjs": "sha256:c8916ecf425318606abd5930b432c8b8b3073051f0756517756eb6d02b6a125e",
     "core/stream-sse.mjs": "sha256:45a8ff68d2665cd04e0d50e01dd8f77a39639ddb370dd86bfbd44c1df334c193",
-    "core/version.mjs": "sha256:dad079b75d7bf88f9d4a20be7fc26deaf834ebba210d6363263a554ee2465f2a",
+    "core/version.mjs": "sha256:c719592920671a51e4ea716b2666cdb75a9e3618dd177ab37401fc3de27246d4",
     "diff-json.mjs": "sha256:4df2def184a5f212e1fce55719431394ed9d49ed6f9e8fcdacded2d64dc32205",
     "diff-oracle.mjs": "sha256:f47705f27167321a82ac254b4fdfd81d9211abda28cc98c2ad30e1626f578597",
     "gate-kernel.mjs": "sha256:0cc25107a07fc8114b30bac386ccdd9db773c7af4ac8af4982cc41a9530d9baf",

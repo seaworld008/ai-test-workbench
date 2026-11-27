@@ -1,12 +1,12 @@
 <div align="center">
 
-# AI Test Workbench (`v6.6.0`)
+# AI Test Workbench (`v6.7.0`)
 
 **面向 AI 编码 Agent 的独立可信验证内核与原生多协议 MCP 服务端**
 
-提供 **CodeMap v5 三层融合代码图谱 + 解耦锁版本侧车 (`codebase-memory-mcp@0.12.1`) + Additive-Only Fail-Closed Diff-Impact v3 (`pipe-sharded-v1` `<20ms`)** · **8 大支柱锁版本 MCP 中枢（含 `code-intelligence` 与 `.aitest/mcp.lock` / `engine-manifest.json` 治理锁）** · **四层 fail-closed AST 防假绿门禁 (`S0–S5` + `AITEST-G101..G118` + 符号表 + Dieselgate 与跨目录锁步门禁)** · **一键变更判决 (`verify-change` · in-toto v1 + `scope.graphEngine` + `T0/T1/T2` + 人类守门员焦点卡)** · **双目标五级检查点差分先知 (`aitest_parity` + 零明文形状指纹)** · **原生零依赖 MCP 服务端 (`stdio` / `/mcp` / `/sse` · 17 权威工具 · 帧化子进程 IPC)**
+提供 **多语言 Monorepo 自发现 + CodeMap v5.1 三层融合代码图谱（Vue 3/TS 泛型 HTTP + Python 多框架 + Spring/MyBatis） + 解耦锁版本侧车 (`codebase-memory-mcp@0.12.1`) + Additive-Only Fail-Closed Diff-Impact v3.1 (`pipe-sharded-v1` `<20ms` + Python 反向图)** · **8 大支柱锁版本 MCP 中枢（含 `code-intelligence`、全局无目标 `engine-status` 与 `.aitest/mcp.lock` / `engine-manifest.json` 治理锁）** · **四层 fail-closed AST 防假绿门禁 (`S0–S5` + `AITEST-G101..G118` + 符号表 + Dieselgate 与跨目录锁步门禁)** · **一键变更判决 (`verify-change` · in-toto v1 + `scope.graphEngine` + `T0/T1/T2` + 人类守门员焦点卡)** · **双目标五级检查点差分先知 (`aitest_parity` + 零明文形状指纹)** · **原生零依赖 MCP 服务端 (`stdio` / `/mcp` / `/sse` · 17 权威工具 · 帧化子进程 IPC)**
 
-[English README](./README.en.md) · [v5→v6.6 升级指南](./docs/upgrade.md) · [治理与四层门禁](./docs/governance.md) · [ADR-0007 外部图谱侧车](./docs/adr/0007-external-code-graph-engine.md) · [AI Agent 快速上手](./docs/ai-agent-quickstart.md) · [AGENTS.md](./AGENTS.md) · [系统架构](./ARCHITECTURE.md) · [更新日志](./CHANGELOG.md)
+[English README](./README.en.md) · [v5→v6.7 升级指南](./docs/upgrade.md) · [治理与四层门禁](./docs/governance.md) · [ADR-0007 外部图谱侧车](./docs/adr/0007-external-code-graph-engine.md) · [AI Agent 快速上手](./docs/ai-agent-quickstart.md) · [AGENTS.md](./AGENTS.md) · [系统架构](./ARCHITECTURE.md) · [更新日志](./CHANGELOG.md)
 
 [![CI](https://img.shields.io/github/actions/workflow/status/seaworld008/ai-test-workbench/ci.yml?branch=main&style=flat-square&logo=github&label=CI)](https://github.com/seaworld008/ai-test-workbench/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/seaworld008/ai-test-workbench?style=flat-square&color=0ea5e9&label=Release)](https://github.com/seaworld008/ai-test-workbench/releases)
@@ -24,7 +24,7 @@
 
 当编码 Agent（Claude Code、Codex CLI、Cursor、VS Code Copilot、Gemini CLI 等）高频生成与修改 Playwright 测试时，核心工程风险是**假绿（Fake-Green）**：测试通过并非因为业务正确，而是因为断言被弱化（`toHaveText('49/50')` → `toBeVisible()` 或 `expect(true).toBe(true)`）、异常被吞掉（`.catch(() => null)` / `expect.soft()` / `test.fail()`）、治理配置被篡改（`testIgnore` / 关闭 ESLint 规则），或复用了过期的 `results.json`。同时，在百万行级多仓微服务体系中，文件级反向依赖容易因扇入爆炸回退全量，或漏防全局基础设施改动。
 
-`ai-test-workbench v6.6.0` 将防假绿门禁、跨栈全链路代码图谱（CodeMap v5 + 解耦 `codebase-memory-mcp@0.12.1` 侧车）与 Fail-Closed 符号级选测（Diff-Impact v3）下沉为**零运行时依赖的工具强执独立验证内核**：
+`ai-test-workbench v6.7.0` 将防假绿门禁、多语言 Monorepo 全栈代码图谱（CodeMap v5.1 + 解耦 `codebase-memory-mcp@0.12.1` 侧车）与 Fail-Closed 符号级选测（Diff-Impact v3.1）下沉为**零运行时依赖的工具强执独立验证内核**：
 
 | 指标 | 已核实实测值（标明语料范围与复现入口） | 对应保障机制 |
 |---|---|---|
@@ -50,7 +50,7 @@
 ```yaml
 jobs:
   aitest-t2-verdict:
-    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.6.0
+    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.7.0
     permissions:
       id-token: write
       attestations: write
@@ -66,7 +66,7 @@ jobs:
 离线校验 T2 证书（默认 fail-closed，缺签名 / 仅 T1 / 身份不符 / 改动 1 字节均非 0 退出且 `trustLevel <= T1`）：
 
 ```bash
-npx ai-test-workbench@6.6.0 attest verify \
+npx ai-test-workbench@6.7.0 attest verify \
   --file attestation.json \
   --bundle attestation.sigstore.json \
   --expect-repo owner/repo \
@@ -78,14 +78,14 @@ npx ai-test-workbench@6.6.0 attest verify \
 
 ---
 
-## 2. v6.6.0 分层架构与三层代码图谱融合
+## 2. v6.7.0 分层架构与三层代码图谱融合
 
-`v6.6.0` 在零循环四层单向依赖与零运行时依赖内核之上，融合 **CodeMap v5**（L0 零依赖全栈提取 + L1 解耦锁版本 `codebase-memory-mcp@0.12.1` 侧车 + L2 反腐败清洗）、**Additive-Only Fail-Closed Diff-Impact v3**（Global Infra Guard + `pipe-sharded-v1` `<20ms` 延迟水合索引）、**8 大支柱 MCP Hub**（新增 `code-intelligence`）与受 `.aitest/governance.lock` 封签的 `.aitest/mcp.lock` / `.aitest/engine-manifest.json`，全仓所有 `src/**/*.mjs` 保持 `<= 450` 行（详见 [ARCHITECTURE.md](./ARCHITECTURE.md) 与 [ADR-0007](./docs/adr/0007-external-code-graph-engine.md)）：
+`v6.7.0` 在零循环四层单向依赖与零运行时依赖内核之上，拓展**多语言 Monorepo 自动发现**（一级与 `src|apps|packages|services|modules` 二级容器 + Python `FastAPI`/`aiohttp`/`Flask`/`Starlette`/`Django`/`Pytest`）、**CodeMap v5.1**（L0 新增 Vue 3 单对象路由/TS 泛型 HTTP/跨文件前缀助手/`.cjs` 与 Python 多框架/TypeORM/DDL + L1 解耦锁版本 `codebase-memory-mcp@0.12.1` 侧车及 `AITEST_DATA_DIR`/tmpdir 隔离 + L2 反腐败清洗）、**Additive-Only Fail-Closed Diff-Impact v3.1**（共享 `.git` Monorepo 差异重映射 + Python `.py` 反向导入图 + Global Infra Guard + `pipe-sharded-v1` `<20ms` 延迟水合索引）、**8 大支柱 MCP Hub**（新增 `code-intelligence` 与全局无目标 `mcp engine-status`）与受 `.aitest/governance.lock` 封签的 `.aitest/mcp.lock` / `.aitest/engine-manifest.json`，全仓所有 `src/**/*.mjs` 保持 `<= 450` 行（详见 [ARCHITECTURE.md](./ARCHITECTURE.md) 与 [ADR-0007](./docs/adr/0007-external-code-graph-engine.md)）：
 
 ```mermaid
 flowchart TB
     L4["Layer 4: 协议与交互层 — src/cli/ (CommandResult v2) · src/mcp/ (17 权威工具 + graph-summary 资源 + 帧化 IPC)"]
-    L3["Layer 3: 应用门面与领域层 — src/app/ · codemap v5 (L0/L1/L2) · impact v3 (Global Infra + pipe-sharded-v1) · parity · memory · verdict · mcp-hub (8 支柱)"]
+    L3["Layer 3: 应用门面与领域层 — src/app/ · codemap v5.1 (L0/L1/L2 + Polyglot) · impact v3.1 (Global Infra + Python + pipe-sharded-v1) · parity · memory · verdict · mcp-hub (8 支柱)"]
     L2["Layer 2: 权威验证内核 SSoT — src/kernel/ (target-guard · schema-validator · diff-oracle · gate/ SymbolTable + G101..G118 + mcp.lock/engine-manifest 治理锁)"]
     L1["Layer 1: 零依赖基础叶模块 — src/core/ (version codeMap=5 · outcome · config · stream-sse · redact v3 · glob · proc) · src/types/*.d.ts"]
     CBM["可选 L1 解耦侧车 (工作区外短路径隔离) — DeusData/codebase-memory-mcp@0.12.1 (SHA-256 + --ui=false)"]
@@ -104,20 +104,20 @@ flowchart TB
 ### 环境要求与供应链安全
 
 - **Node.js**：`>= 22.12.0`（推荐 `24 LTS` 或 `26 LTS`）；支持 Windows PowerShell (`pwsh`)、macOS、Linux。
-- **零运行时依赖**：根包 `package.json` 不含运行时 `dependencies`；请始终锁定精确版本 `npx ai-test-workbench@6.6.0 <cmd>`、全局安装后的短命令 `aitw <cmd>`（`npm i -g ai-test-workbench@6.6.0`），或源码直连 `node tools/aitest.mjs <cmd>`。
-- **可选图谱侧车引擎**：默认零依赖 L0 模式开箱即用；如需百万行级符号调用图收敛，由人类在本地终端执行 `mcp install-engine --engine codebase-memory-mcp`（支持 `--from-file` / `--mirror-url` / `--expected-sha256` 离线安装与 `N-1` 回滚，绝不自动下载）。
+- **零运行时依赖**：根包 `package.json` 不含运行时 `dependencies`；请始终锁定精确版本 `npx ai-test-workbench@6.7.0 <cmd>`、全局安装后的短命令 `aitw <cmd>`（`npm i -g ai-test-workbench@6.7.0`），或源码直连 `node tools/aitest.mjs <cmd>`。
+- **可选图谱侧车引擎**：默认零依赖 L0 模式开箱即用；如需百万行级符号调用图收敛，由人类在本地终端执行 `mcp install-engine --engine codebase-memory-mcp`（支持 `--from-file` / `--mirror-url` / `--expected-sha256` 离线安装、`AITEST_DATA_DIR` 迁移与 `N-1` 回滚，绝不自动下载；`mcp engine-status` 支持无 `--target` 全局查询）。
 
 ### 注册原生 MCP 服务端（`stdio` / `/mcp` / `/sse`）
 
 - **Claude Code**：
   ```bash
-  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.6.0 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
+  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.7.0 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
   ```
 - **Codex CLI**（`.codex/config.toml`）：
   ```toml
   [mcp_servers.ai-test-workbench]
   command = "npx"
-  args = ["--package=ai-test-workbench@6.6.0", "ai-test-workbench", "mcp-serve"]
+  args = ["--package=ai-test-workbench@6.7.0", "ai-test-workbench", "mcp-serve"]
   ```
 - **Cursor / Windsurf / Antigravity / Gemini CLI**（`.mcp.json`）：
   ```json
@@ -125,14 +125,14 @@ flowchart TB
     "mcpServers": {
       "ai-test-workbench": {
         "command": "npx",
-        "args": ["--package=ai-test-workbench@6.6.0", "ai-test-workbench", "mcp-serve"]
+        "args": ["--package=ai-test-workbench@6.7.0", "ai-test-workbench", "mcp-serve"]
       }
     }
   }
   ```
 - **Streamable HTTP (`/mcp`) + Legacy SSE (`/sse`)**：
   ```bash
-  npx ai-test-workbench@6.6.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
+  npx ai-test-workbench@6.7.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
   ```
 
 ### 官方 MCP 协议与外部图谱侧车一致性验证
@@ -147,24 +147,25 @@ flowchart TB
 
 ```bash
 # 1. 体检、初始化与模板/图谱引擎版本检查
-npx ai-test-workbench@6.6.0 doctor
-npx ai-test-workbench@6.6.0 init --name my-app --target "/path/to/your-repo" --loop codex
-npx ai-test-workbench@6.6.0 upgrade --target "/path/to/your-repo" --dry-run
-npx ai-test-workbench@6.6.0 upgrade --target "/path/to/your-repo" --scope engines --dry-run
+npx ai-test-workbench@6.7.0 doctor
+npx ai-test-workbench@6.7.0 mcp engine-status
+npx ai-test-workbench@6.7.0 init --name my-app --target "/path/to/your-repo" --loop codex
+npx ai-test-workbench@6.7.0 upgrade --target "/path/to/your-repo" --dry-run
+npx ai-test-workbench@6.7.0 upgrade --target "/path/to/your-repo" --scope engines --dry-run
 
-# 2. 登录态捕获 -> 只读探索 -> CodeMap v5 建图/组合查询 -> 8 大支柱锁版本 MCP 与侧车安装
-npx ai-test-workbench@6.6.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
-npx ai-test-workbench@6.6.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
-npx ai-test-workbench@6.6.0 mcp install-engine --target "/path/to/your-repo" --engine codebase-memory-mcp
-npx ai-test-workbench@6.6.0 map --target "/path/to/your-repo" --engine auto
-npx ai-test-workbench@6.6.0 map --target "/path/to/your-repo" --query OrderController
-npx ai-test-workbench@6.6.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.6.0 mcp doctor --target "/path/to/your-repo" --lock
+# 2. 登录态捕获 -> 只读探索 -> CodeMap v5.1 建图/组合查询 -> 8 大支柱锁版本 MCP 与侧车安装
+npx ai-test-workbench@6.7.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
+npx ai-test-workbench@6.7.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
+npx ai-test-workbench@6.7.0 mcp install-engine --target "/path/to/your-repo" --engine codebase-memory-mcp
+npx ai-test-workbench@6.7.0 map --target "/path/to/your-repo" --engine auto
+npx ai-test-workbench@6.7.0 map --target "/path/to/your-repo" --query OrderController
+npx ai-test-workbench@6.7.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.7.0 mcp doctor --target "/path/to/your-repo" --lock
 
 # 3. 性能 SLO、双目标差分回归、记忆蒸馏清扫与提交前一键变更判决
-npx ai-test-workbench@6.6.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
-npx ai-test-workbench@6.6.0 parity --target "/path/to/your-repo" --baseline-url http://127.0.0.1:4100 --candidate-url http://127.0.0.1:4200 --privacy-mode shape-only
-npx ai-test-workbench@6.6.0 learn --target "/path/to/your-repo" --action distill --json
-npx ai-test-workbench@6.6.0 verify-change --target "/path/to/your-repo" --base origin/main
+npx ai-test-workbench@6.7.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
+npx ai-test-workbench@6.7.0 parity --target "/path/to/your-repo" --baseline-url http://127.0.0.1:4100 --candidate-url http://127.0.0.1:4200 --privacy-mode shape-only
+npx ai-test-workbench@6.7.0 learn --target "/path/to/your-repo" --action distill --json
+npx ai-test-workbench@6.7.0 verify-change --target "/path/to/your-repo" --base origin/main
 ```
 
 本机克隆全量自检（零外部服务器）：
@@ -223,7 +224,7 @@ npm run check:vendor && npm run lint:docs && npm run typecheck && npm test && np
 
 | 文档主题 | 简体中文（默认） | English |
 |---|---|---|
-| **v5 → v6.6 升级与迁移指南** | [docs/upgrade.md](./docs/upgrade.md) | [docs/upgrade.en.md](./docs/upgrade.en.md) |
+| **v5 → v6.7 升级与迁移指南** | [docs/upgrade.md](./docs/upgrade.md) | [docs/upgrade.en.md](./docs/upgrade.en.md) |
 | **四层防假绿门禁与治理指南** | [docs/governance.md](./docs/governance.md) | [docs/governance.en.md](./docs/governance.en.md) |
 | **v6 重构评估与交付报告** | [v6-refactor-assessment.md](./docs/review/v6-refactor-assessment.md) · [v6 留出集报告](./bench/real-world/results/SUMMARY-v6-holdout.md) · [试跑报告](./bench/real-world/results/SUMMARY.md) · [预登记方案](./bench/real-world/PREREGISTRATION.md) | [v6-refactor-assessment.en.md](./docs/review/v6-refactor-assessment.en.md) · [Holdout Summary (EN)](./bench/real-world/results/SUMMARY-v6-holdout.en.md) · [Pilot Summary (EN)](./bench/real-world/results/SUMMARY.en.md) · [Pre-Reg (EN)](./bench/real-world/PREREGISTRATION.en.md) |
 | **架构决策记录 (ADR-0001..0007)** | [ADR-0001 MCP 零依赖](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) · [ADR-0002 内核单源与升级](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.md) · [ADR-0003 严格类型安全](./docs/adr/0003-strict-checkjs-type-safety.md) · [ADR-0004 AST 门禁与降误报](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.md) · [ADR-0005 工具面/结果/配置](./docs/adr/0005-mcp-surface-outcome-and-config.md) · [ADR-0006 差分先知与形状指纹](./docs/adr/0006-differential-parity-oracle-and-shape-fingerprints.md) · [ADR-0007 外部图谱侧车与 Diff-Impact v3](./docs/adr/0007-external-code-graph-engine.md) | [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md) · [ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.en.md) · [ADR-0003](./docs/adr/0003-strict-checkjs-type-safety.en.md) · [ADR-0004](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.en.md) · [ADR-0005](./docs/adr/0005-mcp-surface-outcome-and-config.en.md) · [ADR-0006](./docs/adr/0006-differential-parity-oracle-and-shape-fingerprints.en.md) · [ADR-0007](./docs/adr/0007-external-code-graph-engine.en.md) |

@@ -30,4 +30,4 @@ npm run report
 请在 **本 `qa/` 目录内** 启动编码 Agent（`cd qa && codex` 或 `cd qa && claude`），或连接 `ai-test-workbench mcp-serve`：
 1. 参考 `.env.example` 配置 `.env`（严禁填生产地址，且 `.env` 不得提交 Git）。
 2. 先确保 `npm run test:seed` 单独跑通。
-3. 执行 **Planner**（或 `npx ai-test-workbench@6.6.0 explore` + `npx ai-test-workbench@6.6.0 map`）→ 评审 `specs/*.md` → **Generator** 生成脚本 → `npm run audit` 审计 → **Healer** 仅允许对 A 类定位器问题在 3 轮内修复。
+3. 执行 **Planner**（或 `npx ai-test-workbench@6.7.0 explore` + `npx ai-test-workbench@6.7.0 map`）→ 评审 `specs/*.md` → **Generator** 生成脚本 → `npm run audit` 审计 → **Healer** 仅允许对 A 类定位器问题在 3 轮内修复。

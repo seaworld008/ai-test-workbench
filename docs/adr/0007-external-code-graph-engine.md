@@ -90,8 +90,8 @@
 ## 6. 持续上游升级闭环与企业级实测验证
 
 1. **人类终端安装与离线/内网镜像支持（`src/codemap/providers/engine-installer.mjs`）**：
-   - `npx ai-test-workbench@6.6.0 mcp install-engine --engine codebase-memory-mcp` 仅限人类本地 CLI（永不暴露给 MCP），内置 6 平台官方 `v0.12.1` SHA-256 校验表，阻断 Zip-Slip 路径穿越，支持 `--from-file`、`--mirror-url` 与 `--expected-sha256` 离线安装，保留 `N-1` 版本支持秒级回滚；
-   - `npx ai-test-workbench@6.6.0 upgrade --scope engines` 对比已安装清单与工作台固定版本，仅报告升级状态与指引，**绝不自动下载二进制或自动重签 `governance.lock`**。
+   - `npx ai-test-workbench@6.7.0 mcp install-engine --engine codebase-memory-mcp` 仅限人类本地 CLI（永不暴露给 MCP），内置 6 平台官方 `v0.12.1` SHA-256 校验表，阻断 Zip-Slip 路径穿越，支持 `--from-file`、`--mirror-url` 与 `--expected-sha256` 离线安装，保留 `N-1` 版本支持秒级回滚；
+   - `npx ai-test-workbench@6.7.0 upgrade --scope engines` 对比已安装清单与工作台固定版本，仅报告升级状态与指引，**绝不自动下载二进制或自动重签 `governance.lock`**。
 2. **契约一致性测试套件与定时 CI 回归（`conformance/graph-engine/` + `.github/workflows/ci.yml`）**：
    - 内置含中文路径目录的多仓 Fixture 与 8 项契约验证（`run-conformance.mjs`），每次升版固定版本前须通过 Live `8/8 PASS` 且两次运行字节一致；CI 常规流水线执行 `--allow-skip-missing`，每周定时与手工 `workflow_dispatch` 触发 `graph-engine-conformance` Live 校验。
 3. **1.01M-LOC 企业级多仓微服务实测成果**（Vue 2 + Spring Cloud 多租户 SaaS 基准：12,889 文件、12 微服务、692 控制器、360 MyBatis XML、129 Feign 客户端，代码仓全程零修改）：

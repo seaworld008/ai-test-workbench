@@ -1,6 +1,19 @@
 // @ts-check
+import { extractPythonEndpointsAndEntities, extractSqlCreateTableNames } from './python-extractor.mjs';
 import { convertBracketSegment, normalizeRoutePath } from './route-matcher.mjs';
 import { extractMybatisXmlEntities, extractSpringEndpointsAndEntities } from './spring-extractor.mjs';
+
+/**
+ * Converts a PascalCase/camelCase identifier to `snake_case` (for TypeORM `@Entity()` class inference).
+ * @param {string} name
+ * @returns {string}
+ */
+function toSnakeCase(name) {
+  return String(name || '')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .toLowerCase();
+}
 
 /**
  * @typedef {{ method: string, path: string, file: string, framework: string, packageName?: string, packagePrefixes?: string[], aliasedPaths?: string[] }} BackendEndpoint
@@ -57,15 +70,16 @@ export const BUILTIN_BACKEND_ADAPTERS = [
     id: 'node-backend',
     description: 'Express/Fastify/Hono, raw Node HTTP, NestJS & TypeORM @Entity',
     extract({ relFile, ext, text }) {
-      if (ext !== '.ts' && ext !== '.js' && ext !== '.mjs') return null;
+      if (ext !== '.ts' && ext !== '.js' && ext !== '.mjs' && ext !== '.cjs') return null;
       /** @type {BackendEndpoint[]} */
       const endpoints = [];
       /** @type {DbEntity[]} */
       const entities = [];
       const ctrlMatch = text.match(/@Controller\s*\(\s*['"]([^'"]*)['"]/);
       const ctrlPrefix = ctrlMatch ? `/${ctrlMatch[1].replace(/^\/|\/$/g, '')}` : '';
-      for (const m of text.matchAll(/\b(?:app|router|api)\.(get|post|put|delete|patch)\s*\(\s*['"`]([^'"`]+)['"`]/g)) {
-        endpoints.push({ method: m[1].toUpperCase(), path: normalizeRoutePath(m[2]), file: relFile, framework: 'express/fastify' });
+      for (const m of text.matchAll(/\b(?:app|router|api)\.(get|post|put|delete|patch|all)\s*\(\s*['"`]([^'"`]+)['"`]/g)) {
+        const meth = m[1].toLowerCase() === 'all' ? 'ANY' : m[1].toUpperCase();
+        endpoints.push({ method: meth, path: normalizeRoutePath(m[2]), file: relFile, framework: 'express/fastify' });
       }
       for (const m of text.matchAll(/\bpathname\s*===\s*['"`](\/[^'"`]+)['"`]/g)) {
         if (m[1].startsWith('/api/')) {
@@ -80,8 +94,24 @@ export const BUILTIN_BACKEND_ADAPTERS = [
           framework: 'nestjs',
         });
       }
-      for (const m of text.matchAll(/@Entity\s*\(\s*['"]([a-zA-Z0-9_]+)['"]/g)) {
-        entities.push({ table: m[1], file: relFile, source: 'typeorm' });
+      /** @type {Set<string>} */
+      const seenTables = new Set();
+      for (const m of text.matchAll(/@Entity\s*\(([^)]*)\)/g)) {
+        const args = m[1].trim();
+        const named = args.match(/^['"]([a-zA-Z0-9_.]+)['"]/) || args.match(/\bname\s*:\s*['"]([a-zA-Z0-9_.]+)['"]/);
+        let table = named ? named[1] : '';
+        if (!table) {
+          const offset = (m.index ?? 0) + m[0].length;
+          const after = text.slice(offset, offset + 240);
+          const cls = after.match(
+            /^(?:\s|\/\/[^\n]*|\/\*[\s\S]*?\*\/|@[A-Za-z0-9_.]+(?:\([^)]*\))?|\b(?:export|default|abstract)\b)*\bclass\s+([A-Za-z_][A-Za-z0-9_]*)/
+          );
+          if (cls) table = toSnakeCase(cls[1]);
+        }
+        if (table && !seenTables.has(table)) {
+          seenTables.add(table);
+          entities.push({ table, file: relFile, source: 'typeorm' });
+        }
       }
       return { endpoints, entities };
     },
@@ -101,16 +131,10 @@ export const BUILTIN_BACKEND_ADAPTERS = [
   },
   {
     id: 'python',
-    description: 'Python FastAPI / Flask / Blueprint route decorators',
+    description: 'Python FastAPI / Flask / Blueprint / aiohttp / Starlette / Django routes & ORM/DDL entities',
     extract({ relFile, ext, text }) {
       if (ext !== '.py') return null;
-      /** @type {BackendEndpoint[]} */
-      const endpoints = [];
-      for (const m of text.matchAll(/@(?:app|router|bp)\.(get|post|put|delete|patch|route)\s*\(\s*['"]([^'"]+)['"]/g)) {
-        const cleanPath = normalizeRoutePath(m[2]).replace(/\{([^}]+)\}/g, ':$1');
-        endpoints.push({ method: m[1] === 'route' ? 'ANY' : m[1].toUpperCase(), path: cleanPath, file: relFile, framework: 'python' });
-      }
-      return { endpoints };
+      return extractPythonEndpointsAndEntities({ relFile, text });
     },
   },
   {
@@ -174,12 +198,7 @@ export const BUILTIN_BACKEND_ADAPTERS = [
     description: 'SQL CREATE TABLE DDL declarations',
     extract({ relFile, ext, text }) {
       if (ext !== '.sql') return null;
-      /** @type {DbEntity[]} */
-      const entities = [];
-      for (const m of text.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"']?([a-zA-Z0-9_.]+)[`"']?/gi)) {
-        entities.push({ table: m[1], file: relFile, source: 'sql' });
-      }
-      return { entities };
+      return { entities: extractSqlCreateTableNames(text).map((table) => ({ table, file: relFile, source: 'sql' })) };
     },
   },
 ];

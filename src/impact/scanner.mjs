@@ -11,10 +11,12 @@ export const GRAPH_EXTS = [
   '.mjs',
   '.cjs',
   '.vue',
+  '.py',
   '/index.ts',
   '/index.tsx',
   '/index.js',
   '/index.vue',
+  '/__init__.py',
 ];
 export const GRAPH_IGNORE_DIRS = new Set([
   'node_modules',
@@ -28,12 +30,17 @@ export const GRAPH_IGNORE_DIRS = new Set([
   'test-results',
   '.aitest',
   '.sandbox',
+  '__pycache__',
+  'venv',
+  'site-packages',
+  'pytest_cache',
+  'mypy_cache',
 ]);
 const ROOT_ONLY_OUTPUT_DIRS = new Set(['dist', 'build', 'out', 'target']);
 const IGNORED_VENDOR_DIR_SUFFIXES = ['public/libs', 'public/static', 'static/libs'];
 export const MAX_GRAPH_FILES = 10000;
 export const DEFAULT_PER_REPO_GRAPH_FILES = 16000;
-const SOURCE_FILE_RE = /\.(ts|tsx|js|jsx|mjs|cjs|vue|java|xml)$/i;
+const SOURCE_FILE_RE = /\.(ts|tsx|js|jsx|mjs|cjs|vue|py|java|xml)$/i;
 const REGEX_PRECEDING_KEYWORDS = new Set([
   'return', 'case', 'throw', 'in', 'of', 'typeof', 'void', 'delete', 'yield', 'await', 'new', 'else', 'do',
 ]);
@@ -184,8 +191,12 @@ export function buildRepoSourceIndex(repoDir, options = {}) {
         break;
       }
       if (GRAPH_IGNORE_DIRS.has(entry.name) || entry.name.startsWith('.')) continue;
-      if (!options.includeQa && entry.name === 'qa') continue;
+      if (!options.includeQa) {
+        if (entry.name === 'qa') continue;
+        if ((entry.name === 'tests' || entry.name === 'test' || entry.name === '__tests__') && !hasSrcAncestor) continue;
+      }
       const rel = relDir ? `${relDir}/${entry.name}` : entry.name;
+      if (!options.includeQa && (rel === 'src/test' || rel.endsWith('/src/test'))) continue;
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         if (ROOT_ONLY_OUTPUT_DIRS.has(entry.name) && !hasSrcAncestor) continue;
@@ -252,4 +263,168 @@ export function resolveRepoImportFromIndex(fromRel, specifier, pathAliases, inde
     if (tsHit) return tsHit;
   }
   return null;
+}
+
+/**
+ * Strips `# ...` comments and triple-quoted docstrings/multiline strings from Python source
+ * while preserving single-line strings and line boundaries.
+ * @param {string} source
+ * @returns {string}
+ */
+export function stripPythonComments(source) {
+  const s = String(source || '');
+  const len = s.length;
+  /** @type {string[]} */
+  const out = [];
+  let i = 0;
+
+  while (i < len) {
+    const ch = s[i];
+    if (ch === '#') {
+      i += 1;
+      while (i < len && s[i] !== '\n' && s[i] !== '\r') i += 1;
+      out.push(' ');
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      if (s[i + 1] === ch && s[i + 2] === ch) {
+        const delim = ch + ch + ch;
+        i += 3;
+        out.push('""');
+        while (i < len) {
+          if (s[i] === '\\') { if (s[i + 1] === '\n') out.push('\n'); i += 2; continue; }
+          if (s.startsWith(delim, i)) { i += 3; break; }
+          if (s[i] === '\n') out.push('\n');
+          i += 1;
+        }
+        continue;
+      }
+      const quote = ch;
+      const start = i;
+      i += 1;
+      while (i < len) {
+        const c = s[i];
+        if (c === '\\') { i += 2; continue; }
+        if (c === quote) { i += 1; break; }
+        if (c === '\n' || c === '\r') break;
+        i += 1;
+      }
+      out.push(s.slice(start, i));
+      continue;
+    }
+    out.push(ch);
+    i += 1;
+  }
+  return out.join('');
+}
+
+/** @param {string} cand @param {RepoSourceIndex} index @returns {string | null} */
+function checkPythonCandidate(cand, index) {
+  if (index.relSet.has(cand)) return cand;
+  if (process.platform === 'win32' || process.platform === 'darwin') {
+    return index.lowerToRel.get(cand.toLowerCase()) || null;
+  }
+  return null;
+}
+
+/**
+ * Resolves a dotted/slashed Python module path against `index` (including `mod.py`,
+ * `mod/__init__.py`, `src/...`, and subpath package roots such as `libs/<pkg>/mod.py`).
+ * @param {string} modPath
+ * @param {RepoSourceIndex} index
+ * @param {string[]} pyRelFiles
+ * @returns {string[]}
+ */
+function resolvePythonModuleCandidates(modPath, index, pyRelFiles) {
+  const clean = modPath.replace(/^\/+|\/+$/g, '');
+  if (!clean) return [];
+  for (const base of index.hasSrcDir ? [clean, `src/${clean}`] : [clean]) {
+    const fileHit = checkPythonCandidate(`${base}.py`, index);
+    if (fileHit) return [fileHit];
+    const initHit = checkPythonCandidate(`${base}/__init__.py`, index);
+    if (initHit) return [initHit];
+  }
+  const ci = process.platform === 'win32' || process.platform === 'darwin';
+  const cleanNorm = ci ? clean.toLowerCase() : clean;
+  const sfxFile = `/${cleanNorm}.py`;
+  const sfxInit = `/${cleanNorm}/__init__.py`;
+  /** @type {string[]} */
+  const suffixHits = [];
+  for (const rel of pyRelFiles) {
+    const cmpRel = ci ? rel.toLowerCase() : rel;
+    if (cmpRel === `${cleanNorm}.py` || cmpRel === `${cleanNorm}/__init__.py` || cmpRel.endsWith(sfxFile) || cmpRel.endsWith(sfxInit)) {
+      suffixHits.push(rel);
+    }
+  }
+  if (suffixHits.length === 1 || (suffixHits.length > 1 && clean.includes('/'))) return suffixHits;
+  return [];
+}
+
+/**
+ * Extracts static Python `from ... import ...` and `import ...` target file paths.
+ * @param {string} fromRel
+ * @param {string} rawText
+ * @param {RepoSourceIndex} index
+ * @param {string[]} pyRelFiles
+ * @returns {string[]}
+ */
+export function extractPythonImportTargets(fromRel, rawText, index, pyRelFiles) {
+  const stripped = stripPythonComments(rawText).replace(/\\\r?\n/g, ' ');
+  /** @type {Set<string>} */
+  const targets = new Set();
+  const fromDir = path.posix.dirname(fromRel);
+  const fromDirParts = fromDir === '.' ? [] : fromDir.split('/').filter(Boolean);
+
+  for (const m of stripped.matchAll(/^\s*from\s+(\.+[A-Za-z0-9_.]*|[A-Za-z0-9_.]+)\s+import\s+(\([^)]*\)|[^\n;]+)/gm)) {
+    const modSpec = m[1].trim();
+    const itemNames = m[2]
+      .replace(/^\(|\)$/g, '')
+      .split(',')
+      .map((part) => part.trim().replace(/\s+as\s+[A-Za-z0-9_]+$/i, '').trim())
+      .filter((name) => /^[A-Za-z0-9_]+$/.test(name));
+
+    if (modSpec.startsWith('.')) {
+      const dotMatch = modSpec.match(/^(\.+)(.*)$/);
+      const pops = (dotMatch ? dotMatch[1].length : 1) - 1;
+      if (pops > fromDirParts.length) continue;
+      const baseParts = fromDirParts.slice(0, fromDirParts.length - pops);
+      const tailParts = dotMatch?.[2] ? dotMatch[2].split('.').filter(Boolean) : [];
+      const relBase = [...baseParts, ...tailParts].join('/');
+      let resolvedSubmodule = false;
+      for (const itemName of itemNames) {
+        const subCand = relBase ? `${relBase}/${itemName}` : itemName;
+        const subHit = checkPythonCandidate(`${subCand}.py`, index) || checkPythonCandidate(`${subCand}/__init__.py`, index);
+        if (subHit && subHit !== fromRel) { targets.add(subHit); resolvedSubmodule = true; }
+      }
+      if (relBase) {
+        const modHit = checkPythonCandidate(`${relBase}.py`, index) || checkPythonCandidate(`${relBase}/__init__.py`, index);
+        if (modHit && modHit !== fromRel) targets.add(modHit);
+      } else if (!resolvedSubmodule && baseParts.length > 0) {
+        const initHit = checkPythonCandidate(`${baseParts.join('/')}/__init__.py`, index);
+        if (initHit && initHit !== fromRel) targets.add(initHit);
+      }
+      continue;
+    }
+
+    const modPath = modSpec.replace(/\./g, '/');
+    for (const hit of resolvePythonModuleCandidates(modPath, index, pyRelFiles)) {
+      if (hit !== fromRel) targets.add(hit);
+    }
+    for (const itemName of itemNames) {
+      for (const hit of resolvePythonModuleCandidates(`${modPath}/${itemName}`, index, pyRelFiles)) {
+        if (hit !== fromRel) targets.add(hit);
+      }
+    }
+  }
+
+  for (const m of stripped.matchAll(/^\s*import\s+((?:[A-Za-z0-9_.]+(?:\s+as\s+[A-Za-z0-9_]+)?)(?:\s*,\s*[A-Za-z0-9_.]+(?:\s+as\s+[A-Za-z0-9_]+)?)*)/gm)) {
+    for (const part of m[1].split(',')) {
+      const modName = part.trim().replace(/\s+as\s+[A-Za-z0-9_]+$/i, '').trim();
+      if (!/^[A-Za-z0-9_.]+$/.test(modName)) continue;
+      for (const hit of resolvePythonModuleCandidates(modName.replace(/\./g, '/'), index, pyRelFiles)) {
+        if (hit !== fromRel) targets.add(hit);
+      }
+    }
+  }
+  return [...targets];
 }
