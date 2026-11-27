@@ -33,6 +33,7 @@ import {
   ENGINE_MANIFESTS,
   PINNED_CBM_VERSION,
   getPinnedEngineManifest,
+  isWindows83ShortNameAliasOnly,
   resolveIsolatedEngineDirs,
   resolvePlatformAsset,
   validateRuntimeDirSafety,
@@ -113,8 +114,19 @@ if (args.includes('--sleep')) {
   setTimeout(() => process.exit(0), 10000);
 } else if (args.includes('--flood')) {
   const chunk = Buffer.alloc(65536, 'A');
-  for (let i = 0; i < 30; i += 1) process.stdout.write(chunk);
-  process.exit(0);
+  let sent = 0;
+  process.stdout.on('error', () => process.exit(0));
+  const pump = () => {
+    while (sent < 40) {
+      sent += 1;
+      if (!process.stdout.write(chunk)) {
+        process.stdout.once('drain', pump);
+        return;
+      }
+    }
+    process.stdout.end();
+  };
+  pump();
 } else {
   const cliIdx = args.indexOf('cli');
   const uiDisabled = args.slice(0, cliIdx).includes('--ui=false');
@@ -284,7 +296,7 @@ test('engine-manifest: embeds verified v0.12.1 SHA-256 hashes for all 6 platform
   assert.equal(linDirs.runtimeDir, '/run/user/1000/aitw-rt-1000');
   assert.equal(linDirs.cacheDir, '/home/dev/.cache/aitw/cbm');
 
-  // Safety checks reject unsafe paths
+  // Safety checks reject unsafe paths and tolerate Windows 8.3 short-name aliases without allowing junctions
   assert.equal(validateRuntimeDirSafety('C:\\repo\\qa\\.aitest\\rt', { platform: 'win32', checkFs: false }).safe, false);
   assert.equal(
     validateRuntimeDirSafety(`C:\\${'a'.repeat(190)}`, { platform: 'win32', checkFs: false }).safe,
@@ -293,6 +305,30 @@ test('engine-manifest: embeds verified v0.12.1 SHA-256 hashes for all 6 platform
   assert.equal(validateRuntimeDirSafety('/mnt/c/work/dev/rt', { platform: 'linux', checkFs: false }).safe, false);
   assert.equal(
     validateRuntimeDirSafety(`/private/tmp/${'x'.repeat(70)}`, { platform: 'darwin', checkFs: false }).safe,
+    false
+  );
+  assert.equal(
+    isWindows83ShortNameAliasOnly(
+      'C:\\work\\RUNNER~1\\AppData\\Local\\Temp\\aitw-rt',
+      'C:\\work\\runneradmin\\AppData\\Local\\Temp\\aitw-rt',
+      { checkFs: false }
+    ),
+    true
+  );
+  assert.equal(
+    isWindows83ShortNameAliasOnly(
+      'C:\\work\\dev\\junction\\aitw-rt',
+      'D:\\other\\target\\aitw-rt',
+      { checkFs: false }
+    ),
+    false
+  );
+  assert.equal(
+    isWindows83ShortNameAliasOnly(
+      'C:\\work\\dev\\junction\\aitw-rt',
+      'C:\\work\\dev\\real-target\\aitw-rt',
+      { checkFs: false }
+    ),
     false
   );
 });

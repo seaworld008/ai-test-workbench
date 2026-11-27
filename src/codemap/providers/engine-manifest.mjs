@@ -192,6 +192,38 @@ export function resolvePlatformAsset(
 }
 
 /**
+ * Returns true when two Windows paths differ solely by NTFS 8.3 short-name segments
+ * (e.g. `C:\work\RUNNER~1\Temp` vs `C:\work\runneradmin\Temp`)
+ * and no differing ancestor segment is a symlink/junction reparse point.
+ * @param {string} rawPath
+ * @param {string} realPath
+ * @param {{ checkFs?: boolean }} [options]
+ * @returns {boolean}
+ */
+export function isWindows83ShortNameAliasOnly(rawPath, realPath, options = {}) {
+  const rawSegs = path.win32.normalize(String(rawPath || '')).replace(/\\+$/, '').split('\\');
+  const realSegs = path.win32.normalize(String(realPath || '')).replace(/\\+$/, '').split('\\');
+  if (rawSegs.length !== realSegs.length || rawSegs.length < 2) return false;
+  if (rawSegs[0].toLowerCase() !== realSegs[0].toLowerCase()) return false;
+  let sawShort = false;
+  for (let i = 1; i < rawSegs.length; i += 1) {
+    const a = rawSegs[i].toLowerCase();
+    const b = realSegs[i].toLowerCase();
+    if (a === b) continue;
+    if (!/~\d+(?:\.[^.\\]+)?$/.test(a)) return false;
+    if (options.checkFs !== false) {
+      try {
+        if (fs.lstatSync(rawSegs.slice(0, i + 1).join('\\')).isSymbolicLink()) return false;
+      } catch {
+        return false;
+      }
+    }
+    sawShort = true;
+  }
+  return sawShort;
+}
+
+/**
  * Validates candidate runtime/cache dir against CBM OS rules: no `.aitest/` nesting,
  * Windows `< 185` chars & no reparse/symlink ancestors, macOS `<= 60` bytes AF_UNIX budget, no WSL `/mnt/*`.
  * @param {string} dirPath
@@ -245,7 +277,10 @@ export function validateRuntimeDirSafety(dirPath, options = {}) {
           }
           if (platform === 'win32') {
             const real = typeof fs.realpathSync.native === 'function' ? fs.realpathSync.native(cursor) : fs.realpathSync(cursor);
-            if (path.win32.normalize(real).toLowerCase() !== path.win32.normalize(cursor).toLowerCase()) {
+            if (
+              path.win32.normalize(real).toLowerCase() !== path.win32.normalize(cursor).toLowerCase() &&
+              !isWindows83ShortNameAliasOnly(cursor, real, { checkFs: true })
+            ) {
               issues.push(`Windows ancestor "${cursor}" resolves to "${real}" (junction/reparse point rejected by CBM).`);
               break;
             }
