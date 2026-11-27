@@ -1,6 +1,7 @@
 // @ts-check
 import { computeTopologySnapshotId } from './correlator.mjs';
 import { normalizeRoutePath } from './route-matcher.mjs';
+import { matchRoutePathToViewFile, resolveDynamicMenuView } from './vue-template-factory.mjs';
 
 export const KNOWN_GATEWAY_PREFIXES = [
   '/admin-api/platform-api',
@@ -45,25 +46,30 @@ export function getStrippedApiCandidates(apiPath, prefixes) {
 }
 
 /**
- * Builds reverse frontend import map (`importedFile -> Set<importerFile>`) and view-file index helpers.
+ * Builds reverse frontend import/template graph (`importedOrChildFile -> Set<importerFile>`) and view-file index helpers.
  * @param {Record<string, string[]>} frontendImports
  * @param {string[]} viewFiles
+ * @param {Record<string, string[]>} [vueTemplateRefs]
  */
-export function buildFrontendViewGraph(frontendImports = {}, viewFiles = []) {
+export function buildFrontendViewGraph(frontendImports = {}, viewFiles = [], vueTemplateRefs = {}) {
   /** @type {Map<string, Set<string>>} */
   const reverse = new Map();
+  const addEdge = (/** @type {string} */ importer, /** @type {string} */ target) => {
+    let set = reverse.get(target);
+    if (!set) { set = new Set(); reverse.set(target, set); }
+    set.add(importer);
+  };
   for (const [importer, targets] of Object.entries(frontendImports || {})) {
-    for (const t of targets || []) {
-      let set = reverse.get(t);
-      if (!set) { set = new Set(); reverse.set(t, set); }
-      set.add(importer);
-    }
+    for (const t of targets || []) addEdge(importer, t);
+  }
+  for (const [parentView, children] of Object.entries(vueTemplateRefs || {})) {
+    for (const c of children || []) addEdge(parentView, c);
   }
   return { reverse, viewSet: new Set(viewFiles || []) };
 }
 
 /**
- * Finds view files (`views/` or `pages/`) that transitively import `startFile` within 1-3 hops,
+ * Finds view files (`views/` or `pages/`) that transitively import or render `startFile` within 1-3 hops,
  * returning `{ file, depth }` entries preferring page views over `/child/` sub-components.
  * @param {string} startFile
  * @param {Map<string, Set<string>>} reverseFrontend
@@ -87,41 +93,13 @@ function findImportingViews(startFile, reverseFrontend, viewSet) {
     }
   }
   const entries = [...viewDepth.entries()].map(([file, depth]) => ({ file, depth }));
-  const nonChild = entries.filter((e) => !/\/(?:child|children|components|modals|dialogs)\//i.test(e.file));
+  const nonChild = entries.filter((e) => !/\/(?:child|children|components|modals|dialogs|menus|tabs)\//i.test(e.file));
   return nonChild.length > 0 ? nonChild : entries;
 }
 
 /**
- * Matches a component specifier (`platform/dataBoard/index` or `@/views/system/user/index.vue`) to `viewFiles`.
- * @param {string} componentSpec
- * @param {string[]} viewFiles
- * @returns {string | null}
- */
-function matchComponentToViewFile(componentSpec, viewFiles) {
-  const clean = String(componentSpec || '')
-    .trim()
-    .replace(/\\/g, '/')
-    .replace(/^@\/(?:views|pages)\//, '')
-    .replace(/^(?:src\/)?(?:views|pages)\//, '')
-    .replace(/^\/+/, '')
-    .replace(/\.(?:vue|[jt]sx?|svelte|astro)$/i, '');
-  if (!clean) return null;
-
-  /** @type {string[]} */
-  const candidates = [];
-  for (const vf of viewFiles) {
-    const stripped = vf
-      .replace(/^[^/]+\/(?=src\/(?:views|pages)\/)/, '')
-      .replace(/^(?:src\/)?(?:views|pages)\//, '')
-      .replace(/\.(?:vue|[jt]sx?|svelte|astro)$/i, '');
-    if (stripped === clean || stripped === `${clean}/index` || `${stripped}/index` === clean) candidates.push(vf);
-  }
-  return candidates.length === 1 ? candidates[0] : candidates[0] || null;
-}
-
-/**
  * Resolves a dynamic route/page's `frontendFile` using:
- * 1) `page.component` / `page.matchedComponent` against `sourceIndex.viewFiles`
+ * 1) `page.component` / `page.matchedComponent` against `sourceIndex.viewFiles` (incl. Chinese filenames)
  * 2) observed APIs -> api module -> unique importing view component
  * 3) route path segments against view directory/index files
  * @param {{ route: string, component?: string, matchedComponent?: string, apisObserved?: string[], apis?: string[], observedApis?: string[] }} page
@@ -141,7 +119,7 @@ export function resolveDynamicViewForPage(page, entryLinkedApis, ctx) {
 
   const compSpec = page.component || page.matchedComponent;
   if (compSpec) {
-    const hit = matchComponentToViewFile(compSpec, viewFiles);
+    const hit = resolveDynamicMenuView(compSpec, viewFiles);
     if (hit) return hit;
   }
 
@@ -176,55 +154,123 @@ export function resolveDynamicViewForPage(page, entryLinkedApis, ctx) {
     }
   }
 
-  const routeSegs = normalizeRoutePath(page.route).split('/').filter((s) => s && !s.startsWith(':'));
-  if (routeSegs.length > 0) {
-    const joined = routeSegs.join('/').toLowerCase();
-    const reversed = routeSegs.length === 2 ? `${routeSegs[1]}/${routeSegs[0]}`.toLowerCase() : '';
-    const exactMatches = viewFiles.filter((vf) => {
-      const body = vf
-        .replace(/^[^/]+\/(?=src\/(?:views|pages)\/)/, '')
-        .replace(/^(?:src\/)?(?:views|pages)\//, '')
-        .replace(/\/index\.(?:vue|[jt]sx?|svelte|astro)$/i, '')
-        .replace(/\.(?:vue|[jt]sx?|svelte|astro)$/i, '')
-        .toLowerCase();
-      return body === joined || (reversed && body === reversed);
-    });
-    if (exactMatches.length === 1) return exactMatches[0];
-  }
-  return null;
+  return matchRoutePathToViewFile(page.route, viewFiles);
 }
 
 /**
- * Follows 1-2 hops of static imports from `frontendFile` and collects all API paths.
+ * Formats an API path with its file's exact axios client prefix (avoiding unprefixed collision duplicates).
+ * @param {string} rawPath
+ * @param {string} filePrefix
+ * @returns {string}
+ */
+function applyExactClientPrefix(rawPath, filePrefix) {
+  const norm = normalizeRoutePath(rawPath);
+  if (!filePrefix || norm.startsWith(`${filePrefix}/`) || norm === filePrefix) return norm;
+  return normalizeRoutePath(`${filePrefix}${norm}`);
+}
+
+/** @type {WeakMap<object, { len: number, map: Map<string, Array<{ path: string, fnName?: string }>> }>} */
+const richCallsCache = new WeakMap();
+
+/**
+ * Follows 1-2 hops of static imports & `<template>` component refs from `frontendFile` and collects API paths.
+ * When `options.frontendNamedImports` & `options.frontendApiCalls` (or rich call objects) are supplied,
+ * narrows API module imports by exact imported `fnName` instead of dumping every export in the API file.
  * @param {string} frontendFile
  * @param {Record<string, string[]>} frontendImports
- * @param {Map<string, string[]>} apiCallsByFile
+ * @param {Map<string, Array<string | { path: string, fnName?: string, method?: string }>>} apiCallsByFile
  * @param {Record<string, string>} axiosPrefixByFile
+ * @param {{
+ *   frontendNamedImports?: Record<string, Record<string, string[]>>,
+ *   frontendApiCalls?: Array<{ method?: string, path: string, file: string, fnName?: string }>,
+ *   vueTemplateRefs?: Record<string, string[]>,
+ * }} [options]
  * @returns {string[]}
  */
-export function collectApisViaStaticImports(frontendFile, frontendImports = {}, apiCallsByFile = new Map(), axiosPrefixByFile = {}) {
+export function collectApisViaStaticImports(
+  frontendFile,
+  frontendImports = {},
+  apiCallsByFile = new Map(),
+  axiosPrefixByFile = {},
+  options = {}
+) {
+  const hasRichArr = Array.isArray(options?.frontendApiCalls) && options.frontendApiCalls.length > 0;
+  const cacheKey = hasRichArr ? options.frontendApiCalls : apiCallsByFile;
+  const cacheLen = hasRichArr ? /** @type {any[]} */ (options.frontendApiCalls).length : apiCallsByFile.size;
+  const hit = cacheKey ? richCallsCache.get(cacheKey) : undefined;
+  /** @type {Map<string, Array<{ path: string, fnName?: string }>>} */
+  let richCallsByFile;
+  if (hit && hit.len === cacheLen) {
+    richCallsByFile = hit.map;
+  } else {
+    richCallsByFile = new Map();
+    if (hasRichArr) {
+      for (const c of /** @type {any[]} */ (options.frontendApiCalls)) {
+        if (!c?.file || !c?.path) continue;
+        const list = richCallsByFile.get(c.file) || [];
+        list.push({ path: c.path, fnName: c.fnName });
+        richCallsByFile.set(c.file, list);
+      }
+    } else {
+      for (const [f, list] of apiCallsByFile.entries()) {
+        richCallsByFile.set(
+          f,
+          (list || []).map((item) => (typeof item === 'string' ? { path: item } : { path: item.path, fnName: item.fnName }))
+        );
+      }
+    }
+    if (cacheKey) richCallsCache.set(cacheKey, { len: cacheLen, map: richCallsByFile });
+  }
+
+  const namedImports = options?.frontendNamedImports || {};
+  const templateRefs = options?.vueTemplateRefs || {};
+
   /** @type {Set<string>} */
   const collected = new Set();
-  const visited = new Set([frontendFile]);
-  const queue = [{ file: frontendFile, depth: 0 }];
+  /** @type {Set<string>} */
+  const visitedAll = new Set([frontendFile]);
+  /** @type {Map<string, Set<string>>} */
+  const visitedNamed = new Map();
+  /** @type {Array<{ file: string, depth: number, allowedFns: Set<string> | null }>} */
+  const queue = [{ file: frontendFile, depth: 0, allowedFns: null }];
 
   while (queue.length > 0) {
     const cur = queue.shift();
     if (!cur) continue;
-    const calls = apiCallsByFile.get(cur.file) || [];
+    const calls = richCallsByFile.get(cur.file) || [];
     const filePrefix = axiosPrefixByFile[cur.file] || '';
-    for (const p of calls) {
-      const norm = normalizeRoutePath(p);
-      collected.add(norm);
-      if (filePrefix && !norm.startsWith(`${filePrefix}/`) && norm !== filePrefix) {
-        collected.add(normalizeRoutePath(`${filePrefix}${norm}`));
+    if (calls.length > 0) {
+      let chosen = calls;
+      if (cur.allowedFns && cur.allowedFns.size > 0) {
+        const matchedByFn = calls.filter((c) => c.fnName && cur.allowedFns?.has(c.fnName));
+        if (matchedByFn.length > 0) chosen = matchedByFn;
+      }
+      for (const c of chosen) {
+        collected.add(applyExactClientPrefix(c.path, filePrefix));
       }
     }
     if (cur.depth >= 2) continue;
-    for (const nextFile of frontendImports[cur.file] || []) {
-      if (!visited.has(nextFile)) {
-        visited.add(nextFile);
-        queue.push({ file: nextFile, depth: cur.depth + 1 });
+
+    const nextTargets = [...new Set([...(frontendImports[cur.file] || []), ...(templateRefs[cur.file] || [])])];
+    const namedForCur = namedImports[cur.file] || {};
+    for (const nextFile of nextTargets) {
+      const syms = namedForCur[nextFile];
+      const isSelective = Array.isArray(syms) && syms.length > 0 && !syms.includes('*') && !syms.includes('default');
+      // Prevent depth>=1 helper modules (e.g. SearchSelect/options.js -> remote.js with 150+ APIs) from dumping barrel APIs
+      const targetCallCount = richCallsByFile.get(nextFile)?.length || 0;
+      if (cur.depth >= 1 && targetCallCount > 15 && (cur.allowedFns !== null || !isSelective)) continue;
+      if (!isSelective) {
+        if (visitedAll.has(nextFile)) continue;
+        visitedAll.add(nextFile);
+        queue.push({ file: nextFile, depth: cur.depth + 1, allowedFns: null });
+      } else {
+        if (visitedAll.has(nextFile)) continue;
+        const prevSet = visitedNamed.get(nextFile) || new Set();
+        const fresh = syms.filter((s) => !prevSet.has(s));
+        if (fresh.length === 0) continue;
+        for (const s of fresh) prevSet.add(s);
+        visitedNamed.set(nextFile, prevSet);
+        queue.push({ file: nextFile, depth: cur.depth + 1, allowedFns: new Set(fresh) });
       }
     }
   }
@@ -232,8 +278,35 @@ export function collectApisViaStaticImports(frontendFile, frontendImports = {}, 
 }
 
 /**
- * Matches a runtime or frontend API path against indexed backend endpoints,
- * falling back to gateway-prefix-stripped suffixes (`>= 2` segments).
+ * Convenience helper resolving a view's exact `fnName`-filtered APIs using all rich `sourceIndex` metadata.
+ * @param {string} frontendFile
+ * @param {{
+ *   frontendImports?: Record<string, string[]>,
+ *   frontendNamedImports?: Record<string, Record<string, string[]>>,
+ *   frontendApiCalls?: Array<{ method?: string, path: string, file: string, fnName?: string }>,
+ *   axiosPrefixByFile?: Record<string, string>,
+ *   vueTemplateRefs?: Record<string, string[]>,
+ * }} sourceIndex
+ * @returns {string[]}
+ */
+export function collectRouteApisWithPrecision(frontendFile, sourceIndex) {
+  return collectApisViaStaticImports(
+    frontendFile,
+    sourceIndex.frontendImports || {},
+    new Map(),
+    sourceIndex.axiosPrefixByFile || {},
+    {
+      frontendNamedImports: sourceIndex.frontendNamedImports || {},
+      frontendApiCalls: sourceIndex.frontendApiCalls || [],
+      vueTemplateRefs: sourceIndex.vueTemplateRefs || {},
+    }
+  );
+}
+
+/**
+ * Matches a runtime or frontend API path against indexed backend endpoints.
+ * Prefers exact prefixed route hits (0% cross-portal collision); falls back to gateway-prefix-stripped
+ * suffixes (`>= 2` segments) ONLY when no prefixed backend route matched directly.
  * @param {string} apiPath
  * @param {(route: string) => string} matchBackendApi
  * @param {Map<string, string[]>} apiToBackend
@@ -248,6 +321,22 @@ export function matchBackendFilesForApi(apiPath, matchBackendApi, apiToBackend, 
   for (const stripped of getStrippedApiCandidates(norm, prefixes)) {
     const hits = apiToBackend.get(matchBackendApi(stripped));
     if (hits && hits.length > 0) return hits;
+  }
+
+  const hasGatewayPrefix = prefixes.some((p) => norm === p || norm.startsWith(`${p}/`));
+  if (!hasGatewayPrefix) {
+    /** @type {Set<string>} */
+    const uniquePortalHits = new Set();
+    let matchedPortals = 0;
+    for (const pref of prefixes) {
+      const candidate = normalizeRoutePath(`${pref}${norm}`);
+      const hits = apiToBackend.get(matchBackendApi(candidate));
+      if (hits && hits.length > 0) {
+        matchedPortals += 1;
+        for (const h of hits) uniquePortalHits.add(h);
+      }
+    }
+    if (matchedPortals === 1) return [...uniquePortalHits];
   }
   return [];
 }

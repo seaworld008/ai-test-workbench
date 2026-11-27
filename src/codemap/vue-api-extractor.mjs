@@ -1,8 +1,11 @@
 // @ts-check
 import { normalizeRoutePath } from './route-matcher.mjs';
 import { findBalancedClose, parseStaticImports, stripJsComments } from './vue-extractor.mjs';
+import { extractLocalJsStringConsts } from './vue-template-factory.mjs';
 
 const API_WRAPPER_FILE_RE = /(?:^|\/)(?:utils|config|api|request|http)\/.*\.(?:js|ts|mjs)$/i;
+const DEFAULT_HTTP_CALLEE_RE = /^(?:request|service|http|axios|defHttp|platformRequest|platfromRequest|requestSchool)$/i;
+const REQUEST_TARGET_FILE_RE = /(?:request|http|axios|service|client|fetch)/i;
 
 /**
  * Extracts depth-1 property expressions from a `{ ... }` object literal.
@@ -75,7 +78,8 @@ function extractSimpleObjectProps(objBody) {
 }
 
 /**
- * Normalizes template-literal or relative API URLs (`/infra/job/get?id=${id}` -> `/infra/job/get`, `/items/${id}` -> `/items/:param`).
+ * Normalizes template-literal, concatenated, or relative API URLs
+ * (`/infra/job/get?id=${id}` -> `/infra/job/get`, `/items/${id}` -> `/items/:param`).
  * @param {string} rawUrl
  * @returns {string | null}
  */
@@ -98,6 +102,42 @@ export function normalizeTemplateApiPath(rawUrl) {
 }
 
 /**
+ * Resolves a JS `url` expression (`'/a/b/' + id`, `"/a/b?id=" + id`, `` `/a/${id}` ``, `PREFIX + '/list'`).
+ * @param {string} urlExpr
+ * @param {Record<string, string>} localConsts
+ * @returns {string | null}
+ */
+function parseUrlExpression(urlExpr, localConsts) {
+  const expr = String(urlExpr || '').trim();
+  if (!expr) return null;
+  const directLit = expr.match(/^(['"`])([^'"`]+)\1$/);
+  if (directLit) return directLit[2];
+
+  if (expr.includes('+')) {
+    const parts = expr.split('+').map((p) => p.trim()).filter(Boolean);
+    let assembled = '';
+    for (let i = 0; i < parts.length; i += 1) {
+      const p = parts[i];
+      const lit = p.match(/^(['"`])([^'"`]+)\1$/);
+      if (lit) {
+        assembled += lit[2];
+        continue;
+      }
+      if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(p) && p in localConsts) {
+        assembled += localConsts[p];
+        continue;
+      }
+      if (assembled.includes('?')) break;
+      if (assembled.endsWith('/')) assembled += ':param';
+    }
+    return assembled || null;
+  }
+
+  const headLit = expr.match(/^(['"`])([^'"`]+)\1/);
+  return headLit ? headLit[2] : null;
+}
+
+/**
  * Extracts enclosing exported function ranges in JS/TS source for API call attribution.
  * @param {string} stripped
  * @returns {Array<{ name: string, start: number, end: number }>}
@@ -105,7 +145,7 @@ export function normalizeTemplateApiPath(rawUrl) {
 function findExportedFunctionRanges(stripped) {
   /** @type {Array<{ name: string, start: number, end: number }>} */
   const ranges = [];
-  const fnRe = /\bexport\s+(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
+  const fnRe = /\b(?:export\s+(?:default\s+)?)?(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
   for (const m of stripped.matchAll(fnRe)) {
     const start = m.index || 0;
     const parenIdx = stripped.indexOf('(', start + m[0].length - 1);
@@ -114,7 +154,8 @@ function findExportedFunctionRanges(stripped) {
     const closeBrace = braceIdx >= 0 ? findBalancedClose(stripped, braceIdx, '{', '}') : -1;
     if (closeBrace > start) ranges.push({ name: m[1], start, end: closeBrace });
   }
-  const arrowRe = /\bexport\s+(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>/g;
+  const arrowRe =
+    /\bexport\s+(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>/g;
   for (const m of stripped.matchAll(arrowRe)) {
     const start = m.index || 0;
     let cursor = start + m[0].length;
@@ -139,7 +180,7 @@ function findExportedFunctionRanges(stripped) {
 }
 
 /**
- * Extracts axios wrapper prefixes (`baseURL` / prefix concatenation) from request/config files.
+ * Extracts axios wrapper prefixes (`baseURL` incl. local consts / prefix concatenation) from request/config files.
  * @param {string} relFile
  * @param {string} text
  * @returns {string[]}
@@ -147,11 +188,18 @@ function findExportedFunctionRanges(stripped) {
 export function extractAxiosPrefixes(relFile, text) {
   if (!API_WRAPPER_FILE_RE.test(relFile)) return [];
   const stripped = stripJsComments(text);
+  const localConsts = extractLocalJsStringConsts(stripped);
   /** @type {Set<string>} */
   const prefixes = new Set();
   for (const m of stripped.matchAll(/\bbaseURL\s*:\s*([^\n,;}{]{1,200})/g)) {
-    for (const sm of m[1].matchAll(/['"`](\/[A-Za-z0-9_/-]+)['"`]/g)) {
+    const expr = m[1];
+    for (const sm of expr.matchAll(/['"`](\/[A-Za-z0-9_/-]+)['"`]/g)) {
       prefixes.add(normalizeRoutePath(sm[1]));
+    }
+    for (const part of expr.split('+').map((p) => p.trim())) {
+      if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(part) && part in localConsts && localConsts[part].startsWith('/')) {
+        prefixes.add(normalizeRoutePath(localConsts[part]));
+      }
     }
   }
   for (const m of stripped.matchAll(/\burl\s*:\s*['"`](\/(?:admin-api|platform-api|app-api|api)[A-Za-z0-9_/-]*)['"`]\s*\+/g)) {
@@ -164,7 +212,8 @@ export function extractAxiosPrefixes(relFile, text) {
 }
 
 /**
- * Extracts frontend static imports, API calls (including template literals, relative URLs, and exported fn names), and axios prefixes.
+ * Extracts frontend static imports, named symbol imports, API calls (supporting aliased wrappers,
+ * template/concat URLs, exported fn names, and per-call client attribution), and axios prefixes.
  * @param {{
  *   filePath: string,
  *   relFile: string,
@@ -176,10 +225,12 @@ export function extractAxiosPrefixes(relFile, text) {
  * }} ctx
  */
 export function extractFrontendImportsAndApis({ filePath, relFile, ext, text, repoDir, fileIndex, resolveImportCandidate }) {
-  /** @type {Array<{ method: string, path: string, file: string, fnName?: string }>} */
+  /** @type {Array<{ method: string, path: string, rawPath?: string, file: string, fnName?: string, clientFile?: string }>} */
   const apiCalls = [];
+  /** @type {Record<string, string[]>} */
+  const namedImports = {};
   if (!['.ts', '.tsx', '.js', '.jsx', '.mjs', '.vue', '.svelte', '.astro'].includes(ext)) {
-    return { apiCalls, imports: /** @type {string[]} */ ([]), axiosPrefixes: /** @type {string[]} */ ([]) };
+    return { apiCalls, imports: /** @type {string[]} */ ([]), axiosPrefixes: /** @type {string[]} */ ([]), namedImports };
   }
 
   let scriptText = text;
@@ -189,16 +240,32 @@ export function extractFrontendImportsAndApis({ filePath, relFile, ext, text, re
   }
 
   const stripped = stripJsComments(scriptText);
-  const { specs } = parseStaticImports(stripped);
+  const localConsts = extractLocalJsStringConsts(stripped);
+  const { specs, identifierToSpec, namedImportsBySpec } = parseStaticImports(stripped);
   /** @type {string[]} */
   const imports = [];
+  /** @type {Map<string, string>} */
+  const specToResolved = new Map();
   for (const spec of specs) {
     if (spec.startsWith('./') || spec.startsWith('../') || spec.startsWith('@/')) {
       const chk = resolveImportCandidate(filePath, spec, repoDir, fileIndex);
-      if (chk.exists && chk.resolvedRel && !imports.includes(chk.resolvedRel)) {
-        imports.push(chk.resolvedRel);
+      if (chk.exists && chk.resolvedRel) {
+        specToResolved.set(spec, chk.resolvedRel);
+        if (!imports.includes(chk.resolvedRel)) imports.push(chk.resolvedRel);
+        const syms = namedImportsBySpec[spec];
+        if (syms && syms.length > 0) {
+          const prev = namedImports[chk.resolvedRel] || [];
+          namedImports[chk.resolvedRel] = [...new Set([...prev, ...syms])];
+        }
       }
     }
+  }
+
+  /** @type {Map<string, string>} */
+  const identifierToFile = new Map();
+  for (const [ident, spec] of identifierToSpec.entries()) {
+    const resolved = specToResolved.get(spec);
+    if (resolved) identifierToFile.set(ident, resolved);
   }
 
   const fnRanges = findExportedFunctionRanges(stripped);
@@ -208,37 +275,57 @@ export function extractFrontendImportsAndApis({ filePath, relFile, ext, text, re
     }
     return undefined;
   };
-  const pushCall = (/** @type {string} */ method, /** @type {string | null} */ apiPath, /** @type {number} */ pos) => {
+  const pushCall = (
+    /** @type {string} */ method,
+    /** @type {string | null} */ apiPath,
+    /** @type {number} */ pos,
+    /** @type {string | undefined} */ clientFile
+  ) => {
     if (!apiPath) return;
     const fnName = findFn(pos);
-    apiCalls.push({ method, path: apiPath, file: relFile, ...(fnName ? { fnName } : {}) });
+    apiCalls.push({
+      method,
+      path: apiPath,
+      rawPath: apiPath,
+      file: relFile,
+      ...(fnName ? { fnName } : {}),
+      ...(clientFile ? { clientFile } : {}),
+    });
   };
 
   for (const m of stripped.matchAll(/\bfetch\s*\(\s*(['"`])([^'"`]+)\1/g)) {
     if (m[2].startsWith('/') || /^https?:\/\//i.test(m[2])) {
-      pushCall('FETCH', normalizeTemplateApiPath(m[2]), m.index || 0);
-    }
-  }
-  for (const m of stripped.matchAll(/\b(?:axios|defHttp|http|service)\.(get|post|put|delete|patch)\s*\(\s*(['"`])([^'"`]+)\2/gi)) {
-    if (m[3].startsWith('/') || /(?:^|\/)api\//.test(relFile)) {
-      pushCall(m[1].toUpperCase(), normalizeTemplateApiPath(m[3]), m.index || 0);
+      pushCall('FETCH', normalizeTemplateApiPath(m[2]), m.index || 0, undefined);
     }
   }
 
-  for (const m of stripped.matchAll(/\b(?:request|service|http)\s*\(\s*\{/g)) {
+  for (const m of stripped.matchAll(/\b([A-Za-z_$][A-Za-z0-9_$]*)\.(get|post|put|delete|patch)\s*\(\s*(['"`])([^'"`]+)\3/gi)) {
+    const callee = m[1];
+    const clientFile = identifierToFile.get(callee);
+    const isHttpClient = DEFAULT_HTTP_CALLEE_RE.test(callee) || Boolean(clientFile && REQUEST_TARGET_FILE_RE.test(clientFile));
+    if (!isHttpClient) continue;
+    if (m[4].startsWith('/') || /(?:^|\/)api\//.test(relFile)) {
+      pushCall(m[2].toUpperCase(), normalizeTemplateApiPath(m[4]), m.index || 0, clientFile);
+    }
+  }
+
+  for (const m of stripped.matchAll(/\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(\s*\{/g)) {
+    const callee = m[1];
+    const clientFile = identifierToFile.get(callee);
+    const isHttpClient = DEFAULT_HTTP_CALLEE_RE.test(callee) || Boolean(clientFile && REQUEST_TARGET_FILE_RE.test(clientFile));
+    if (!isHttpClient) continue;
     const braceStart = (m.index || 0) + m[0].length - 1;
     const braceEnd = findBalancedClose(stripped, braceStart, '{', '}');
     if (braceEnd <= braceStart) continue;
     const objProps = extractSimpleObjectProps(stripped.slice(braceStart + 1, braceEnd));
     if (!objProps.url) continue;
-    const urlMatch = objProps.url.match(/^(['"`])([^'"`]+)\1/);
-    if (!urlMatch) continue;
-    const rawUrl = urlMatch[2];
+    const rawUrl = parseUrlExpression(objProps.url, localConsts);
+    if (!rawUrl) continue;
     if (!rawUrl.startsWith('/') && !/^[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_${}.:-]+)+/.test(rawUrl)) continue;
     const methodMatch = objProps.method ? objProps.method.match(/^(['"`])([A-Za-z]+)\1$/) : null;
     const method = methodMatch ? methodMatch[2].toUpperCase() : 'REQUEST';
-    pushCall(method, normalizeTemplateApiPath(rawUrl), m.index || 0);
+    pushCall(method, normalizeTemplateApiPath(rawUrl), m.index || 0, clientFile);
   }
 
-  return { apiCalls, imports, axiosPrefixes: extractAxiosPrefixes(relFile, text) };
+  return { apiCalls, imports, axiosPrefixes: extractAxiosPrefixes(relFile, text), namedImports };
 }

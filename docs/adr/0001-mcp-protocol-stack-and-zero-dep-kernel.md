@@ -31,7 +31,7 @@
 
 1. **根包零运行时依赖**：`package.json` 不含 `dependencies`，`src/mcp/` 按职责拆分为 `protocol.mjs`、`registry.mjs`、`tools/{shared,discovery,verification,stateful}.mjs`、`resources.mjs`、`security.mjs`、`transport-stdio.mjs`、`transport-http.mjs`（单文件均 `<= 500` 行，零循环依赖）。
 2. **隔离的官方合规与参考客户端测试**：在独立的 `conformance/` 子目录中运行官方 `@modelcontextprotocol/conformance` 场景以及 `@modelcontextprotocol/sdk` 参考客户端三传输测试（`StdioClientTransport`、`StreamableHTTPClientTransport`、`SSEClientTransport`），并在 CI 的 `mcp-conformance` 任务中强制把关。
-3. **特权隔离铁律**：人工治理审批命令 `npx ai-test-workbench@6.5.0 governance approve` 永不注册到 `src/mcp/registry.mjs`，且在 `AITEST_MCP_CHILD=1` 环境下硬阻断。
+3. **特权隔离铁律**：人工治理审批命令 `npx ai-test-workbench@6.6.0 governance approve` 永不注册到 `src/mcp/registry.mjs`，且在 `AITEST_MCP_CHILD=1` 环境下硬阻断。
 
 ---
 

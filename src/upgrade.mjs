@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
+import { readEngineManifestRecord } from './codemap/providers/engine-installer.mjs';
+import { ENGINE_MANIFESTS } from './codemap/providers/engine-manifest.mjs';
 import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import { REPO_ROOT, SCHEMA_VERSIONS, WORKBENCH_VERSION } from './core/version.mjs';
 import { GATE_KERNEL_VERSION, isProtectedDiffPath } from './kernel/gate-kernel.mjs';
@@ -152,18 +154,74 @@ export function readTemplateManifest(qaDir) {
 }
 
 /**
- * Performs a 3-way hash-safe upgrade of vendored kernel/template files inside `<repo>/qa`.
+ * Inspects `.aitest/engine-manifest.json` against pinned `ENGINE_MANIFESTS` without mutating
+ * disk or auto-resigning `.aitest/governance.lock`.
+ * @param {string} qaDir
+ */
+export function inspectEngineUpgrades(qaDir) {
+  const manifestRecord = readEngineManifestRecord(qaDir);
+  const manifestPath = path.join(qaDir, '.aitest', 'engine-manifest.json');
+  const manifestPresent = fs.existsSync(manifestPath);
+  const engines = Object.values(ENGINE_MANIFESTS).map((spec) => {
+    const rec = manifestRecord && manifestRecord.engine === spec.id ? manifestRecord : null;
+    const installedVersion = rec?.installedVersion ? String(rec.installedVersion) : null;
+    const status = !rec
+      ? 'NOT_INSTALLED'
+      : installedVersion === spec.pinnedVersion
+        ? 'UP_TO_DATE'
+        : 'OUTDATED';
+    return {
+      engine: spec.id,
+      pinnedVersion: spec.pinnedVersion,
+      installedVersion,
+      status,
+      binaryPath: rec?.binaryPath || null,
+      binarySha256: rec?.binarySha256 || null,
+      manifestPresent,
+      upgradeCommand: `npx ai-test-workbench@${WORKBENCH_VERSION} mcp install-engine --engine ${spec.id} --target "${path.dirname(qaDir)}"`,
+    };
+  });
+  return { manifestPath, manifestPresent, engines };
+}
+
+/**
+ * Performs a 3-way hash-safe upgrade of vendored kernel/template files inside `<repo>/qa`,
+ * or inspects pinned sidecar graph engine versions (`scope: 'engines'` / `'all'`).
  * - Unmodified files matching the recorded manifest hash are updated in place.
  * - Customized files differing from both manifest and incoming template are NEVER overwritten unless `force: true`;
  *   instead incoming contents are written to `<file>.aitest-new`.
  * - Never auto-approves `.aitest/governance.lock`: surfaces `requiresGovernanceApprove: true` when protected files change.
  * @param {string} qaDir
- * @param {{ dryRun?: boolean, force?: boolean, scope?: 'kernel' | 'all' }} [options]
+ * @param {{ dryRun?: boolean, force?: boolean, scope?: 'kernel' | 'all' | 'engines' }} [options]
  */
 export function upgradeQaWorkspace(qaDir, options = {}) {
   const dryRun = Boolean(options.dryRun);
   const force = Boolean(options.force);
-  const scope = options.scope === 'all' ? 'all' : 'kernel';
+  const scope = options.scope === 'all' ? 'all' : options.scope === 'engines' ? 'engines' : 'kernel';
+
+  if (scope === 'engines') {
+    const engInfo = inspectEngineUpgrades(qaDir);
+    /** @type {Array<{ action: 'CREATE' | 'UPDATE' | 'UP_TO_DATE' | 'CONFLICT' | 'REMOVE_STALE' | 'KEEP_STALE_CUSTOM', file: string, sidecar?: string }>} */
+    const engineActions = engInfo.engines.map((e) => ({
+      action: e.status === 'UP_TO_DATE' ? 'UP_TO_DATE' : 'UPDATE',
+      file: `.aitest/engine-manifest.json (${e.engine}: ${e.installedVersion || 'not-installed'} -> ${e.pinnedVersion})`,
+    }));
+    return {
+      ok: true,
+      dryRun,
+      scope: /** @type {'engines'} */ ('engines'),
+      qaDir,
+      fromVersion: engInfo.engines[0]?.installedVersion || 'not-installed',
+      toVersion: engInfo.engines[0]?.pinnedVersion || WORKBENCH_VERSION,
+      changedCount: 0,
+      conflictCount: 0,
+      requiresGovernanceApprove: false,
+      manifestPath: engInfo.manifestPath,
+      actions: engineActions,
+      engines: engInfo.engines,
+    };
+  }
+
   const scopeFilter = scope === 'all' ? ALL_UPGRADEABLE_RELS : KERNEL_SCOPE_RELS;
 
   const prevManifest = readTemplateManifest(qaDir);
@@ -274,6 +332,8 @@ export function upgradeQaWorkspace(qaDir, options = {}) {
     fs.writeFileSync(manifestPath, JSON.stringify(nextManifest, null, 2) + '\n', 'utf8');
   }
 
+  const enginesSummary = scope === 'all' ? inspectEngineUpgrades(qaDir).engines : undefined;
+
   return {
     ok: conflicts.length === 0,
     dryRun,
@@ -286,6 +346,7 @@ export function upgradeQaWorkspace(qaDir, options = {}) {
     requiresGovernanceApprove: protectedChanged,
     manifestPath,
     actions,
+    ...(enginesSummary ? { engines: enginesSummary } : {}),
   };
 }
 
@@ -325,7 +386,7 @@ export async function runUpgradeCommand(options = {}) {
     return failUpgrade(1, lang === 'zh' ? `未在 ${target} 找到 QA 目录` : `QA directory not found at ${target}`);
   }
 
-  const scope = options.scope === 'all' ? 'all' : 'kernel';
+  const scope = options.scope === 'all' ? 'all' : options.scope === 'engines' ? 'engines' : 'kernel';
   const res = upgradeQaWorkspace(qaDir, {
     dryRun: Boolean(options.dryRun),
     force: Boolean(options.force),

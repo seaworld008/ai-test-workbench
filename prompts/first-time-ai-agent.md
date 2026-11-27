@@ -9,7 +9,7 @@
 ## 模板一：新/老项目首次一键接入并建立自动化测试底座
 
 ```text
-请优先使用 `ai-test-workbench` MCP 工具（如未连上 MCP，则通过 `npx ai-test-workbench@6.5.0 <cmd> --json`）帮我为当前项目完成首次自动化测试工作台接入：
+请优先使用 `ai-test-workbench` MCP 工具（如未连上 MCP，则通过 `npx ai-test-workbench@6.6.0 <cmd> --json`）帮我为当前项目完成首次自动化测试工作台接入：
 1. 调用 `aitest_doctor` 核验 Node >= 22.12 与 Chromium 浏览器缓存状态；
 2. 陌生本地回环项目可直接调用 `aitest_bootstrap` 一键探测服务并初始化隔离 `qa/`（或先传 `dryRun: true` 调用 `aitest_init` 预览宿主 tsconfig/eslint 冲突提示）；
 3. 调用 `aitest_verify_change`（或 `aitest_run(suite="smoke", audit=true)`）验证离线 Smoke 与四层防假绿门禁是否全部通过；
@@ -23,7 +23,7 @@
 
 ```text
 请先对测试环境（`<TEST_BASE_URL>`）执行从 0 到 1 的只读探索后再编写深度测试用例：
-1. 如果系统存在短信验证码、企业 SSO 或扫码登录，请提醒我在终端运行 `npx ai-test-workbench@6.5.0 auth-login --target . --base-url <TEST_BASE_URL>` 由我手工登录并保存会话（绝不绕过验证码）；
+1. 如果系统存在短信验证码、企业 SSO 或扫码登录，请提醒我在终端运行 `npx ai-test-workbench@6.6.0 auth-login --target . --base-url <TEST_BASE_URL>` 由我手工登录并保存会话（绝不绕过验证码）；
 2. 登录就绪后调用 `aitest_explore(target=".", baseUrl="<TEST_BASE_URL>", maxPages=30)` 严格只读巡检所有端/租户工作台切换器、页面原型、筛选列与异常接口；
 3. 调用 `aitest_map_sync` 融合源代码与运行态输出 `SYSTEM_MAP.md`，并按 P0/P1 分层编写 `qa/specs/` 测试计划，涵盖空态边界、分页状态、多租户隔离与已发现问题（绝不把旧 Bug 写成正常预期）。
 ```

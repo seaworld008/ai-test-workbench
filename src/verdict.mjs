@@ -288,12 +288,25 @@ export async function verifyChangeCore(options = {}) {
     hasAllFourGates,
   });
 
+  const graphEngineProvenance = impact.graphEngine
+    ? {
+        provider: impact.graphEngine.provider,
+        version: impact.graphEngine.version ?? null,
+        binarySha256: impact.graphEngine.binarySha256 ?? null,
+        mode: impact.graphEngine.mode,
+        usedForNarrowing: Boolean(impact.graphEngine.usedForNarrowing),
+      }
+    : null;
+
   const confidenceReasons = [
     `trustTier=${trustTier}`,
     `selection=${requestedMode}->${effectiveSuite}${scopeDowngraded ? '(downgraded-no-baseUrl)' : ''}`,
     `base=${baseResolution.strategy}`,
     `gateKernel=${GATE_KERNEL_VERSION}`,
     `acceptanceScope=${runOut.acceptanceScope}`,
+    ...(graphEngineProvenance
+      ? [`graphEngine=${graphEngineProvenance.provider}(${graphEngineProvenance.mode},narrowed=${graphEngineProvenance.usedForNarrowing})`]
+      : []),
   ];
 
   const nextActions = [];
@@ -345,6 +358,7 @@ export async function verifyChangeCore(options = {}) {
       selected: impact.specs.length,
       total: impact.totalSpecsCount ?? impact.specs.length,
       why: impact.why || [],
+      ...(graphEngineProvenance ? { graphEngine: graphEngineProvenance } : {}),
     },
     gates: effectiveGates,
     gateErrors: combinedGateErrors,

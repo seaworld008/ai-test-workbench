@@ -92,6 +92,12 @@ export function validateCliOptionValues(cmd, values) {
       return `[CLI Option Error] Unsupported --suite "${values.suite}" on "${cmd}". Allowed: ${allowedSuites.join(', ')}.`;
     }
   }
+  if (cmd === 'map' && values.engine !== undefined && !['auto', 'builtin', 'codebase-memory-mcp'].includes(String(values.engine).trim())) {
+    return `[CLI Option Error] Unsupported --engine "${values.engine}" on "map". Allowed: auto, builtin, codebase-memory-mcp.`;
+  }
+  if (cmd === 'upgrade' && values.scope !== undefined && !['kernel', 'all', 'engines'].includes(String(values.scope).toLowerCase())) {
+    return `[CLI Option Error] Unsupported --scope "${values.scope}" on "upgrade". Allowed: kernel, all, engines.`;
+  }
   return null;
 }
 

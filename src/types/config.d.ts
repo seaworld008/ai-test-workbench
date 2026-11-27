@@ -24,6 +24,24 @@ export interface AitestObservabilityConfig {
   traceProtocol?: 'w3c' | 'sw8' | 'all';
 }
 
+export type CodeMapEngineMode = 'auto' | 'builtin' | 'codebase-memory-mcp';
+
+export interface AitestCodeMapExternalEngineConfig {
+  pinnedVersion?: string;
+  binarySha256?: string;
+  binaryPath?: string;
+  strictChecksum?: boolean;
+  timeoutMs?: number;
+  maxRssMb?: number;
+  runtimeDir?: string;
+  cacheDir?: string;
+}
+
+export interface AitestCodeMapConfig {
+  engine?: CodeMapEngineMode;
+  externalEngine?: AitestCodeMapExternalEngineConfig;
+}
+
 export interface LockstepRuleConfig {
   id: string;
   whenModified: string[];
@@ -56,6 +74,7 @@ export interface AitestConfig {
   maxScanFiles?: number;
   apiPrefixes?: string[];
   observability?: AitestObservabilityConfig;
+  codeMap?: AitestCodeMapConfig;
   protectedGlobs?: string[];
   governance?: { protected?: string[] };
   waiversFile?: string;

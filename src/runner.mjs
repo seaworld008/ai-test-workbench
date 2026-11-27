@@ -273,7 +273,7 @@ export async function executeSuiteCore(options = {}) {
   let codeMapSummary = null;
   if (!skipGlobalLedgerLatest && fs.existsSync(path.join(qaDir, 'knowledge', 'code-map.json'))) {
     try {
-      codeMapSummary = syncLivingCodeMap(qaDir, { lang, syncImpact: false, skipWriteIfUnchanged: true });
+      codeMapSummary = await syncLivingCodeMap(qaDir, { lang, engine: 'builtin', syncImpact: false, skipWriteIfUnchanged: true });
     } catch {
       // non-fatal knowledge sync warning
     }

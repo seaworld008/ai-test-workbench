@@ -75,6 +75,8 @@ export {
  *     backendFiles: string[],
  *     dbTables: string[],
  *     apis: string[],
+ *     serviceChains?: string[],
+ *     tenantAuthHints?: string[],
  *   } | null,
  * }} DiagnosedFailure
  */
@@ -235,6 +237,18 @@ export function generateDiagnosticsMarkdown(qaDir, resultsPath, options = {}) {
           detailLines.push(`- **Backend Controllers**: ${codeCorr.backendFiles.map((s) => `\`${s}\``).join(', ')}`);
         if (codeCorr.dbTables.length > 0)
           detailLines.push(`- **Linked DB Entities**: ${codeCorr.dbTables.map((t) => `\`${t}\``).join(', ')}`);
+        if (Array.isArray(codeCorr.serviceChains) && codeCorr.serviceChains.length > 0) {
+          detailLines.push('- **Service Chains (CodeMap v5)**:');
+          for (const chain of codeCorr.serviceChains.slice(0, 8)) {
+            detailLines.push(`  - \`${redactSecrets(chain)}\``);
+          }
+        }
+        if (Array.isArray(codeCorr.tenantAuthHints) && codeCorr.tenantAuthHints.length > 0) {
+          detailLines.push('- **Tenant / Auth Filter Hints**:');
+          for (const hint of codeCorr.tenantAuthHints.slice(0, 5)) {
+            detailLines.push(`  - ${redactSecrets(hint)}`);
+          }
+        }
       }
       detailLines.push(
         `- **Loki / Tempo MCP Query (LogQL)**: \`${observabilityQueries.lokiLogQl}\``,

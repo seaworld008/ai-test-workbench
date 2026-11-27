@@ -17,13 +17,14 @@ import {
   matchBackendFilesForApi,
   resolveDynamicViewForPage,
 } from './route-api-linker.mjs';
+import { buildApisAndServiceChains, prepareExternalGraphSignals } from './v5-fusion.mjs';
 
 export { compileDbEntityMatchers, correlateDbTablesForRoute };
 
 const STALE_RUNTIME_DAYS = 14;
 
 /**
- * Migrates v3.0 code-map objects cleanly to `schemaVersion: 4` (`A-07`).
+ * Migrates v3/v4 code-map objects cleanly to `schemaVersion: 5` while preserving runtime routes & defects.
  * @param {any} rawMap @returns {Record<string, any>}
  */
 export function migrateCodeMapSchema(rawMap) {
@@ -32,12 +33,14 @@ export function migrateCodeMapSchema(rawMap) {
     ...rawMap,
     schemaVersion: SCHEMA_VERSIONS.codeMap,
     processedSnapshots: Array.isArray(rawMap.processedSnapshots) ? rawMap.processedSnapshots : [],
+    apis: rawMap.apis && typeof rawMap.apis === 'object' && !Array.isArray(rawMap.apis) ? rawMap.apis : {},
+    serviceChains: Array.isArray(rawMap.serviceChains) ? rawMap.serviceChains : [],
   };
 }
 
 /**
- * Fuses static code index + runtime exploration topology + test results + perf snapshots into
- * Living Code Map v4 (`schemaVersion: 4`) in linear O(N) time (`K-01..K-06`).
+ * Fuses static code index + optional sidecar graph snapshot + runtime exploration topology + test results + perf snapshots
+ * into Living Code Map v5 (`schemaVersion: 5`).
  * @param {any} existingMap
  * @param {{
  *   nowIso?: string,
@@ -49,6 +52,7 @@ export function migrateCodeMapSchema(rawMap) {
  *   sourceRepos?: string[],
  *   maxScanFiles?: number,
  *   apiPrefixes?: string[],
+ *   normalizedGraphSnapshot?: import('./providers/cbm-normalizer.mjs').NormalizedGraphSnapshot | null,
  * }} [inputs]
  */
 export function mergeLivingCodeMap(existingMap, inputs = {}) {
@@ -58,19 +62,17 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
   const revision = Number(base.revision || 0) + 1;
 
   const sourceIndex = inputs.sourceIndex || {
-    fileCount: 0,
-    truncated: false,
-    warnings: [],
-    frontendRoutes: [],
-    brokenRouteImports: [],
-    frontendApiCalls: [],
-    backendEndpoints: [],
-    dbEntities: [],
-    backendFileTexts: {},
+    fileCount: 0, truncated: false, warnings: [], frontendRoutes: [], brokenRouteImports: [],
+    frontendApiCalls: [], backendEndpoints: [], dbEntities: [], backendFileTexts: {},
   };
   const topology = inputs.topology || {};
   const specIndex = Array.isArray(inputs.specIndex) ? inputs.specIndex : [];
   const outcomesBySpec = groupOutcomesBySpecFile(inputs.resultsJson || null);
+
+  const { graphEngine, cbmControllerChains, cbmMethodByCtrlRoute } = prepareExternalGraphSignals(
+    inputs.normalizedGraphSnapshot || null,
+    sourceIndex
+  );
 
   const staticPatterns = (sourceIndex.frontendRoutes || []).map((/** @type {any} */ r) => normalizeRoutePath(r.route));
   const matchStatic = createRoutePatternMatcher(staticPatterns);
@@ -105,13 +107,14 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
     entry.lastSeenAt = now;
   }
   for (const [prevKey, prevRoute] of Object.entries(base.routes || {})) {
-    if (routesObj[prevKey] || (hasStaticIndex && prevRoute.frontendFile)) continue;
+    if (routesObj[prevKey] || (hasStaticIndex && prevRoute.source !== 'runtime' && prevRoute.frontendFile)) continue;
     if (prevRoute.source === 'runtime' || (!prevRoute.frontendFile && prevRoute.archetype !== 'tested-route')) {
       const ageMs = nowMs - Date.parse(prevRoute.lastSeenAt || prevRoute.lastUpdatedAt || now);
       routesObj[prevKey] = {
-        ...prevRoute,
-        source: 'runtime',
-        coveringSpecs: [],
+        ...prevRoute, source: 'runtime', coveringSpecs: [],
+        linkedApis: Array.isArray(prevRoute.linkedApis) ? [...prevRoute.linkedApis] : [],
+        linkedBackendFiles: Array.isArray(prevRoute.linkedBackendFiles) ? [...prevRoute.linkedBackendFiles] : [],
+        linkedDbTables: Array.isArray(prevRoute.linkedDbTables) ? [...prevRoute.linkedDbTables] : [],
         stale: Number.isFinite(ageMs) && ageMs > STALE_RUNTIME_DAYS * 86_400_000,
       };
     }
@@ -162,28 +165,39 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
   const apiCallsByFile = new Map();
   for (const c of sourceIndex.frontendApiCalls || []) {
     if (!c?.file || !c?.path) continue;
-    let list = apiCallsByFile.get(c.file);
-    if (!list) { list = []; apiCallsByFile.set(c.file, list); }
+    const list = apiCallsByFile.get(c.file) || [];
     list.push(c.path);
+    apiCallsByFile.set(c.file, list);
   }
 
   const gatewayPrefixes = collectGatewayPrefixes([...(sourceIndex.axiosPrefixes || []), ...(inputs.apiPrefixes || [])]);
-  const { reverse: reverseFrontend, viewSet } = buildFrontendViewGraph(sourceIndex.frontendImports || {}, sourceIndex.viewFiles || []);
+  const { reverse: reverseFrontend, viewSet } = buildFrontendViewGraph(
+    sourceIndex.frontendImports || {},
+    sourceIndex.viewFiles || [],
+    sourceIndex.vueTemplateRefs || {}
+  );
   const compiledEntities = compileDbEntityMatchers(sourceIndex.dbEntities || []);
-  const javaDbChain = buildJavaDbChainIndex(sourceIndex.javaFileInfos || {}, sourceIndex.mybatisMappers || [], sourceIndex.dbEntities || []);
+  const javaDbChain = buildJavaDbChainIndex(
+    sourceIndex.javaFileInfos || {},
+    sourceIndex.mybatisMappers || [],
+    sourceIndex.dbEntities || [],
+    { feignBridges: sourceIndex.feignBridges || [], cbmControllerChains }
+  );
   const backendFileTexts = sourceIndex.backendFileTexts || {};
 
+  const allRouteKeys = Object.keys(routesObj);
   for (const entry of Object.values(routesObj)) {
     if (!entry.frontendFile) {
       const pageMeta = pageMetaByRoute.get(entry.route) || { route: entry.route };
       const resolvedView = resolveDynamicViewForPage(pageMeta, entry.linkedApis, {
-        viewFiles: sourceIndex.viewFiles || [],
-        frontendApiCalls: sourceIndex.frontendApiCalls || [],
-        reverseFrontend,
-        viewSet,
-        prefixes: gatewayPrefixes,
+        viewFiles: sourceIndex.viewFiles || [], frontendApiCalls: sourceIndex.frontendApiCalls || [],
+        reverseFrontend, viewSet, prefixes: gatewayPrefixes,
       });
       if (resolvedView) entry.frontendFile = resolvedView;
+      else if (sourceIndex.layoutRoutes?.[entry.route]) entry.frontendFile = sourceIndex.layoutRoutes[entry.route];
+      else if (sourceIndex.layoutFile && entry.route !== '/' && allRouteKeys.some((rk) => rk.startsWith(`${entry.route}/`))) {
+        entry.frontendFile = sourceIndex.layoutFile;
+      }
     }
 
     if (entry.frontendFile) {
@@ -191,7 +205,12 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
         entry.frontendFile,
         sourceIndex.frontendImports || {},
         apiCallsByFile,
-        sourceIndex.axiosPrefixByFile || {}
+        sourceIndex.axiosPrefixByFile || {},
+        {
+          frontendNamedImports: sourceIndex.frontendNamedImports || {},
+          frontendApiCalls: sourceIndex.frontendApiCalls || [],
+          vueTemplateRefs: sourceIndex.vueTemplateRefs || {},
+        }
       );
       const apiSet = new Set(entry.linkedApis);
       for (const p of calls) {
@@ -216,15 +235,15 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
   for (const sp of specIndex) {
     for (const u of sp.uiRoutes || []) {
       const key = matchActive(u);
-      let set = routeToSpecs.get(key);
-      if (!set) { set = new Set(); routeToSpecs.set(key, set); }
+      const set = routeToSpecs.get(key) || new Set();
       set.add(sp.specFile);
+      routeToSpecs.set(key, set);
     }
     for (const api of sp.apiPaths || []) {
       for (const cand of [api, ...getStrippedApiCandidates(api, gatewayPrefixes)]) {
-        let set = apiToSpecs.get(cand);
-        if (!set) { set = new Set(); apiToSpecs.set(cand, set); }
+        const set = apiToSpecs.get(cand) || new Set();
         set.add(sp.specFile);
+        apiToSpecs.set(cand, set);
       }
     }
   }
@@ -233,8 +252,7 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
     const matchedSpecs = new Set(routeToSpecs.get(entry.route) || []);
     for (const api of entry.linkedApis) {
       for (const cand of [api, ...getStrippedApiCandidates(api, gatewayPrefixes)]) {
-        const linked = apiToSpecs.get(cand);
-        if (linked) { for (const sf of linked) matchedSpecs.add(sf); }
+        for (const sf of apiToSpecs.get(cand) || []) matchedSpecs.add(sf);
       }
     }
     entry.coveringSpecs = [...matchedSpecs];
@@ -253,6 +271,10 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
     }
   }
 
+  const { apis, serviceChains, crossServiceBridges } = buildApisAndServiceChains(
+    sourceIndex, routesObj, javaDbChain, apiToSpecs, gatewayPrefixes, cbmMethodByCtrlRoute
+  );
+
   const portalsByKey = new Map();
   for (const pt of [...(base.portals || []), ...(topology.portals || [])]) {
     if (!pt || !pt.name) continue;
@@ -265,13 +287,7 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
   }
 
   const converged = convergeDefectsAndPerf({
-    base,
-    sourceIndex,
-    topology,
-    perfReport: inputs.perfReport || null,
-    now,
-    exploredRouteKeys,
-    matchActive,
+    base, sourceIndex, topology, perfReport: inputs.perfReport || null, now, exploredRouteKeys, matchActive,
   });
 
   const activeRoutes = Object.values(routesObj).filter((r) => !r.stale);
@@ -289,7 +305,7 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
   const resolvedSourceRepos = inputs.sourceRepos || sourceIndex.repos || base.meta?.sourceRepos || [];
   const nextMap = {
     schemaVersion: SCHEMA_VERSIONS.codeMap,
-    version: '4.1',
+    version: '5.0',
     revision,
     updatedAt: now,
     contentFingerprint: '',
@@ -299,6 +315,7 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
       truncated: Boolean(sourceIndex.truncated),
       ...(typeof inputs.maxScanFiles === 'number' ? { maxScanFiles: inputs.maxScanFiles } : {}),
       ...(Array.isArray(inputs.apiPrefixes) && inputs.apiPrefixes.length > 0 ? { apiPrefixes: inputs.apiPrefixes } : {}),
+      graphEngine,
     },
     baseURL: topology.baseURL || base.baseURL || null,
     techStack: [...new Set([...(base.techStack || []), ...(topology.techStack || [])])],
@@ -312,15 +329,15 @@ export function mergeLivingCodeMap(existingMap, inputs = {}) {
       dbEntities: dbTables.length > 0 ? [...new Set(dbTables)] : base.sourceSummary?.dbEntities || [],
     },
     routes: routesObj,
+    apis,
+    serviceChains,
+    crossServiceBridges,
     endpoints: [...endpointMap.values()],
     defects: converged.defects,
     duplicateWaterfalls: topology.duplicateWaterfalls || base.duplicateWaterfalls || [],
     coverage: {
-      totalRoutes: activeRoutes.length,
-      coveredRoutes,
-      uncoveredCount: uncoveredRoutes.length,
-      uncoveredRoutes,
-      coveragePct,
+      totalRoutes: activeRoutes.length, coveredRoutes,
+      uncoveredCount: uncoveredRoutes.length, uncoveredRoutes, coveragePct,
       staleRoutesCount: Object.values(routesObj).filter((r) => r.stale).length,
     },
     perfSnapshots: converged.perfSnapshots,

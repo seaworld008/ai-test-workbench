@@ -8,7 +8,7 @@ import { collectDoctorReport } from '../../doctor.mjs';
 import { computeFlakyReport } from '../../flaky.mjs';
 import { computeImpact } from '../../impact.mjs';
 import { collectLessonsReport } from '../../learn.mjs';
-import { runMcpDoctorReadOnly } from '../../mcp-hub/auditor.mjs';
+import { inspectGraphEngineStatus, runMcpDoctorReadOnly } from '../../mcp-hub/auditor.mjs';
 import { getMcpPresetsSummary } from '../../mcp-hub/catalog.mjs';
 import { collectReportArtifacts } from '../../report.mjs';
 import { buildRequirementTraceMatrix } from '../../traceability.mjs';
@@ -50,8 +50,8 @@ export async function executeDoctorReadOnlyFastPath(_args, ctx) {
 }
 
 /**
- * Pure read-only in-process MCP fast path for `aitest_mcp_hub` when `action === 'presets'`
- * or read-only `action === 'doctor' && !args.lock`.
+ * Pure read-only in-process MCP fast path for `aitest_mcp_hub` when `action === 'presets'`,
+ * `action === 'engine-status'`, or read-only `action === 'doctor' && !args.lock`.
  * Mutating calls (`action === 'add'` or `args.lock === true`) return `null` so they run under `McpJobManager`.
  * @param {Record<string, any>} args
  * @param {import('./shared.mjs').ToolExecContext} ctx
@@ -64,21 +64,35 @@ export async function executeMcpHubReadOnlyFastPath(args, ctx) {
       ok: true,
       exitCode: 0,
       outcome: 'pass',
-      summary: 'Listed 7-pillar pinned MCP presets',
+      summary: 'Listed 8-pillar pinned MCP presets',
       data: redactStructuredValue(getMcpPresetsSummary()),
     };
   }
-  if (action !== 'doctor' || Boolean(args.lock)) {
+  if (action !== 'engine-status' && (action !== 'doctor' || Boolean(args.lock))) {
     return null;
   }
   if (!ctx.target) {
     const msg = ctx.lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option';
-    return { ok: false, exitCode: 64, outcome: 'usage', blockerKind: 'USAGE_ERROR', summary: msg, data: { action: 'doctor', error: msg } };
+    return { ok: false, exitCode: 64, outcome: 'usage', blockerKind: 'USAGE_ERROR', summary: msg, data: { action, error: msg } };
   }
   const qaDir = resolveQaDirectory(path.resolve(ctx.target), args.qaDir);
   if (!qaDir) {
     const msg = redactSecrets(ctx.lang === 'zh' ? `未找到 QA 目录: ${ctx.target}` : `QA directory not found: ${ctx.target}`);
-    return { ok: false, exitCode: 1, outcome: 'fail', summary: msg, data: { action: 'doctor', error: msg } };
+    return { ok: false, exitCode: 1, outcome: 'fail', summary: msg, data: { action, error: msg } };
+  }
+  if (action === 'engine-status') {
+    const status = inspectGraphEngineStatus(qaDir);
+    return {
+      ok: !status.manifestError,
+      exitCode: status.manifestError ? 1 : 0,
+      outcome: status.manifestError ? 'fail' : 'pass',
+      summary: redactSecrets(
+        status.manifestError
+          ? `Engine manifest parse error: ${status.manifestError}`
+          : `Graph engine status: mode=${status.engineMode}, manifest=${status.manifestPresent}, installPolicy=${status.installPolicy}`
+      ),
+      data: redactStructuredValue(status),
+    };
   }
 
   const res = runMcpDoctorReadOnly(qaDir, { ignoreLock: false });

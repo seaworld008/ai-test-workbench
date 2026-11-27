@@ -1,7 +1,7 @@
 {
   "name": "ai-test-workbench",
-  "version": "6.5.0",
-  "description": "Trustworthy Verification Kernel & Multi-Protocol MCP Server for AI Coding Agents: 4-Layer Semantic AST Anti-Fake-Green Gates, Governance Lock, Run Ledger, One-Call verify_change Verdict, Stateful Heal Governance, Import-Graph Impact v2, and PerformanceObserver Web Vitals.",
+  "version": "6.6.0",
+  "description": "Trustworthy Verification Kernel & Multi-Protocol MCP Server for AI Coding Agents: 4-Layer Semantic AST Anti-Fake-Green Gates, Governance Lock, Run Ledger, One-Call verify_change Verdict, Stateful Heal Governance, CodeMap v5 & Diff-Impact v3 with Pinned Sidecar Graph Engine, 8-Pillar MCP Hub, and PerformanceObserver Web Vitals.",
   "license": "MIT",
   "author": "seaworld008",
   "homepage": "https://github.com/seaworld008/ai-test-workbench#readme",

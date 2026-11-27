@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { probeEngineHealth } from './codemap/providers/engine-installer.mjs';
+import { loadAndValidateAitestConfigFile } from './core/config.mjs';
 import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
 import { resolvePlaywrightCli } from './core/playwright-resolve.mjs';
 import { probeToolVersion, runNpm, runPlaywright } from './core/proc.mjs';
@@ -196,6 +198,13 @@ export async function collectDoctorReport(options = {}) {
   // preserving deterministic check ordering in the final output.
   const templateQaDir = path.join(WORKBENCH_ROOT, 'templates', 'playwright-qa');
   const templatePwCli = resolvePlaywrightCli(templateQaDir);
+  const candidateQa = targetDir
+    ? (fs.existsSync(path.join(targetDir, 'playwright.config.ts')) ? targetDir : path.join(targetDir, 'qa'))
+    : null;
+  const engineProbeConfig =
+    candidateQa && fs.existsSync(candidateQa)
+      ? { qaDir: candidateQa, ...(loadAndValidateAitestConfigFile(candidateQa).config.codeMap?.externalEngine || {}) }
+      : {};
 
   const [
     npmVerProbe,
@@ -205,6 +214,7 @@ export async function collectDoctorReport(options = {}) {
     claudeInfo,
     dockerInfo,
     templatePwRes,
+    engineHealth,
   ] = await Promise.all([
     runNpm(['--version'], { timeoutMs: 8000 }).then(
       (res) => ({ ok: true, res, err: null }),
@@ -219,6 +229,10 @@ export async function collectDoctorReport(options = {}) {
     probeToolVersion('claude'),
     probeToolVersion('docker'),
     templatePwCli ? runPlaywright(templateQaDir, ['--version'], { timeoutMs: 8000 }) : Promise.resolve(null),
+    probeEngineHealth('codebase-memory-mcp', engineProbeConfig).catch((err) => ({
+      ok: false, healthy: false, id: 'codebase-memory-mcp', blockerKind: 'PROBE_ERROR',
+      reason: err instanceof Error ? err.message : String(err), installedVersion: null, binaryPath: '', binarySha256: null, recoverySteps: [],
+    })),
   ]);
 
   // 3. npm
@@ -322,9 +336,17 @@ export async function collectDoctorReport(options = {}) {
     );
   }
 
+  // 8b. Optional Sidecar Graph Engine (`codebase-memory-mcp`, never fails core workbench)
+  add(
+    engineHealth.ok ? 'OK' : 'WARN',
+    lang === 'zh' ? '代码图谱引擎 (codebase-memory-mcp)' : 'Graph Engine (codebase-memory-mcp)',
+    engineHealth.ok
+      ? `v${engineHealth.installedVersion} verified (${engineHealth.binaryPath}, sha256=${String(engineHealth.binarySha256 || '').slice(0, 12)})`
+      : `${engineHealth.reason || 'not installed'} [${engineHealth.blockerKind || 'OPTIONAL'}] — built-in zero-dep CodeMap fallback active${engineHealth.recoverySteps?.[0] ? `; ${engineHealth.recoverySteps[0]}` : ''}`
+  );
+
   // 9. Optional target QA check & Gate Kernel drift check (A-03)
-  if (targetDir) {
-    const candidateQa = fs.existsSync(path.join(targetDir, 'playwright.config.ts')) ? targetDir : path.join(targetDir, 'qa');
+  if (targetDir && candidateQa) {
     const targetPwCli = resolvePlaywrightCli(targetDir) || resolvePlaywrightCli(candidateQa);
     const hasDir = fs.existsSync(targetDir);
     add(

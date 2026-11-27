@@ -1,60 +1,52 @@
 // @ts-check
 
 /**
+ * Protected `.aitest/` lock & supply-chain manifests sealed inside `.aitest/governance.lock` when present on disk.
+ * Explicitly collected by `src/kernel/gate/policy.mjs` even though generic `.aitest/` runtime dirs are skipped.
+ */
+export const PROTECTED_AITEST_LOCK_FILES = Object.freeze([
+  '.aitest/mcp.lock',
+  '.aitest/engine-manifest.json',
+]);
+
+/**
  * Default protected referee-kernel governance globs (shared with `src/kernel/gate/policy.mjs`).
  * Deliberately locks ONLY verifier infrastructure (`support/**`, `tests/fixtures/base.ts`, `eslint`,
- * `playwright.config.*`, `aitest.config.json`, `waivers.json`, `corpus/**`, `fixtures/upstream-cassettes/**`)
- * while keeping business adaptation files open for autonomous Agent iteration.
+ * `playwright.config.*`, `aitest.config.json`, `waivers.json`, `corpus/**`, `fixtures/upstream-cassettes/**`,
+ * `.aitest/mcp.lock`, `.aitest/engine-manifest.json`) while keeping business adaptation files open.
  */
 export const DEFAULT_CONFIG_PROTECTED_GLOBS = Object.freeze([
-  'playwright.config.ts',
-  'playwright.config.js',
-  'eslint.config.mjs',
-  'eslint.config.js',
-  'eslint.config.ts',
-  'aitest.config.json',
-  'waivers.json',
-  'tsconfig.json',
-  'impact-map.json',
-  'package.json',
-  '.gitignore',
-  'support/**',
-  'scripts/audit-results.mjs',
-  'tests/fixtures/base.ts',
-  'corpus/**',
-  'fixtures/upstream-cassettes/**',
-  'known-blockers.json',
+  'playwright.config.ts', 'playwright.config.js',
+  'eslint.config.mjs', 'eslint.config.js', 'eslint.config.ts',
+  'aitest.config.json', 'waivers.json', 'tsconfig.json', 'impact-map.json', 'package.json', '.gitignore',
+  'support/**', 'scripts/audit-results.mjs', 'tests/fixtures/base.ts',
+  'corpus/**', 'fixtures/upstream-cassettes/**', 'known-blockers.json',
+  ...PROTECTED_AITEST_LOCK_FILES,
 ]);
 
 export const RESERVED_WEAK_MATCHERS = Object.freeze(
   new Set([
-    'toBeTruthy',
-    'toBeFalsy',
-    'toBeDefined',
-    'toBeNull',
-    'toBeUndefined',
-    'toBeNaN',
-    'toBeGreaterThan',
-    'toBeGreaterThanOrEqual',
-    'toBeLessThan',
-    'toBeLessThanOrEqual',
-    'toBeCloseTo',
-    'toBeVisible',
-    'toBeAttached',
-    'toBeInViewport',
+    'toBeTruthy', 'toBeFalsy', 'toBeDefined', 'toBeNull', 'toBeUndefined', 'toBeNaN',
+    'toBeGreaterThan', 'toBeGreaterThanOrEqual', 'toBeLessThan', 'toBeLessThanOrEqual',
+    'toBeCloseTo', 'toBeVisible', 'toBeAttached', 'toBeInViewport',
   ])
 );
 
 const FORBIDDEN_UPSTREAM_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0']);
+const CODE_MAP_ENGINES = new Set(['auto', 'builtin', 'codebase-memory-mcp']);
+const PINNED_SEMVER_RE = /^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/;
+const SHA256_VALUE_RE = /^(?:sha256:)?[0-9a-f]{64}$/i;
 
 /**
  * @typedef {{ id: string; whenModified: string[]; requireModified: string[]; allowWaiver?: boolean }} LockstepRuleConfig
  * @typedef {{ id: string; code?: string; title?: string; pattern: string; flags?: string; scope?: 'all' | 'product' | 'specs'; fileGlobs?: string[]; remediation?: string }} MemoryPatternConfig
  * @typedef {{ normalizePaths?: string[]; strictByteEscape?: boolean; maxLatencyRatio?: number; maxTtftRatio?: number; privacyMode?: 'redacted' | 'shape-only'; authStorageKeys?: string[]; failOnAuthError?: boolean }} ParityConfig
  * @typedef {{ logsBackend?: 'loki' | 'victorialogs' | 'elk'; traceProtocol?: 'w3c' | 'sw8' | 'all' }} ObservabilityConfig
+ * @typedef {{ pinnedVersion?: string; binarySha256?: string; binaryPath?: string; strictChecksum?: boolean; timeoutMs?: number; maxRssMb?: number; runtimeDir?: string; cacheDir?: string }} CodeMapExternalEngineConfig
+ * @typedef {{ engine?: 'auto' | 'builtin' | 'codebase-memory-mcp'; externalEngine?: CodeMapExternalEngineConfig }} CodeMapConfig
  * @typedef {{
  *   assertFunctionNames: string[]; criticalTags: string[]; maxFlaky: number; maxSkipped: number; maxWaivers: number; maxWaiverDays: number;
- *   sourceRepos: string[]; maxScanFiles?: number; apiPrefixes: string[]; observability?: ObservabilityConfig;
+ *   sourceRepos: string[]; maxScanFiles?: number; apiPrefixes: string[]; observability?: ObservabilityConfig; codeMap?: CodeMapConfig;
  *   governance: { protected: string[] }; rules: Record<string, boolean | { enabled?: boolean; severity?: 'error' | 'off' }>;
  *   customMatchers: Record<string, number>; parity?: ParityConfig; replayAllowedUpstreamHosts: string[];
  *   lockstepRules: LockstepRuleConfig[]; memoryPatterns: MemoryPatternConfig[]; _configError?: string; _configErrors?: string[]; [key: string]: unknown;
@@ -68,34 +60,19 @@ const FORBIDDEN_UPSTREAM_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1
 export const DEFAULT_AITEST_CONFIG = Object.freeze({
   assertFunctionNames: ['expect*', 'assert*', 'verify*'],
   criticalTags: ['@critical', '@smoke'],
-  maxFlaky: 0,
-  maxSkipped: 0,
-  maxWaivers: 5,
-  maxWaiverDays: 14,
-  sourceRepos: [],
-  apiPrefixes: [],
-  governance: {
-    protected: [...DEFAULT_CONFIG_PROTECTED_GLOBS],
-  },
-  rules: {},
-  customMatchers: {},
-  replayAllowedUpstreamHosts: [],
-  lockstepRules: [],
-  memoryPatterns: [],
+  maxFlaky: 0, maxSkipped: 0, maxWaivers: 5, maxWaiverDays: 14,
+  sourceRepos: [], apiPrefixes: [],
+  governance: { protected: [...DEFAULT_CONFIG_PROTECTED_GLOBS] },
+  rules: {}, customMatchers: {}, replayAllowedUpstreamHosts: [], lockstepRules: [], memoryPatterns: [],
 });
 
 /** @returns {NormalizedAitestConfig} */
 export function createDefaultAitestConfig() {
   return {
     ...DEFAULT_AITEST_CONFIG,
-    sourceRepos: [],
-    apiPrefixes: [],
+    sourceRepos: [], apiPrefixes: [],
     governance: { protected: [...DEFAULT_CONFIG_PROTECTED_GLOBS] },
-    rules: {},
-    customMatchers: {},
-    replayAllowedUpstreamHosts: [],
-    lockstepRules: [],
-    memoryPatterns: [],
+    rules: {}, customMatchers: {}, replayAllowedUpstreamHosts: [], lockstepRules: [], memoryPatterns: [],
   };
 }
 
@@ -105,9 +82,7 @@ export function createDefaultAitestConfig() {
  * @returns {{ ok: boolean, normalized: string, error?: string }}
  */
 export function validateReplayUpstreamHostEntry(rawHost) {
-  if (typeof rawHost !== 'string') {
-    return { ok: false, normalized: '', error: 'must be a non-empty hostname string' };
-  }
+  if (typeof rawHost !== 'string') return { ok: false, normalized: '', error: 'must be a non-empty hostname string' };
   const host = rawHost.trim().toLowerCase();
   if (!host) return { ok: false, normalized: '', error: 'must not be empty' };
   if (host.includes('*')) return { ok: false, normalized: host, error: `wildcard host "${rawHost}" is forbidden` };
@@ -115,13 +90,69 @@ export function validateReplayUpstreamHostEntry(rawHost) {
     return { ok: false, normalized: host, error: `host "${rawHost}" must be a bare hostname without scheme, port, or path` };
   }
   if (FORBIDDEN_UPSTREAM_HOSTS.has(host) || host.endsWith('.localhost')) {
-    return {
-      ok: false,
-      normalized: host,
-      error: `loopback/SUT host "${rawHost}" is forbidden in replayAllowedUpstreamHosts`,
-    };
+    return { ok: false, normalized: host, error: `loopback/SUT host "${rawHost}" is forbidden in replayAllowedUpstreamHosts` };
   }
   return { ok: true, normalized: host };
+}
+
+/**
+ * Validates optional `codeMap` engine and external sidecar configuration (fail-closed).
+ * @param {unknown} rawCodeMap
+ * @param {string[]} errors
+ * @returns {CodeMapConfig | undefined}
+ */
+function validateCodeMapConfig(rawCodeMap, errors) {
+  if (rawCodeMap === undefined) return undefined;
+  if (!rawCodeMap || typeof rawCodeMap !== 'object' || Array.isArray(rawCodeMap)) {
+    errors.push('aitest.config.json "codeMap" must be an object.');
+    return undefined;
+  }
+  const cm = /** @type {Record<string, unknown>} */ (rawCodeMap);
+  /** @type {CodeMapConfig} */
+  const out = {};
+  if (cm.engine !== undefined) {
+    if (typeof cm.engine !== 'string' || !CODE_MAP_ENGINES.has(cm.engine)) {
+      errors.push('aitest.config.json "codeMap.engine" must be "auto", "builtin", or "codebase-memory-mcp".');
+    } else out.engine = /** @type {'auto' | 'builtin' | 'codebase-memory-mcp'} */ (cm.engine);
+  }
+  if (cm.externalEngine !== undefined) {
+    if (!cm.externalEngine || typeof cm.externalEngine !== 'object' || Array.isArray(cm.externalEngine)) {
+      errors.push('aitest.config.json "codeMap.externalEngine" must be an object.');
+      return out;
+    }
+    const ee = /** @type {Record<string, unknown>} */ (cm.externalEngine);
+    /** @type {CodeMapExternalEngineConfig} */
+    const ext = {};
+    if (ee.pinnedVersion !== undefined) {
+      if (typeof ee.pinnedVersion !== 'string' || !PINNED_SEMVER_RE.test(ee.pinnedVersion.trim())) {
+        errors.push('aitest.config.json "codeMap.externalEngine.pinnedVersion" must be a pinned semver string (e.g. "0.12.1").');
+      } else ext.pinnedVersion = ee.pinnedVersion.trim();
+    }
+    if (ee.binarySha256 !== undefined) {
+      if (typeof ee.binarySha256 !== 'string' || !SHA256_VALUE_RE.test(ee.binarySha256.trim())) {
+        errors.push('aitest.config.json "codeMap.externalEngine.binarySha256" must be a 64-char hex SHA-256 digest.');
+      } else ext.binarySha256 = ee.binarySha256.trim().toLowerCase();
+    }
+    for (const k of /** @type {const} */ (['binaryPath', 'runtimeDir', 'cacheDir'])) {
+      if (ee[k] === undefined) continue;
+      if (typeof ee[k] !== 'string' || !ee[k].trim() || ee[k].includes('\0')) {
+        errors.push(`aitest.config.json "codeMap.externalEngine.${k}" must be a non-empty path string without NUL bytes.`);
+      } else ext[k] = ee[k].trim();
+    }
+    if (ee.strictChecksum !== undefined) {
+      if (typeof ee.strictChecksum !== 'boolean') errors.push('aitest.config.json "codeMap.externalEngine.strictChecksum" must be a boolean.');
+      else ext.strictChecksum = ee.strictChecksum;
+    }
+    for (const [k, min, max] of /** @type {const} */ ([['timeoutMs', 1000, 600000], ['maxRssMb', 64, 16384]])) {
+      const v = ee[k];
+      if (v === undefined) continue;
+      if (typeof v !== 'number' || !Number.isInteger(v) || v < min || v > max) {
+        errors.push(`aitest.config.json "codeMap.externalEngine.${k}" must be an integer between ${min} and ${max}.`);
+      } else ext[k] = v;
+    }
+    out.externalEngine = ext;
+  }
+  return out;
 }
 
 /**
@@ -188,6 +219,7 @@ export function validateAitestConfigObject(raw) {
       observabilityCfg = /** @type {ObservabilityConfig} */ ({ ...ob });
     }
   }
+  const codeMapCfg = validateCodeMapConfig(obj.codeMap, errors);
 
   if (obj.governance !== undefined) {
     if (!obj.governance || typeof obj.governance !== 'object' || Array.isArray(obj.governance)) {
@@ -397,6 +429,7 @@ export function validateAitestConfigObject(raw) {
       ...(typeof obj.maxScanFiles === 'number' ? { maxScanFiles: obj.maxScanFiles } : {}),
       apiPrefixes: Array.isArray(obj.apiPrefixes) ? /** @type {string[]} */ (obj.apiPrefixes).map((s) => s.trim()).filter(Boolean) : [],
       ...(observabilityCfg ? { observability: observabilityCfg } : {}),
+      ...(codeMapCfg ? { codeMap: codeMapCfg } : {}),
       governance: { protected: [...new Set([...DEFAULT_CONFIG_PROTECTED_GLOBS, ...customProtected])] },
       rules: rulesObj,
       customMatchers: customMatchersObj,

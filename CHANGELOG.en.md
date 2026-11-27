@@ -4,6 +4,38 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.6.0] - 2026-11-27
+
+### CodeMap v5 Three-Tier Fusion, Decoupled Pinned Sidecar Code Graph Engine & Continuous Upgrade Loop ([ADR-0007](./docs/adr/0007-external-code-graph-engine.en.md))
+- **Decoupled Pinned Sidecar Graph Engine & Graph Provider SPI (`src/codemap/providers/{registry,engine-manifest,engine-installer,cbm-client,cbm-normalizer,cbm-adapter}.mjs`, `conformance/graph-engine/`)**:
+  - Preserves **0 runtime third-party npm dependencies** while integrating official **`DeusData/codebase-memory-mcp@0.12.1`** (MIT, read-only `stdio` JSON-RPC sidecar with `--ui=false` enforced) behind a pluggable Graph Provider SPI; degrades cleanly to L0 `builtin` mode when absent or timed out, with concurrent `doctor` probes reporting `OK`/`WARN` (never `FAIL`).
+  - `engine-manifest.mjs` embeds verified 6-platform official `v0.12.1` SHA-256 checksums (Windows x64/arm64, macOS arm64/x64, Linux x64/arm64) and enforces cross-platform short-path cohort isolation (never inside `<qaDir>/.aitest/`; Windows `<185`-char guard + untrusted ancestor NTFS ACL detection with owner-only `icacls` `%SystemDrive%\aitw-{rt,cbm}` fallback; macOS `<=60B` `AF_UNIX` budget; Linux WSL2 DrvFs `/mnt/*` ban).
+  - `engine-installer.mjs` adds human-CLI-only `mcp install-engine --engine codebase-memory-mcp` (SHA-256 verification, Zip-Slip blocking, air-gapped `--from-file`/`--mirror-url`/`--expected-sha256` support, and `N-1` retention for instant rollback) plus `upgrade --scope engines` (version drift check without auto-downloading binaries or auto-resigning `governance.lock`).
+  - `cbm-client.mjs` and `cbm-normalizer.mjs` enforce strict env allowlist scrubbing, UTF-8 CJK path/stdin safety, `8 MB` stdout cap, cross-platform `killProcessTree`, cross-service Feign/RPC stop-boundaries, `BaseMapperX`/`Object.*`/POJO noise pruning, and `sanitizeUntrustedCodeMetadata` prompt-injection defense.
+  - Adds `conformance/graph-engine/` with CJK-path multi-repo fixtures achieving live **`8/8 PASS`** and wires `.github/workflows/ci.yml` PR (`--allow-skip-missing`) + scheduled/`workflow_dispatch` live conformance jobs.
+- **L0 Zero-Dep Enterprise Full-Stack Extractors (`src/codemap/{spring-prefix-resolver,rpc-mybatis-extractor,vue-template-factory,spring-extractor,vue-api-extractor,vue-extractor,route-api-linker,correlator,adapters}.mjs`)**:
+  - Added `spring-prefix-resolver.mjs` resolving Java `static final String` constants, Ant/regex matchers, and most-specific prefixes—cutting cross-portal `@RequestMapping` collisions from `46/46 (100%)` to **`0 / 3,512 (0%)`** on the 1.01M-LOC enterprise benchmark.
+  - Added `rpc-mybatis-extractor.mjs` extracting OpenFeign/Dubbo cross-service bridges (skipping `@ApiOperation` annotations), RocketMQ producers, XXL-Job handlers, MyBatis XML statements, and `BaseMapper<DO>` direct table chains—narrowing controller DB tables from `262` to **`10` (Builtin, -96.2%) / `11` (CBM, -95.8%)**.
+  - Added `vue-template-factory.mjs` parsing chained Axios clients, `crudFactory` generated endpoints, Vue template custom tags & global component registrations (`<right-toolbar>`), and dynamic backend menu routes (`Layout` shell resolution & deterministic incremental route retention: **`79/80 (98.75%)`** runtime view hits with `FP1 === FP2`).
+- **CodeMap v5 Fusion, Fast Cached Composite Query & Enhanced Diagnostics (`src/codemap/{sync,v5-fusion,merger,reporter}.mjs`, `src/codemap.mjs`, `src/diagnose.mjs`, `src/diagnose/observability.mjs`)**:
+  - Bumped `SCHEMA_VERSIONS.codeMap` to **`5`** with automatic `v4 -> v5` migration preserving runtime routes and defects; added `--engine auto|builtin|codebase-memory-mcp` and cached `--query <symbol>` fast-path queries (zero raw source code body exposure).
+  - Wired CodeMap v5 `serviceChains` and prioritized `tenantAuthHints` directly into `ai-diagnostics.md` and defect tickets.
+
+### Additive-Only Fail-Closed Diff-Impact v3 & `<20ms` `pipe-sharded-v1` Projection Index
+- **Global Infra Guard (`src/impact/global-infra-guard.mjs`)**: Unconditionally fails closed to `mode: "full"` when edits touch Spring `META-INF/spring.factories`, `AutoConfiguration.imports`, `WebFilter`/`GlobalFilter`/`OncePerRequestFilter`/`HandlerInterceptor`/`ControllerAdvice`/`WebConfigurer`/`WebProperties`/`RequestInterceptor`/MyBatis `@Intercepts`, or Vue global request/permission guards and unmapped global components.
+- **`pipe-sharded-v1` 16-Shard Lazy-Hydrated Index & Symbol Narrowing (`src/impact/{graph-index,graph-index-codec,java-support}.mjs`, `src/impact.mjs`, `src/verdict.mjs`)**:
+  - Encodes projected graph indices into zero-JSON-escape, string-interned (`_ft`) 16-shard `pipe-sharded-v1` JSON (pruning POJO/VO/DTO/DO/Enum/Test and builtin pseudo-nodes) hydrated lazily via read-only `Proxy`: compresses the 1.01M-LOC enterprise CBM index from `6.46 MB / 26.71 ms` to **`4.11 MB / 8.76 ms` median** (Builtin: **`1.29 MB / 2.17 ms`**), well under `< 20 ms`.
+  - Adds innermost callable symbol hunk matching, `OVERRIDE` upward inheritance traversal, Feign caller bridging, and the `> 65`-caller **`*HIGH_FAN_IN*`** fail-closed sentinel (failing closed on hubs such as `CommonResult#success` with 3,595 callers).
+  - Verified on an enterprise 1.01M-LOC Vue 2 + Spring Cloud multi-tenant SaaS benchmark (12,889 files, 12 microservices, 692 controllers, 360 MyBatis XMLs, 129 Feign clients): Service method edit narrows **`-99.78%`** (`1,366 → 3` Java files → `5` Vue views → `5` specs); cross-service Feign API narrows **`-98.98%`** (`1,667 → 17` Java files, zero `Object.getClass` noise); MyBatis XML statement narrows **`-98.78%`** (`410 → 5` files).
+  - `verify-change` binds **`scope.graphEngine`** (`{ provider, version, binarySha256, mode, usedForNarrowing }`) directly into `in-toto Statement v1` attestations.
+
+### Governance Lock Expansion, 8-Pillar MCP Hub, New Resource & Security Fixes
+- **Governance Lock Coverage for `.aitest/mcp.lock` & `.aitest/engine-manifest.json` (`src/core/config-schema.mjs`, `src/kernel/gate/policy.mjs`)**: Explicitly adds both files to `PROTECTED_AITEST_LOCK_FILES` sealed inside `.aitest/governance.lock`, and adds fail-closed `codeMap.engine` / `codeMap.externalEngine` validation in `aitest.config.json`.
+- **8-Pillar MCP Hub & Native Sidecar Auditing (`src/mcp-hub/{catalog,auditor}.mjs`, `src/mcp-hub.mjs`, `src/mcp/resources.mjs`, `src/mcp/tools/{discovery,fast-paths}.mjs`)**:
+  - Adds Pillar #8 **`code-intelligence`** (`codebase-memory-mcp@0.12.1`, wired into `enterprise-selfhosted` and `full-link` profiles); `mcp doctor` enforces `--ui=false`, bans mutating update/install args, validates exact pinned versions, and checks local binary SHA-256 (`strictChecksum`).
+  - Preserves the **17 canonical MCP tools** invariant, adds read-only in-process `aitest_mcp_hub(action="engine-status")`, and exposes `aitest://project/{target}/graph-summary` (and `aitest://current/graph-summary`).
+  - Tightened `pin` redaction word boundaries in `src/core/redact.mjs` so `pinnedVersion` metadata survives while `pin`/`pincode`/`pin_code`/`user_pin` remain 100% redacted.
+
 ## [6.5.0] - 2026-11-26
 
 ### Anti-Fake-Green Gate Closure, Heal Isolation & Authenticated Parity Hardening (`WB-P0-01..03` · `WB-P1-01..02`)

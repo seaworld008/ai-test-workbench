@@ -218,7 +218,7 @@ export async function runPerfCommand(options = {}) {
   fs.writeFileSync(mdPath, buildPerfMarkdown(report, lang), 'utf8');
 
   if (fs.existsSync(path.join(qaDir, 'knowledge', 'code-map.json'))) {
-    syncLivingCodeMap(qaDir, { lang, syncImpact: false });
+    await syncLivingCodeMap(qaDir, { lang, engine: 'builtin', syncImpact: false });
   }
 
   if (!options.json) {

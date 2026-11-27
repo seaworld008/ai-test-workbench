@@ -15,13 +15,39 @@ export { bootstrapWorkspaceCore, inferRuntimeConfigForRepo, runBootstrapCommand 
 export { runCli } from '../cli.mjs';
 export { CLI_COMMANDS } from '../cli/commands.mjs';
 export {
+  buildCompositeCodeMapQuery,
   createRoutePatternMatcher,
   listCodeMapAdapters,
+  listGraphProviders,
+  queryGraphComposite,
   registerCodeMapAdapter,
+  registerGraphProvider,
+  resolveGraphSnapshot,
   runMapCommand,
   syncLivingCodeMap,
   unregisterCodeMapAdapter,
+  unregisterGraphProvider,
 } from '../codemap.mjs';
+export { installGraphEngine, probeEngineHealth } from '../codemap/providers/engine-installer.mjs';
+export {
+  ENGINE_MANIFESTS,
+  getPinnedEngineManifest,
+  resolveIsolatedEngineDirs,
+  resolvePlatformAsset,
+} from '../codemap/providers/engine-manifest.mjs';
+export {
+  MCP_PILLARS,
+  MCP_PILLAR_LABELS,
+  MCP_PRESETS,
+  MCP_PROFILES,
+  auditMcpSafety,
+  buildCbmCohortDefaults,
+  getMcpPresetsSummary,
+  inspectGraphEngineStatus,
+  runMcpCommand,
+  runMcpDoctorReadOnly,
+  sanitizeUntrustedCodeMetadata,
+} from '../mcp-hub.mjs';
 export {
   detectCorpusFormat,
   extractFeatureCohort,

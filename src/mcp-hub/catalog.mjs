@@ -4,6 +4,7 @@ import { WORKBENCH_VERSION } from '../core/version.mjs';
 export const MCP_PILLARS = [
   'orchestrator',
   'browser',
+  'code-intelligence',
   'observability',
   'database',
   'middleware',
@@ -11,8 +12,19 @@ export const MCP_PILLARS = [
   'api-contract',
 ];
 
+export const MCP_PILLAR_LABELS = Object.freeze({
+  orchestrator: { zh: '编排与治理中枢', en: 'Orchestrator & Governance' },
+  browser: { zh: '浏览器自动化', en: 'Browser Automation' },
+  'code-intelligence': { zh: '代码图谱智能', en: 'Code Graph Intelligence' },
+  observability: { zh: '可观测性追踪', en: 'Observability & Tracing' },
+  database: { zh: '只读数据库', en: 'Read-Only Database' },
+  middleware: { zh: '只读中间件', en: 'Read-Only Middleware' },
+  performance: { zh: '性能与压测', en: 'Performance & Load' },
+  'api-contract': { zh: '接口契约', en: 'API Contract' },
+});
+
 /**
- * 7-Pillar System MCP Presets with Supply-Chain Version Pinning (`S-06`) and
+ * 8-Pillar System MCP Presets with Supply-Chain Version Pinning (`S-06`) and
  * 3-Tier Risk Classification (`riskLevel: 'read' | 'local-write' | 'remote-effect'`, `S-07`).
  */
 export const MCP_PRESETS = {
@@ -46,6 +58,29 @@ export const MCP_PRESETS = {
     riskLevel: 'local-write',
     readonly: false,
     envTemplate: {},
+  },
+  'codebase-memory-mcp': {
+    pillar: 'code-intelligence',
+    description:
+      'Local-first AST & call-graph knowledge graph sidecar (writes local SQLite graph DB only; zero remote SUT writes; --ui=false enforced)',
+    command: 'codebase-memory-mcp',
+    args: ['--ui=false'],
+    pinnedVersion: '0.12.1',
+    riskLevel: 'local-write',
+    readonly: false,
+    transport: 'stdio',
+    offlineCapable: true,
+    nativeBinary: true,
+    env: {
+      CBM_RUNTIME_DIR: '${CBM_RUNTIME_DIR}',
+      CBM_CACHE_DIR: '${CBM_CACHE_DIR}',
+      CBM_ALLOWED_ROOT: '${CBM_ALLOWED_ROOT}',
+    },
+    envTemplate: {
+      CBM_RUNTIME_DIR: '~/.aitw/cbm/r',
+      CBM_CACHE_DIR: '~/.aitw/cbm/c',
+      CBM_ALLOWED_ROOT: '.',
+    },
   },
   grafana: {
     pillar: 'observability',
@@ -278,13 +313,22 @@ export const MCP_PROFILES = {
   observability: ['ai-test-workbench', 'playwright-test', 'grafana', 'prometheus', 'loki', 'sentry', 'victorialogs', 'skywalking'],
   'data-verify': ['ai-test-workbench', 'playwright-test', 'postgres-readonly', 'mysql-readonly', 'mysql', 'redis-readonly'],
   perf: ['ai-test-workbench', 'playwright-test', 'chrome-devtools', 'prometheus', 'k6'],
-  'enterprise-selfhosted': ['ai-test-workbench', 'playwright-test', 'gitlab', 'mysql', 'victorialogs', 'skywalking'],
+  'enterprise-selfhosted': [
+    'ai-test-workbench',
+    'playwright-test',
+    'codebase-memory-mcp',
+    'gitlab',
+    'mysql',
+    'victorialogs',
+    'skywalking',
+  ],
   'full-link': Object.keys(MCP_PRESETS),
 };
 
 export function getMcpPresetsSummary() {
   return {
     pillars: MCP_PILLARS,
+    pillarLabels: MCP_PILLAR_LABELS,
     profiles: MCP_PROFILES,
     presets: Object.fromEntries(
       Object.entries(MCP_PRESETS).map(([k, v]) => [
@@ -297,6 +341,9 @@ export function getMcpPresetsSummary() {
           command: v.command,
           args: v.args,
           description: v.description,
+          ...('transport' in v ? { transport: v.transport } : {}),
+          ...('offlineCapable' in v ? { offlineCapable: v.offlineCapable } : {}),
+          ...('nativeBinary' in v ? { nativeBinary: v.nativeBinary } : {}),
         },
       ])
     ),
