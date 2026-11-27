@@ -1,6 +1,8 @@
 // @ts-check
+import path from 'node:path';
 import { resolveQaDirectory } from './agents.mjs';
 import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
+import { WORKBENCH_VERSION } from './core/version.mjs';
 import {
   createRoutePatternMatcher,
   indexQaSpecs,
@@ -70,18 +72,50 @@ export {
 export async function runMapCommand(options = {}) {
   const lang = options.lang === 'zh' ? 'zh' : 'en';
   const asJson = Boolean(options.json);
-  /** @param {string} msg */
-  const failMap = (msg) => {
+  /** @param {string} msg @param {{ blockerKind?: string | null, recoverySteps?: string[], nextRecommendedActions?: string[] }} [meta] */
+  const failMap = (msg, meta = {}) => {
     if (!asJson) console.error(msg);
     return emitCommandResult(
-      buildCommandResult({ tool: 'map', outcome: 'fail', ok: false, exitCode: 1, summary: msg, data: { error: msg } }),
+      buildCommandResult({
+        tool: 'map',
+        outcome: 'fail',
+        ok: false,
+        exitCode: 1,
+        recoverable: true,
+        blockerKind: meta.blockerKind ?? null,
+        recoverySteps: meta.recoverySteps || [],
+        nextRecommendedActions: meta.nextRecommendedActions || meta.recoverySteps || [],
+        summary: msg,
+        data: { error: msg },
+      }),
       { asJson, compatSpreadData: false }
     );
   };
-  if (!options.target) return failMap(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
+  if (!options.target) {
+    return failMap(lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option', {
+      blockerKind: 'USAGE_ERROR',
+      recoverySteps: [
+        lang === 'zh'
+          ? `请传入 --target <业务仓库路径>: npx ai-test-workbench@${WORKBENCH_VERSION} map --target <repo>`
+          : `Pass --target <repo-path>: npx ai-test-workbench@${WORKBENCH_VERSION} map --target <repo>`,
+      ],
+      nextRecommendedActions: ['Run "aitw map --target <repo-path> --json".'],
+    });
+  }
 
-  const qaDir = resolveQaDirectory(options.target, options.qaDir);
-  if (!qaDir) return failMap(lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
+  const resolvedTarget = path.resolve(options.target);
+  const qaDir = resolveQaDirectory(resolvedTarget, options.qaDir);
+  if (!qaDir) {
+    return failMap(lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`, {
+      blockerKind: 'WORKSPACE_NOT_INITIALIZED',
+      recoverySteps: [
+        lang === 'zh'
+          ? `请先初始化 QA 工作区: npx ai-test-workbench@${WORKBENCH_VERSION} init --target "${resolvedTarget}"`
+          : `Initialize QA workspace first: npx ai-test-workbench@${WORKBENCH_VERSION} init --target "${resolvedTarget}"`,
+      ],
+      nextRecommendedActions: [`Run "aitw init --target ${resolvedTarget}" or call aitest_bootstrap(target) before "aitw map".`],
+    });
+  }
 
   const out = await syncLivingCodeMap(qaDir, {
     lang,

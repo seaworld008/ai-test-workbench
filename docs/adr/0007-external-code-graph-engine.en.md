@@ -90,8 +90,8 @@ To keep read-only `aitest_impact` fast without spawning external graph daemons o
 ## 6. Continuous Upstream Upgrade Loop & Enterprise Benchmark Results
 
 1. **Human-CLI Installer & Air-Gapped Mirror Support (`src/codemap/providers/engine-installer.mjs`)**:
-   - `npx ai-test-workbench@6.6.0 mcp install-engine --engine codebase-memory-mcp` is human-CLI-only (never exposed as an MCP tool), embeds official 6-platform `v0.12.1` SHA-256 digests, blocks Zip-Slip archive traversal, supports offline `--from-file`, `--mirror-url`, and `--expected-sha256`, and retains `N-1` versions for instant rollback.
-   - `npx ai-test-workbench@6.6.0 upgrade --scope engines` compares installed engine manifests against the workbench pin without auto-downloading binaries or auto-resigning `governance.lock`.
+   - `npx ai-test-workbench@6.7.0 mcp install-engine --engine codebase-memory-mcp` is human-CLI-only (never exposed as an MCP tool), embeds official 6-platform `v0.12.1` SHA-256 digests, blocks Zip-Slip archive traversal, supports offline `--from-file`, `--mirror-url`, and `--expected-sha256`, and retains `N-1` versions for instant rollback.
+   - `npx ai-test-workbench@6.7.0 upgrade --scope engines` compares installed engine manifests against the workbench pin without auto-downloading binaries or auto-resigning `governance.lock`.
 2. **Conformance Harness & Scheduled CI Gate (`conformance/graph-engine/` + `.github/workflows/ci.yml`)**:
    - Ships a CJK-path multi-repo conformance fixture and 8-check verifier (`run-conformance.mjs`) that must pass `8/8` live with byte-identical repeatability before any upstream pin bump; PR CI runs `--allow-skip-missing` while scheduled and `workflow_dispatch` CI runs the live `graph-engine-conformance` job.
 3. **Enterprise 1.01M-LOC Multi-Repo Benchmark Scorecard** (Vue 2 + Spring Cloud multi-tenant SaaS: 12,889 files, 12 microservices, 692 controllers, 360 MyBatis XMLs, 129 Feign clients; zero modifications to target repos):

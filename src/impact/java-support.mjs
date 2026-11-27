@@ -2,12 +2,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadAndValidateAitestConfigFile } from '../core/config.mjs';
+import { discoverMonorepoSubProjects } from '../init/stack-registry.mjs';
 import { canonicalFsPath } from '../kernel/gate-kernel.mjs';
 
 const WORKBENCH_ARTIFACT_PREFIX_RE = /^(?:\.aitest|reports|knowledge|test-results|playwright-report)(?:\/|$)/i;
 const JAVA_STEM_SUFFIX_RE = /(?:Controller|ServiceImpl|Service|Mapper|Manager|DO|Entity|PO|ReqVO|RespVO|VO|DTO)$/i;
 const JS_STEM_SUFFIX_RE = /\.(?:controller|service|view|page|component|route|routes)$/i;
-const REPO_MARKERS = ['.git', 'package.json', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'go.mod', 'pyproject.toml'];
 const UNIVERSAL_JAVA_BASE_TYPES = new Set([
   'BaseDO', 'TenantBaseDO', 'BaseEntity', 'BaseVO', 'BaseDTO', 'BaseReqVO', 'BaseRespVO',
   'BaseMapper', 'BaseMapperX', 'MPJBaseMapper', 'BaseController', 'ServiceImpl', 'IService',
@@ -136,19 +136,21 @@ export function buildCodeMapFileToSpecMap(qaDir, allSpecs) {
 
 /** @param {string} dir @returns {string[]} */
 export function detectSiblingRepoRoots(dir) {
-  if (!dir || !fs.existsSync(dir) || REPO_MARKERS.some((m) => fs.existsSync(path.join(dir, m)))) return [];
-  /** @type {string[]} */
-  const childRoots = [];
-  try {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-      if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name === 'qa' || entry.name === 'node_modules') continue;
-      const sub = path.join(dir, entry.name);
-      if (REPO_MARKERS.some((m) => fs.existsSync(path.join(sub, m)))) childRoots.push(sub);
-    }
-  } catch {
-    return [];
+  return discoverMonorepoSubProjects(dir);
+}
+
+/**
+ * Expands a single monorepo container root into discovered sub-projects when applicable.
+ * @param {string[]} candidates
+ * @returns {string[]}
+ */
+function expandSingleMonorepoCandidate(candidates) {
+  const uniq = [...new Set(candidates.filter(Boolean).map((p) => path.resolve(p)))];
+  if (uniq.length === 1 && fs.existsSync(uniq[0])) {
+    const siblings = detectSiblingRepoRoots(uniq[0]);
+    if (siblings.length >= 2) return siblings;
   }
-  return childRoots.length >= 2 ? childRoots : [];
+  return uniq;
 }
 
 /**
@@ -166,7 +168,7 @@ export function resolveImpactRepos(repoDir, qaDir, options = {}) {
     .map((s) => s.trim())
     .filter(Boolean)
     .map((s) => path.resolve(s));
-  if (explicit.length > 0) return [...new Set(explicit)];
+  if (explicit.length > 0) return expandSingleMonorepoCandidate(explicit);
 
   const cfgRes = loadAndValidateAitestConfigFile(qaDir);
   const parentOfQa = path.dirname(qaDir);
@@ -178,7 +180,7 @@ export function resolveImpactRepos(repoDir, qaDir, options = {}) {
         return fs.existsSync(fromParent) ? fromParent : path.resolve(qaDir, entry);
       })
       .filter((p) => fs.existsSync(p));
-    if (cfgRepos.length > 0) return [...new Set(cfgRepos)];
+    if (cfgRepos.length > 0) return expandSingleMonorepoCandidate(cfgRepos);
   }
 
   const cmPath = path.join(qaDir, 'knowledge', 'code-map.json');
@@ -188,7 +190,7 @@ export function resolveImpactRepos(repoDir, qaDir, options = {}) {
       const metaRepos = Array.isArray(cm?.meta?.sourceRepos)
         ? cm.meta.sourceRepos.filter((/** @type {string} */ p) => typeof p === 'string' && fs.existsSync(p))
         : [];
-      if (metaRepos.length > 0) return [...new Set(metaRepos)];
+      if (metaRepos.length > 0) return expandSingleMonorepoCandidate(metaRepos);
     } catch {
       // ignore invalid code-map
     }
@@ -375,24 +377,61 @@ export function evaluateUpwardDependentClosure({ file, reverseGraph, dependents,
         ? { ok: false, reason: `Unmapped source file "${file}" has unknown blast radius — falling back to full regression suite.`, via: `unmapped-fallback: ${file}` }
         : { ok: false, reason: `Transitive dependent "${node}" of "${file}" is unmapped — falling back to full suite to prevent missed regressions.`, via: `unmapped-transitive: ${chain.join(' -> ')}` };
     }
-    /** @type {Array<{ ok: boolean, reason?: string, via?: string }>} */
+    /** @type {Array<{ ok: boolean, reason?: string, via?: string, _orphanInit?: boolean }>} */
     const unmappedBranches = [];
+    let hasCoveredBranch = matchedNodes.get(node) === true;
     for (const imp of importers) {
       const nextStack = new Set(onStack);
       nextStack.add(imp);
       const res = verifyCovered(imp, [...chain, imp], nextStack);
-      if (!res.ok) {
+      if (res.ok) {
+        hasCoveredBranch = true;
+      } else {
         const impParents = reverseGraph.get(imp);
-        const isOrphanRootWrapper =
-          matchedNodes.get(node) === true &&
-          /(?:^|\/)src\/views\/index\.vue$/i.test(imp) &&
-          (!impParents || impParents.size === 0);
-        if (!isOrphanRootWrapper) unmappedBranches.push(res);
+        const isNoParents = !impParents || impParents.size === 0;
+        const isOrphanVue = matchedNodes.get(node) === true && /(?:^|\/)src\/views\/index\.vue$/i.test(imp) && isNoParents;
+        const isOrphanPyInit = /(?:^|\/)__init__\.py$/i.test(imp) && isNoParents;
+        if (isOrphanPyInit) unmappedBranches.push({ ...res, _orphanInit: true });
+        else if (!isOrphanVue) unmappedBranches.push(res);
       }
     }
-    if (unmappedBranches.length > 0) return unmappedBranches[0];
+    const realFailures = unmappedBranches.filter((b) => !b._orphanInit);
+    if (realFailures.length > 0) return realFailures[0];
+    if (unmappedBranches.length > 0 && !hasCoveredBranch) return unmappedBranches[0];
     return { ok: true };
   };
 
   return verifyCovered(file, [file], new Set([file]));
+}
+
+/** @param {string} testsDir @param {string} qaDir @returns {string[]} */
+export function listAllSpecFiles(testsDir, qaDir) {
+  /** @type {string[]} */
+  const results = [];
+  if (!fs.existsSync(testsDir)) return results;
+  const walk = (/** @type {string} */ dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (
+        entry.isFile() &&
+        /\.(?:spec|test)\.[jt]s$/.test(entry.name) &&
+        path.relative(testsDir, full).replace(/\\/g, '/') !== 'seed.spec.ts' &&
+        !entry.name.endsWith('.official.example.ts')
+      ) {
+        results.push(path.relative(qaDir, full).replace(/\\/g, '/'));
+      }
+    }
+  };
+  walk(testsDir);
+  return results.sort();
+}
+
+/** @param {string} specRel @param {string} stem @returns {boolean} */
+export function specMatchesStemExactSegment(specRel, stem) {
+  const baseNoExt = path.basename(specRel).replace(/\.(?:spec|test)\.[jt]s$/i, '').toLowerCase();
+  const dirSegments = specRel.toLowerCase().split('/').slice(0, -1);
+  if (baseNoExt === stem || dirSegments.includes(stem)) return true;
+  const tokens = baseNoExt.split(/[-_.]+/).filter(Boolean);
+  return tokens.length === 1 && tokens[0] === stem;
 }

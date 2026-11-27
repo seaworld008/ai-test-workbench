@@ -1,6 +1,7 @@
 // @ts-check
 import fs from 'node:fs';
 import path from 'node:path';
+import { discoverMonorepoSubProjects } from '../init/stack-registry.mjs';
 import { normalizeRoutePath, normalizeSlash } from './route-matcher.mjs';
 
 const ALWAYS_IGNORE_DIRS = new Set([
@@ -20,56 +21,24 @@ const ALWAYS_IGNORE_DIRS = new Set([
 ]);
 const ROOT_ONLY_OUTPUT_DIRS = new Set(['dist', 'build', 'out', 'target']);
 const IGNORED_VENDOR_DIR_SUFFIXES = ['public/libs', 'public/static', 'static/libs'];
-const REPO_ROOT_MARKERS = [
-  '.git',
-  'package.json',
-  'pom.xml',
-  'build.gradle',
-  'build.gradle.kts',
-  'go.mod',
-  'pyproject.toml',
-  'requirements.txt',
-  'Cargo.toml',
-  'composer.json',
-];
 export const SPRING_CFG_FILE_RE = /^(?:application|bootstrap)(?:-[a-z0-9_.-]+)?\.(?:ya?ml|properties)$/i;
 
 const CODE_EXTS = new Set([
-  '.ts', '.tsx', '.js', '.jsx', '.mjs', '.vue', '.svelte', '.astro',
+  '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte', '.astro',
   '.java', '.kt', '.py', '.php', '.go', '.prisma', '.sql', '.xml',
 ]);
 
 export const DEFAULT_MAX_SCAN_FILES = 10000;
 export const DEFAULT_PER_REPO_SCAN_FILES = 16000;
 
-/** @param {string} dir @returns {boolean} */
-function hasProjectRootMarker(dir) {
-  return REPO_ROOT_MARKERS.some((marker) => fs.existsSync(path.join(dir, marker)));
-}
-
 /**
- * Detects independent child frontend/backend repository roots under a multi-repo parent directory
- * when the parent itself has no `.git` / `package.json` / `pom.xml`.
+ * Detects independent child frontend/backend repository roots under a multi-repo parent
+ * or polyglot monorepo root (delegating to `discoverMonorepoSubProjects`).
  * @param {string} parentDir
  * @returns {string[]}
  */
 export function detectMultiRepoRoots(parentDir) {
-  if (!parentDir || !fs.existsSync(parentDir) || hasProjectRootMarker(parentDir)) return [];
-  /** @type {string[]} */
-  const roots = [];
-  let entries;
-  try {
-    entries = fs.readdirSync(parentDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
-  } catch {
-    return [];
-  }
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
-    if (ALWAYS_IGNORE_DIRS.has(entry.name) || ROOT_ONLY_OUTPUT_DIRS.has(entry.name)) continue;
-    const sub = path.join(parentDir, entry.name);
-    if (hasProjectRootMarker(sub)) roots.push(sub);
-  }
-  return roots.length >= 2 ? roots : [];
+  return discoverMonorepoSubProjects(parentDir);
 }
 
 /**

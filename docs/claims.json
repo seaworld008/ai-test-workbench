@@ -228,6 +228,41 @@
       "corpusType": "codemap-v5-integration",
       "testFile": "test/unit/v660-codemap-v5-integration.test.mjs",
       "testTitleSubstring": "v6.6.0 CodeMap v4->v5 migration"
+    },
+    {
+      "id": "CLAIM-35-v670-polyglot-monorepo-discovery-and-tooling",
+      "claim": "v6.7.0 unified polyglot monorepo discovery preserves single-repo boundaries, discovers depth-1/depth-2 (src|apps|packages|services|modules) subprojects, detects Python FastAPI/aiohttp/Flask/Starlette/Django + Pytest stacks, and aggregates host tooling across subprojects",
+      "corpusType": "polyglot-monorepo-discovery",
+      "testFile": "test/unit/v670-monorepo-impact-ergonomics.test.mjs",
+      "testTitleSubstring": "v6.7.0 unified polyglot monorepo discovery"
+    },
+    {
+      "id": "CLAIM-36-v670-shared-git-monorepo-diff-and-python-impact",
+      "claim": "v6.7.0 Diff-Impact v3.1 remaps shared-.git monorepo diffs, filters non-spec .md/.txt docs, scopes backend tests/fixtures/ exclusions, and computes Python .py reverse-import dependency graphs without unit-test pollution",
+      "corpusType": "impact-v31-polyglot",
+      "testFile": "test/unit/v670-monorepo-impact-ergonomics.test.mjs",
+      "testTitleSubstring": "v6.7.0 shared-.git monorepo diff remapping"
+    },
+    {
+      "id": "CLAIM-37-v670-codemap-frontend-ts-vue3",
+      "claim": "v6.7.0 CodeMap v5.1 Frontend TS/Vue 3 extractors parse single-object router modules (satisfies/as/const), lazy component bindings, balanced TS generics (<T>), all 4 HTTP wrapper patterns, .cjs modules, and walk-order-independent cross-file URL prefix helpers",
+      "corpusType": "codemap-v51-frontend-ts",
+      "testFile": "test/unit/v670-codemap-frontend-ts.test.mjs",
+      "testTitleSubstring": "indexRepositorySource resolves cross-file URL prefix helpers"
+    },
+    {
+      "id": "CLAIM-38-v670-codemap-backend-polyglot",
+      "claim": "v6.7.0 CodeMap v5.1 Backend Polyglot extractors support FastAPI, Flask, aiohttp, Starlette, Django, Python SQLAlchemy/Django/DDL entities, Node .cjs / .all routes, and TypeORM @Entity inference with O(N) comment/docstring isolation",
+      "corpusType": "codemap-v51-backend-polyglot",
+      "testFile": "test/unit/v670-codemap-backend-polyglot.test.mjs",
+      "testTitleSubstring": "indexRepositorySource integrates Python polyglot"
+    },
+    {
+      "id": "CLAIM-39-v670-sidecar-datadir-and-ergonomics",
+      "claim": "v6.7.0 supports AITEST_DATA_DIR/AITEST_CBM_* sidecar migration, prevents ephemeral os.tmpdir() CBM SQLite cache leaks, supports targetless/uninitialized global mcp engine-status, and returns structured USAGE_ERROR/WORKSPACE_NOT_INITIALIZED recovery envelopes",
+      "corpusType": "sidecar-isolation-and-ergonomics",
+      "testFile": "test/unit/v670-monorepo-impact-ergonomics.test.mjs",
+      "testTitleSubstring": "v6.7.0 global mcp engine-status"
     }
   ]
 }

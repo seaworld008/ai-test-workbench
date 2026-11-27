@@ -1,12 +1,12 @@
 <div align="center">
 
-# AI Test Workbench (`v6.6.0`)
+# AI Test Workbench (`v6.7.0`)
 
 **Trustworthy Verification Kernel & Native Multi-Protocol MCP Server for AI Coding Agents**
 
-Provides **CodeMap v5 Three-Tier Graph Fusion + Decoupled Pinned Sidecar (`codebase-memory-mcp@0.12.1`) + Additive-Only Fail-Closed Diff-Impact v3 (`pipe-sharded-v1` `<20ms`)** · **8-Pillar Pinned MCP Hub (adding `code-intelligence` & Governance-Sealed `.aitest/mcp.lock` / `engine-manifest.json`)** · **4-Layer Fail-Closed AST Anti-Fake-Green Gate (`S0–S5` + `AITEST-G101..G118` + SymbolTable + Dieselgate & Cross-Directory Lockstep Guard)** · **One-Call Change Verdict (`verify-change` · in-toto v1 + `scope.graphEngine` + `T0/T1/T2` + Human Seam Gatekeeper Card)** · **5-Checkpoint Differential Parity Oracle (`aitest_parity` + Zero-Plaintext Shape Fingerprints)** · **Zero-Dep Native MCP Server (`stdio` / `/mcp` / `/sse` · 17 Canonical Tools · Framed Subprocess IPC)**
+Provides **Polyglot Monorepo Auto-Discovery + CodeMap v5.1 Three-Tier Graph Fusion (Vue 3/TS Generic HTTP + Python Multi-Framework + Spring/MyBatis) + Decoupled Pinned Sidecar (`codebase-memory-mcp@0.12.1`) + Additive-Only Fail-Closed Diff-Impact v3.1 (`pipe-sharded-v1` `<20ms` + Python Reverse Graph)** · **8-Pillar Pinned MCP Hub (with `code-intelligence`, Targetless `engine-status`, & Governance-Sealed `.aitest/mcp.lock` / `engine-manifest.json`)** · **4-Layer Fail-Closed AST Anti-Fake-Green Gate (`S0–S5` + `AITEST-G101..G118` + SymbolTable + Dieselgate & Cross-Directory Lockstep Guard)** · **One-Call Change Verdict (`verify-change` · in-toto v1 + `scope.graphEngine` + `T0/T1/T2` + Human Seam Gatekeeper Card)** · **5-Checkpoint Differential Parity Oracle (`aitest_parity` + Zero-Plaintext Shape Fingerprints)** · **Zero-Dep Native MCP Server (`stdio` / `/mcp` / `/sse` · 17 Canonical Tools · Framed Subprocess IPC)**
 
-[简体中文文档 (默认)](./README.md) · [v5→v6.6 Upgrade Guide](./docs/upgrade.en.md) · [Governance & 4-Layer Gate](./docs/governance.en.md) · [ADR-0007 Graph Sidecar](./docs/adr/0007-external-code-graph-engine.en.md) · [AI Agent Quickstart](./docs/ai-agent-quickstart.en.md) · [AGENTS.en.md](./AGENTS.en.md) · [Architecture](./ARCHITECTURE.en.md) · [Changelog](./CHANGELOG.en.md)
+[简体中文文档 (默认)](./README.md) · [v5→v6.7 Upgrade Guide](./docs/upgrade.en.md) · [Governance & 4-Layer Gate](./docs/governance.en.md) · [ADR-0007 Graph Sidecar](./docs/adr/0007-external-code-graph-engine.en.md) · [AI Agent Quickstart](./docs/ai-agent-quickstart.en.md) · [AGENTS.en.md](./AGENTS.en.md) · [Architecture](./ARCHITECTURE.en.md) · [Changelog](./CHANGELOG.en.md)
 
 [![CI](https://img.shields.io/github/actions/workflow/status/seaworld008/ai-test-workbench/ci.yml?branch=main&style=flat-square&logo=github&label=CI)](https://github.com/seaworld008/ai-test-workbench/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/seaworld008/ai-test-workbench?style=flat-square&color=0ea5e9&label=Release)](https://github.com/seaworld008/ai-test-workbench/releases)
@@ -24,7 +24,7 @@ Provides **CodeMap v5 Three-Tier Graph Fusion + Decoupled Pinned Sidecar (`codeb
 
 When AI coding agents (Claude Code, Codex CLI, Cursor, VS Code Copilot, Gemini CLI) generate or edit Playwright tests at high velocity, the primary risk is **fake-green passes**: tests turn green not because the application is correct, but because assertions were weakened (`toHaveText('49/50')` → `toBeVisible()` or `expect(true).toBe(true)`), errors were swallowed (`.catch(() => null)` / `expect.soft()` / `test.fail()`), governance configs were altered (`testIgnore` / disabled ESLint rules), or stale `results.json` artifacts were replayed. At million-LOC multi-repo microservice scale, file-level diff-impact also suffers from fan-in fallback cliffs and unguarded global infrastructure edits.
 
-`ai-test-workbench v6.6.0` moves anti-fake-green invariants, full-stack code-graph intelligence (CodeMap v5 + decoupled `codebase-memory-mcp@0.12.1` sidecar), and fail-closed symbol-level test selection (Diff-Impact v3) into a **zero-runtime-dependency, tool-enforced verification kernel**:
+`ai-test-workbench v6.7.0` moves anti-fake-green invariants, polyglot monorepo full-stack code-graph intelligence (CodeMap v5.1 + decoupled `codebase-memory-mcp@0.12.1` sidecar), and fail-closed symbol-level test selection (Diff-Impact v3.1) into a **zero-runtime-dependency, tool-enforced verification kernel**:
 
 | Metric | Verified Measurement (Corpus-Qualified & Reproducible) | Enforcing Mechanism |
 |---|---|---|
@@ -50,7 +50,7 @@ Adopt T2 verification via [examples/workflows/use-aitest-verify.yml](./examples/
 ```yaml
 jobs:
   aitest-t2-verdict:
-    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.6.0
+    uses: seaworld008/ai-test-workbench/.github/workflows/aitest-verify.yml@v6.7.0
     permissions:
       id-token: write
       attestations: write
@@ -66,7 +66,7 @@ jobs:
 Verify a T2 attestation bundle offline (fail-closed by default: missing signature, T1-only MAC, digest tampering, or workflow identity mismatch exits non-zero with `trustLevel <= T1`):
 
 ```bash
-npx ai-test-workbench@6.6.0 attest verify \
+npx ai-test-workbench@6.7.0 attest verify \
   --file attestation.json \
   --bundle attestation.sigstore.json \
   --expect-repo owner/repo \
@@ -78,14 +78,14 @@ npx ai-test-workbench@6.6.0 attest verify \
 
 ---
 
-## 2. v6.6.0 Layered Architecture & Three-Tier Code-Graph Fusion
+## 2. v6.7.0 Layered Architecture & Three-Tier Code-Graph Fusion
 
-`v6.6.0` extends the acyclic four-layer, zero-runtime-dependency core with **CodeMap v5** (L0 zero-dep full-stack extractors + L1 decoupled pinned `codebase-memory-mcp@0.12.1` sidecar + L2 anti-corruption fusion), **Additive-Only Fail-Closed Diff-Impact v3** (Global Infra Guard + `<20ms` `pipe-sharded-v1` lazy-hydrated index), an **8-Pillar MCP Hub** (adding `code-intelligence`), and governance-sealed `.aitest/mcp.lock` / `.aitest/engine-manifest.json`, keeping every `src/**/*.mjs <= 450` LOC (see [ARCHITECTURE.en.md](./ARCHITECTURE.en.md) and [ADR-0007](./docs/adr/0007-external-code-graph-engine.en.md)):
+`v6.7.0` extends the acyclic four-layer, zero-runtime-dependency core with **Polyglot Monorepo Auto-Discovery** (depth-1 and `src|apps|packages|services|modules` depth-2 plus Python `FastAPI`/`aiohttp`/`Flask`/`Starlette`/`Django`/`Pytest`), **CodeMap v5.1** (L0 adding Vue 3 single-object routers/TS generic HTTP/cross-file prefix helpers/`.cjs` and Python polyglot/TypeORM/DDL + L1 decoupled pinned `codebase-memory-mcp@0.12.1` sidecar with `AITEST_DATA_DIR`/tmpdir leak prevention + L2 anti-corruption fusion), **Additive-Only Fail-Closed Diff-Impact v3.1** (shared-`.git` monorepo diff remapping + Python `.py` reverse-import graph + Global Infra Guard + `<20ms` `pipe-sharded-v1` lazy-hydrated index), an **8-Pillar MCP Hub** (adding `code-intelligence` and targetless `mcp engine-status`), and governance-sealed `.aitest/mcp.lock` / `.aitest/engine-manifest.json`, keeping every `src/**/*.mjs <= 450` LOC (see [ARCHITECTURE.en.md](./ARCHITECTURE.en.md) and [ADR-0007](./docs/adr/0007-external-code-graph-engine.en.md)):
 
 ```mermaid
 flowchart TB
     L4["Layer 4: Protocol & CLI — src/cli/ (CommandResult v2) · src/mcp/ (17 canonical tools + graph-summary resource + framed IPC)"]
-    L3["Layer 3: App Facade & Domains — src/app/ · codemap v5 (L0/L1/L2) · impact v3 (Global Infra + pipe-sharded-v1) · parity · memory · verdict · mcp-hub (8 pillars)"]
+    L3["Layer 3: App Facade & Domains — src/app/ · codemap v5.1 (L0/L1/L2 + Polyglot) · impact v3.1 (Global Infra + Python + pipe-sharded-v1) · parity · memory · verdict · mcp-hub (8 pillars)"]
     L2["Layer 2: Authoritative Kernel SSoT — src/kernel/ (target-guard · schema-validator · diff-oracle · gate/ SymbolTable + G101..G118 + mcp.lock/engine-manifest lock)"]
     L1["Layer 1: Zero-Dep Core Leaves — src/core/ (version codeMap=5 · outcome · config · stream-sse · redact v3 · glob · proc) · src/types/*.d.ts"]
     CBM["Optional L1 Pinned Sidecar (Out-of-Workspace Short Path) — DeusData/codebase-memory-mcp@0.12.1 (SHA-256 + --ui=false)"]
@@ -104,20 +104,20 @@ flowchart TB
 ### Requirements & Supply-Chain Security
 
 - **Node.js**: `>= 22.12.0` (`24 LTS` or `26 LTS` recommended) on Windows PowerShell (`pwsh`), macOS, or Linux.
-- **Zero Runtime Dependencies**: Root `package.json` carries zero runtime `dependencies`. Always invoke pinned `npx ai-test-workbench@6.6.0 <cmd>`, global short alias `aitw <cmd>` (`npm i -g ai-test-workbench@6.6.0`), or local source `node tools/aitest.mjs <cmd>`.
-- **Optional Graph Sidecar Engine**: L0 zero-dep indexing works out of the box. For million-LOC symbol-level call-graph narrowing, a human installs the pinned sidecar via local CLI `mcp install-engine --engine codebase-memory-mcp` (supports offline `--from-file` / `--mirror-url` / `--expected-sha256` and `N-1` rollback; never auto-downloaded).
+- **Zero Runtime Dependencies**: Root `package.json` carries zero runtime `dependencies`. Always invoke pinned `npx ai-test-workbench@6.7.0 <cmd>`, global short alias `aitw <cmd>` (`npm i -g ai-test-workbench@6.7.0`), or local source `node tools/aitest.mjs <cmd>`.
+- **Optional Graph Sidecar Engine**: L0 zero-dep indexing works out of the box. For million-LOC symbol-level call-graph narrowing, a human installs the pinned sidecar via local CLI `mcp install-engine --engine codebase-memory-mcp` (supports offline `--from-file` / `--mirror-url` / `--expected-sha256`, `AITEST_DATA_DIR` migration, and `N-1` rollback; never auto-downloaded; `mcp engine-status` works targetlessly too).
 
 ### Register Native MCP Server (`stdio` / `/mcp` / `/sse`)
 
 - **Claude Code**:
   ```bash
-  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.6.0 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
+  claude mcp add ai-test-workbench -- npx --package=ai-test-workbench@6.7.0 ai-test-workbench mcp-serve --workspace-root /path/to/your-repo
   ```
 - **Codex CLI** (`.codex/config.toml`):
   ```toml
   [mcp_servers.ai-test-workbench]
   command = "npx"
-  args = ["--package=ai-test-workbench@6.6.0", "ai-test-workbench", "mcp-serve"]
+  args = ["--package=ai-test-workbench@6.7.0", "ai-test-workbench", "mcp-serve"]
   ```
 - **Cursor / Windsurf / Antigravity / Gemini CLI** (`.mcp.json`):
   ```json
@@ -125,14 +125,14 @@ flowchart TB
     "mcpServers": {
       "ai-test-workbench": {
         "command": "npx",
-        "args": ["--package=ai-test-workbench@6.6.0", "ai-test-workbench", "mcp-serve"]
+        "args": ["--package=ai-test-workbench@6.7.0", "ai-test-workbench", "mcp-serve"]
       }
     }
   }
   ```
 - **Streamable HTTP (`/mcp`) & Legacy SSE (`/sse`)**:
   ```bash
-  npx ai-test-workbench@6.6.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
+  npx ai-test-workbench@6.7.0 mcp-serve --transport http --port 3847 --target /path/to/your-repo --workspace-root /path/to/your-repo
   ```
 
 ### Official MCP & External Graph Sidecar Conformance
@@ -147,24 +147,25 @@ flowchart TB
 
 ```bash
 # 1. Readiness check, initialization, and hash-safe template / graph-engine pin checks
-npx ai-test-workbench@6.6.0 doctor
-npx ai-test-workbench@6.6.0 init --name my-app --target "/path/to/your-repo" --loop codex
-npx ai-test-workbench@6.6.0 upgrade --target "/path/to/your-repo" --dry-run
-npx ai-test-workbench@6.6.0 upgrade --target "/path/to/your-repo" --scope engines --dry-run
+npx ai-test-workbench@6.7.0 doctor
+npx ai-test-workbench@6.7.0 mcp engine-status
+npx ai-test-workbench@6.7.0 init --name my-app --target "/path/to/your-repo" --loop codex
+npx ai-test-workbench@6.7.0 upgrade --target "/path/to/your-repo" --dry-run
+npx ai-test-workbench@6.7.0 upgrade --target "/path/to/your-repo" --scope engines --dry-run
 
-# 2. Session capture -> read-only exploration -> CodeMap v5 sync/query -> 8-pillar MCP & sidecar install
-npx ai-test-workbench@6.6.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
-npx ai-test-workbench@6.6.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
-npx ai-test-workbench@6.6.0 mcp install-engine --target "/path/to/your-repo" --engine codebase-memory-mcp
-npx ai-test-workbench@6.6.0 map --target "/path/to/your-repo" --engine auto
-npx ai-test-workbench@6.6.0 map --target "/path/to/your-repo" --query OrderController
-npx ai-test-workbench@6.6.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.6.0 mcp doctor --target "/path/to/your-repo" --lock
+# 2. Session capture -> read-only exploration -> CodeMap v5.1 sync/query -> 8-pillar MCP & sidecar install
+npx ai-test-workbench@6.7.0 auth-login --target "/path/to/your-repo" --base-url https://staging.example.internal
+npx ai-test-workbench@6.7.0 explore --target "/path/to/your-repo" --base-url https://staging.example.internal --max-pages 30
+npx ai-test-workbench@6.7.0 mcp install-engine --target "/path/to/your-repo" --engine codebase-memory-mcp
+npx ai-test-workbench@6.7.0 map --target "/path/to/your-repo" --engine auto
+npx ai-test-workbench@6.7.0 map --target "/path/to/your-repo" --query OrderController
+npx ai-test-workbench@6.7.0 mcp add --target "/path/to/your-repo" --profile full-link && npx ai-test-workbench@6.7.0 mcp doctor --target "/path/to/your-repo" --lock
 
 # 3. Performance SLOs, dual-target parity, memory distiller/sweeper, and one-call pre-merge verdict
-npx ai-test-workbench@6.6.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
-npx ai-test-workbench@6.6.0 parity --target "/path/to/your-repo" --baseline-url http://127.0.0.1:4100 --candidate-url http://127.0.0.1:4200 --privacy-mode shape-only
-npx ai-test-workbench@6.6.0 learn --target "/path/to/your-repo" --action distill --json
-npx ai-test-workbench@6.6.0 verify-change --target "/path/to/your-repo" --base origin/main
+npx ai-test-workbench@6.7.0 perf --target "/path/to/your-repo" --concurrency 4 --iterations 12 --enforce-budget
+npx ai-test-workbench@6.7.0 parity --target "/path/to/your-repo" --baseline-url http://127.0.0.1:4100 --candidate-url http://127.0.0.1:4200 --privacy-mode shape-only
+npx ai-test-workbench@6.7.0 learn --target "/path/to/your-repo" --action distill --json
+npx ai-test-workbench@6.7.0 verify-change --target "/path/to/your-repo" --base origin/main
 ```
 
 Reproduce the full repository gate locally (zero external servers):
@@ -223,7 +224,7 @@ The following privileged or interactive commands are **local CLI only and never 
 
 | Topic | Simplified Chinese (Default) | English |
 |---|---|---|
-| **v5 → v6.6 Upgrade & Migration Guide** | [docs/upgrade.md](./docs/upgrade.md) | [docs/upgrade.en.md](./docs/upgrade.en.md) |
+| **v5 → v6.7 Upgrade & Migration Guide** | [docs/upgrade.md](./docs/upgrade.md) | [docs/upgrade.en.md](./docs/upgrade.en.md) |
 | **Governance & 4-Layer Gate Kernel** | [docs/governance.md](./docs/governance.md) | [docs/governance.en.md](./docs/governance.en.md) |
 | **v6 Refactor Assessment & Benchmarks** | [v6-refactor-assessment.md](./docs/review/v6-refactor-assessment.md) · [v6 Holdout (ZH)](./bench/real-world/results/SUMMARY-v6-holdout.md) · [Pilot (ZH)](./bench/real-world/results/SUMMARY.md) · [Pre-Reg (ZH)](./bench/real-world/PREREGISTRATION.md) | [v6-refactor-assessment.en.md](./docs/review/v6-refactor-assessment.en.md) · [v6 Holdout Summary](./bench/real-world/results/SUMMARY-v6-holdout.en.md) · [Pilot Summary](./bench/real-world/results/SUMMARY.en.md) · [Pre-Registration](./bench/real-world/PREREGISTRATION.en.md) |
 | **Architecture Decision Records (ADR-0001..0007)** | [ADR-0001](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.md) · [ADR-0002](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.md) · [ADR-0003](./docs/adr/0003-strict-checkjs-type-safety.md) · [ADR-0004](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.md) · [ADR-0005](./docs/adr/0005-mcp-surface-outcome-and-config.md) · [ADR-0006](./docs/adr/0006-differential-parity-oracle-and-shape-fingerprints.md) · [ADR-0007](./docs/adr/0007-external-code-graph-engine.md) | [ADR-0001 Zero-Dep MCP](./docs/adr/0001-mcp-protocol-stack-and-zero-dep-kernel.en.md) · [ADR-0002 Kernel SSoT & Upgrade](./docs/adr/0002-kernel-ssot-vendor-mirror-and-upgrade.en.md) · [ADR-0003 Strict checkJs](./docs/adr/0003-strict-checkjs-type-safety.en.md) · [ADR-0004 AST Gate & FPR](./docs/adr/0004-pluggable-ast-gate-and-fp-governance.en.md) · [ADR-0005 MCP/Outcome/Config](./docs/adr/0005-mcp-surface-outcome-and-config.en.md) · [ADR-0006 Differential Parity Oracle](./docs/adr/0006-differential-parity-oracle-and-shape-fingerprints.en.md) · [ADR-0007 Graph Sidecar & Diff-Impact v3](./docs/adr/0007-external-code-graph-engine.en.md) |

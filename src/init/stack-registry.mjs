@@ -1,6 +1,7 @@
 // @ts-check
 import fs from 'node:fs';
 import path from 'node:path';
+import { canonicalFsPath } from '../kernel/gate-kernel.mjs';
 
 /**
  * @typedef {{
@@ -29,7 +30,17 @@ import path from 'node:path';
  * }} StackDescriptor
  */
 
-const REPO_MARKERS = ['.git', 'package.json', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'go.mod', 'pyproject.toml', 'requirements.txt'];
+export const BUILD_MANIFEST_MARKERS = Object.freeze([
+  'package.json', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'go.mod',
+  'pyproject.toml', 'requirements.txt', 'Cargo.toml', 'composer.json',
+]);
+
+const NON_JS_BUILD_MANIFEST_MARKERS = BUILD_MANIFEST_MARKERS.filter((m) => m !== 'package.json');
+const MONOREPO_IGNORED_SUBDIRS = new Set([
+  '.git', 'node_modules', 'qa', 'reports', '.aitest', '.sandbox', 'dist', 'build', 'out', 'target',
+]);
+const MONOREPO_CONTAINER_DIRS = new Set(['src', 'apps', 'packages', 'services', 'modules']);
+const DIRECT_SRC_CODE_FILE_RE = /\.(?:[cm]?[jt]sx?|vue|svelte|astro|py|go|java|kt|rs|php)$/i;
 
 /** @param {'npm' | 'pnpm' | 'yarn' | 'bun'} name @returns {PackageManagerInfo} */
 function makePmInfo(name) {
@@ -76,11 +87,18 @@ function pickJsDevOrStartCommand(ctx) {
   return null;
 }
 
+/** @param {StackDetectContext} ctx @returns {string} */
+function readPythonManifestText(ctx) {
+  if (!ctx.hasFile('pyproject.toml') && !ctx.hasFile('requirements.txt')) return '';
+  return `${ctx.readText('pyproject.toml')}\n${ctx.readText('requirements.txt')}`;
+}
+
 /** @param {StackDetectContext} ctx @returns {boolean} */
 function isFastApiOrUvicorn(ctx) {
-  if (!ctx.hasFile('pyproject.toml') && !ctx.hasFile('requirements.txt')) return false;
-  const combined = `${ctx.readText('pyproject.toml')}\n${ctx.readText('requirements.txt')}`;
-  return /\b(?:fastapi|uvicorn)\b/i.test(combined);
+  const combined = readPythonManifestText(ctx);
+  if (!combined) return false;
+  if (/\bfastapi\b/i.test(combined)) return true;
+  return /\buvicorn\b/i.test(combined) && !/\b(?:starlette|aiohttp|flask|django)\b/i.test(combined);
 }
 
 /** @param {StackDetectContext} ctx @returns {boolean} */
@@ -109,22 +127,107 @@ export function extractMavenModules(pomText) {
   return [...modsMatch[1].matchAll(/<module>\s*([^<\s]+)\s*<\/module>/gi)].map((m) => m[1].trim()).filter(Boolean);
 }
 
-/** @param {string} repoDir @returns {string[]} */
-export function detectSiblingRepoDirs(repoDir) {
-  if (!repoDir || !fs.existsSync(repoDir)) return [];
-  if (REPO_MARKERS.some((m) => fs.existsSync(path.join(repoDir, m)))) return [];
-  /** @type {string[]} */
-  const subRepos = [];
+/** @param {string} rootDir @returns {boolean} */
+function hasDirectSourceFilesInSrc(rootDir) {
+  const srcDir = path.join(rootDir, 'src');
+  if (!fs.existsSync(srcDir)) return false;
   try {
-    for (const entry of fs.readdirSync(repoDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-      if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name === 'qa' || entry.name === 'node_modules') continue;
-      const full = path.join(repoDir, entry.name);
-      if (REPO_MARKERS.some((m) => fs.existsSync(path.join(full, m)))) subRepos.push(full);
+    if (!fs.statSync(srcDir).isDirectory()) return false;
+    for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+      if (entry.isFile() && DIRECT_SRC_CODE_FILE_RE.test(entry.name)) return true;
     }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+/** @param {string} rootDir @returns {boolean} */
+function isExplicitJsWorkspaceContainer(rootDir) {
+  if (fs.existsSync(path.join(rootDir, 'pnpm-workspace.yaml'))) return true;
+  const pkgPath = path.join(rootDir, 'package.json');
+  if (!fs.existsSync(pkgPath)) return false;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    const ws = pkg?.workspaces;
+    if (Array.isArray(ws) && ws.length > 0) return true;
+    if (ws && typeof ws === 'object' && Array.isArray(ws.packages) && ws.packages.length > 0) return true;
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+/**
+ * Discovers polyglot monorepo / multi-repo sub-project roots under `dir`.
+ * Preserves single-repo behavior whenever `dir` has a non-JS build manifest,
+ * a non-workspace `package.json`, or direct source files in `dir/src`.
+ * @param {string} dir
+ * @returns {string[]}
+ */
+export function discoverMonorepoSubProjects(dir) {
+  if (!dir || !fs.existsSync(dir)) return [];
+  const rootDir = path.resolve(dir);
+  try {
+    if (!fs.statSync(rootDir).isDirectory()) return [];
   } catch {
     return [];
   }
-  return subRepos.length >= 2 ? subRepos : [];
+  if (NON_JS_BUILD_MANIFEST_MARKERS.some((m) => fs.existsSync(path.join(rootDir, m)))) return [];
+  if (fs.existsSync(path.join(rootDir, 'package.json'))) {
+    if (!isExplicitJsWorkspaceContainer(rootDir) || hasDirectSourceFilesInSrc(rootDir)) return [];
+  }
+
+  /** @type {Set<string>} */
+  const seenCanonical = new Set();
+  /** @type {string[]} */
+  const discovered = [];
+  const addRoot = (/** @type {string} */ candidate) => {
+    const resolved = path.resolve(candidate);
+    const key = canonicalFsPath(resolved);
+    if (seenCanonical.has(key)) return;
+    seenCanonical.add(key);
+    discovered.push(resolved);
+  };
+  const hasBuildManifest = (/** @type {string} */ d) =>
+    BUILD_MANIFEST_MARKERS.some((m) => fs.existsSync(path.join(d, m)));
+  const isIgnoredChildDir = (/** @type {fs.Dirent} */ entry) =>
+    !entry.isDirectory() || entry.name.startsWith('.') || MONOREPO_IGNORED_SUBDIRS.has(entry.name);
+
+  let entries;
+  try {
+    entries = fs.readdirSync(rootDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+  for (const entry of entries) {
+    if (isIgnoredChildDir(entry)) continue;
+    const childDir = path.join(rootDir, entry.name);
+    if (hasBuildManifest(childDir) || fs.existsSync(path.join(childDir, '.git'))) {
+      addRoot(childDir);
+      continue;
+    }
+    if (MONOREPO_CONTAINER_DIRS.has(entry.name)) {
+      let subEntries;
+      try {
+        subEntries = fs.readdirSync(childDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+      } catch {
+        continue;
+      }
+      for (const subEntry of subEntries) {
+        if (isIgnoredChildDir(subEntry)) continue;
+        const subDir = path.join(childDir, subEntry.name);
+        if (hasBuildManifest(subDir)) addRoot(subDir);
+      }
+    }
+  }
+  discovered.sort((a, b) => a.localeCompare(b));
+  return discovered.length >= 2 ? discovered : [];
+}
+
+/** @param {string} repoDir @returns {string[]} */
+export function detectSiblingRepoDirs(repoDir) {
+  return discoverMonorepoSubProjects(repoDir);
 }
 
 /** @type {StackDescriptor[]} */
@@ -167,6 +270,10 @@ export const STACK_DESCRIPTORS = [
   { id: 'element-plus', label: 'Element Plus', match: (ctx) => Boolean(ctx.deps['element-plus']) },
   { id: 'vue-cli', label: 'Vue CLI', match: (ctx) => Boolean(ctx.deps['@vue/cli-service']), defaultPort: (ctx) => readVueCliPort(ctx) || 8080, healthPath: '/', defaultCommand: pickJsDevOrStartCommand },
   { id: 'python-fastapi', label: 'Python/FastAPI', group: 'python', match: isFastApiOrUvicorn, defaultPort: 8000, healthPath: '/health', defaultCommand: 'uvicorn main:app --host 127.0.0.1 --port 8000' },
+  { id: 'python-aiohttp', label: 'Python/aiohttp', group: 'python', match: (ctx) => /\baiohttp\b/i.test(readPythonManifestText(ctx)), defaultPort: 8080, healthPath: '/health', defaultCommand: null },
+  { id: 'python-flask', label: 'Python/Flask', group: 'python', match: (ctx) => /\bflask\b/i.test(readPythonManifestText(ctx)), defaultPort: 5000, healthPath: '/health', defaultCommand: 'flask run --host 127.0.0.1 --port 5000' },
+  { id: 'python-starlette', label: 'Python/Starlette', group: 'python', match: (ctx) => /\bstarlette\b/i.test(readPythonManifestText(ctx)), defaultPort: 8000, healthPath: '/health', defaultCommand: 'uvicorn main:app --host 127.0.0.1 --port 8000' },
+  { id: 'python-django', label: 'Python/Django', group: 'python', match: (ctx) => /\bdjango\b/i.test(readPythonManifestText(ctx)) || ctx.hasFile('manage.py'), defaultPort: 8000, healthPath: '/health', defaultCommand: 'python manage.py runserver 127.0.0.1:8000' },
   { id: 'python', label: 'Python', group: 'python', match: (ctx) => ctx.hasFile('pyproject.toml') || ctx.hasFile('requirements.txt'), defaultPort: 8000, healthPath: '/health', defaultCommand: 'uvicorn main:app --host 127.0.0.1 --port 8000' },
   { id: 'go', label: 'Go', match: (ctx) => ctx.hasFile('go.mod'), defaultPort: 8080, healthPath: '/healthz', defaultCommand: 'go run .' },
   { id: 'java-spring', label: 'Java/Spring', match: (ctx) => ctx.hasFile('pom.xml') || ctx.hasFile('build.gradle') || ctx.hasFile('build.gradle.kts'), defaultPort: 8080, healthPath: '/actuator/health', defaultCommand: null },
@@ -270,18 +377,20 @@ export function detectStacksFromDescriptors(repoDir) {
     }
   }
 
-  const siblingRepos = matched.length === 0 ? detectSiblingRepoDirs(repoDir) : [];
+  const siblingRepos = matched.length === 0 || matched.every((d) => d.id === 'nodejs') ? detectSiblingRepoDirs(repoDir) : [];
   if (siblingRepos.length >= 2) {
+    /** @type {StackDescriptor[]} */
+    const subMatched = [];
     const labelSet = new Set();
     for (const sub of siblingRepos) {
       const subRes = detectStacksFromDescriptors(sub);
       for (const lbl of subRes.labels) labelSet.add(lbl);
       for (const d of subRes.matched) {
-        if (!matched.some((m) => m.id === d.id)) matched.push(d);
+        if (!subMatched.some((m) => m.id === d.id)) subMatched.push(d);
       }
     }
     labelSet.add('Multi-Repo Workspace');
-    return { matched, labels: [...labelSet], ctx, siblingRepos };
+    return { matched: subMatched, labels: [...labelSet], ctx, siblingRepos };
   }
 
   return { matched, labels: matched.map((d) => d.label), ctx, siblingRepos };

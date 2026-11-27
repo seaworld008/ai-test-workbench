@@ -1,6 +1,6 @@
-# 版本与兼容性矩阵 (v6.6.0)
+# 版本与兼容性矩阵 (v6.7.0)
 
-> [English Version](./VERSION.en.md) · [简体中文主文档](./README.md) · **工作台与门禁内核版本**：`6.6.0`（单一真源：`src/core/version.mjs`） · **核验日期**：`2026-11-27`
+> [English Version](./VERSION.en.md) · [简体中文主文档](./README.md) · **工作台与门禁内核版本**：`6.7.0`（单一真源：`src/core/version.mjs`） · **核验日期**：`2026-11-27`
 
 ## 1. 运行时与工具链要求
 
@@ -18,9 +18,9 @@
 
 | 工件类型 | 当前 Schema 版本 | 对应模块 |
 |---|---|---|
-| **Gate Kernel** | `6.6.0` | 权威源码 `src/kernel/gate-kernel.mjs`（18 条可插拔规则 `AITEST-G101..G118` + 经治理锁校验的声明式 `qa/support/project-rules.json`，治理锁同步封签 `.aitest/mcp.lock` 与 `.aitest/engine-manifest.json`，单向同步镜像 `templates/playwright-qa/support/gate-kernel.mjs`，`doctor` 与 `check:vendor` 双重校验漂移） |
-| **Living Code Map** | `v5` (`schemaVersion: 5`) | `src/codemap/sync.mjs`、`src/codemap/v5-fusion.mjs`、`src/codemap/providers/`（L0 零依赖全栈提取 + L1 解耦 `codebase-memory-mcp@0.12.1` 侧车 + L2 反腐败融合，自动迁移 v4 → v5） |
-| **Graph Impact Index** | `v1` (`pipe-sharded-v1`) | `src/impact/graph-index.mjs`、`src/impact/graph-index-codec.mjs`、`src/impact/global-infra-guard.mjs`（`knowledge/graph-impact-index.json` 16 分片 `<20ms` 延迟水合 + `>65` 高扇入 Fail-Closed 哨兵 + Global Infra Guard） |
+| **Gate Kernel** | `6.7.0` | 权威源码 `src/kernel/gate-kernel.mjs`（18 条可插拔规则 `AITEST-G101..G118` + 经治理锁校验的声明式 `qa/support/project-rules.json`，治理锁同步封签 `.aitest/mcp.lock` 与 `.aitest/engine-manifest.json`，单向同步镜像 `templates/playwright-qa/support/gate-kernel.mjs`，`doctor` 与 `check:vendor` 双重校验漂移） |
+| **Living Code Map** | `v5.1` (`schemaVersion: 5`) | `src/codemap/sync.mjs`、`src/codemap/v5-fusion.mjs`、`src/codemap/python-extractor.mjs`、`src/codemap/providers/`（多语言 Monorepo 自发现 + Vue 3/TS 泛型 HTTP/跨文件前缀助手/`.cjs` + Python `FastAPI`/`Flask`/`aiohttp`/`Starlette`/`Django`/ORM + Spring/MyBatis L0 提取 + L1 解耦 `codebase-memory-mcp@0.12.1` 侧车与 `AITEST_DATA_DIR`/tmpdir 隔离 + L2 反腐败融合，自动迁移 v4 → v5） |
+| **Graph Impact Index** | `v1` (`pipe-sharded-v1` / Diff-Impact v3.1) | `src/impact/graph-index.mjs`、`src/impact/graph-index-codec.mjs`、`src/impact/global-infra-guard.mjs`、`src/impact/scanner.mjs`、`src/impact/graph.mjs`（共享 `.git` Monorepo 差异重映射 + Python `.py` 反向导入图 + `knowledge/graph-impact-index.json` 16 分片 `<20ms` 延迟水合 + `>65` 高扇入 Fail-Closed 哨兵 + Global Infra Guard） |
 | **8-Pillar MCP Hub** | `v1` (`.aitest/mcp.lock`) | `src/mcp-hub/catalog.mjs`、`src/mcp-hub/auditor.mjs`（8 大支柱新增 `code-intelligence`，`mcp doctor` 强检原生侧车 `--ui=false` 与二进制 SHA-256） |
 | **Differential Parity Oracle** | `v1` | `src/kernel/diff-oracle.mjs` / `src/parity/`（五级检查点 `CP1..CP5`、`shape-only` 零明文形状指纹 `fp_<12hex>` 与零依赖 SSE 重组 `src/core/stream-sse.mjs`） |
 | **Memory Loop & Seam Card** | `v1` | `src/memory/` / `src/learn.mjs` / `src/verdict/seam-card.mjs`（受锁 `qa/known-blockers.json`、待审提案 `learn-proposals.{json,md}` 与人类守门员焦点卡） |

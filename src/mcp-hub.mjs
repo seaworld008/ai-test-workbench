@@ -6,11 +6,12 @@ import { installGraphEngine } from './codemap/providers/engine-installer.mjs';
 import { DEFAULT_GRAPH_ENGINE_ID, resolvePlatformAsset } from './codemap/providers/engine-manifest.mjs';
 import { loadAndValidateAitestConfigFile } from './core/config.mjs';
 import { buildCommandResult, emitCommandResult } from './core/outcome.mjs';
-import { SCHEMA_VERSIONS } from './core/version.mjs';
+import { SCHEMA_VERSIONS, WORKBENCH_VERSION } from './core/version.mjs';
 import {
   PROMPT_POISONING_RE,
   auditMcpDescriptorsAndLock,
   auditMcpSafety,
+  inspectGlobalGraphEngineStatus,
   inspectGraphEngineStatus,
   inspectUntrustedCodeMetadata,
   runMcpDoctorReadOnly,
@@ -33,6 +34,7 @@ export {
   auditMcpDescriptorsAndLock,
   auditMcpSafety,
   getMcpPresetsSummary,
+  inspectGlobalGraphEngineStatus,
   inspectGraphEngineStatus,
   inspectUntrustedCodeMetadata,
   runMcpDoctorReadOnly,
@@ -227,8 +229,8 @@ export async function runMcpCommand(options = {}) {
   const action = (options.action || 'presets').toLowerCase();
   const asJson = Boolean(options.json);
 
-  /** @param {number} exitCode @param {string} msg */
-  const failMcp = (exitCode, msg) => {
+  /** @param {number} exitCode @param {string} msg @param {{ blockerKind?: string | null, recoverable?: boolean, recoverySteps?: string[], nextRecommendedActions?: string[] }} [meta] */
+  const failMcp = (exitCode, msg, meta = {}) => {
     if (!asJson) console.error(msg);
     return emitCommandResult(
       buildCommandResult({
@@ -236,38 +238,28 @@ export async function runMcpCommand(options = {}) {
         outcome: exitCode === 64 ? 'usage' : exitCode === 2 ? 'blocked' : 'fail',
         ok: false,
         exitCode,
-        blockerKind: exitCode === 64 ? 'USAGE_ERROR' : null,
+        recoverable: meta.recoverable ?? true,
+        blockerKind: meta.blockerKind ?? (exitCode === 64 ? 'USAGE_ERROR' : exitCode === 2 ? 'PREREQUISITE_OR_GATE_BLOCK' : null),
+        recoverySteps: meta.recoverySteps || [],
+        nextRecommendedActions: meta.nextRecommendedActions || meta.recoverySteps || [],
         summary: msg,
         data: { action, error: msg },
       }),
       { asJson }
     );
   };
+  /** @param {string} summary @param {Record<string, any>} data @param {string[]} [nextRecommendedActions] */
+  const passMcp = (summary, data, nextRecommendedActions) =>
+    emitCommandResult(buildCommandResult({ tool: 'mcp', outcome: 'pass', ok: true, exitCode: 0, summary, data, ...(nextRecommendedActions ? { nextRecommendedActions } : {}) }), { asJson });
 
   if (action === 'presets') {
     const summary = getMcpPresetsSummary();
     if (!asJson) {
-      console.log(
-        lang === 'zh'
-          ? '\n=== AI Test Workbench 8 大支柱全链路系统 MCP 预设清单 (已锁版本 & 风险分级) ==='
-          : '\n=== AI Test Workbench 8-Pillar Full-Link MCP Presets (Pinned & Risk-Graded) ==='
-      );
-      for (const [name, p] of Object.entries(MCP_PRESETS)) {
-        console.log(`  [${p.pillar.padEnd(17)} | ${p.riskLevel.padEnd(13)}] ${name.padEnd(20)} — ${p.description}`);
-      }
+      console.log(lang === 'zh' ? '\n=== AI Test Workbench 8 大支柱全链路系统 MCP 预设清单 (已锁版本 & 风险分级) ===' : '\n=== AI Test Workbench 8-Pillar Full-Link MCP Presets (Pinned & Risk-Graded) ===');
+      for (const [name, p] of Object.entries(MCP_PRESETS)) console.log(`  [${p.pillar.padEnd(17)} | ${p.riskLevel.padEnd(13)}] ${name.padEnd(20)} — ${p.description}`);
       console.log(`\nProfiles: ${Object.keys(MCP_PROFILES).join(', ')}`);
     }
-    return emitCommandResult(
-      buildCommandResult({
-        tool: 'mcp',
-        outcome: 'pass',
-        ok: true,
-        exitCode: 0,
-        summary: `Listed ${Object.keys(MCP_PRESETS).length} pinned 8-pillar MCP presets`,
-        data: summary,
-      }),
-      { asJson }
-    );
+    return passMcp(`Listed ${Object.keys(MCP_PRESETS).length} pinned 8-pillar MCP presets`, summary);
   }
 
   if (action === 'install-engine') {
@@ -276,29 +268,73 @@ export async function runMcpCommand(options = {}) {
     if (!asset) return failMcp(64, `Unsupported graph engine "${engineId}" on ${process.platform}-${process.arch}.`);
     let targetQaDir;
     if (options.target) {
-      targetQaDir = resolveQaDirectory(options.target, options.qaDir) || undefined;
-      if (!targetQaDir) return failMcp(1, lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
+      const resolvedTarget = path.resolve(options.target);
+      targetQaDir = resolveQaDirectory(resolvedTarget, options.qaDir) || undefined;
+      if (!targetQaDir) {
+        return failMcp(1, lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`, {
+          blockerKind: 'WORKSPACE_NOT_INITIALIZED',
+          recoverySteps: [lang === 'zh' ? `请先初始化 QA 工作区 (${resolvedTarget})，或省略 --target 仅全局安装二进制引擎。` : `Initialize QA workspace under ${resolvedTarget} first, or omit --target to install the global binary only.`],
+          nextRecommendedActions: [`npx ai-test-workbench@${WORKBENCH_VERSION} init --target "${resolvedTarget}"`, `npx ai-test-workbench@${WORKBENCH_VERSION} mcp install-engine`],
+        });
+      }
     }
     if (options.dryRun) {
       const plan = { dryRun: true, engine: engineId, pinnedVersion: asset.version, asset: asset.asset, sha256: asset.sha256, qaDir: targetQaDir || null, fromFile: options.fromFile || null, mirrorUrl: options.mirrorUrl || null };
       if (!asJson) console.log(`[MCP Engine Install DRY-RUN] engine=${engineId} v${asset.version} (${asset.asset})`);
-      return emitCommandResult(buildCommandResult({ tool: 'mcp', outcome: 'pass', ok: true, exitCode: 0, summary: `Dry-run install plan for ${engineId} v${asset.version}`, data: plan }), { asJson });
+      return passMcp(`Dry-run install plan for ${engineId} v${asset.version}`, plan);
     }
     const res = await installGraphEngine({ id: engineId, fromFile: options.fromFile, mirrorUrl: options.mirrorUrl, expectedSha256: options.expectedSha256, qaDir: targetQaDir });
     if (!asJson) {
       console.log(`\n[MCP Engine Install] Installed ${res.engine} v${res.installedVersion} -> ${res.binaryPath} (sha256=${res.binarySha256.slice(0, 12)})`);
       if (res.manifestPath) console.log(`  Engine Manifest : ${res.manifestPath} (run "governance approve" to seal)`);
     }
-    return emitCommandResult(buildCommandResult({ tool: 'mcp', outcome: 'pass', ok: true, exitCode: 0, summary: `Installed ${res.engine} v${res.installedVersion} (${res.binaryPath})`, data: res }), { asJson });
+    return passMcp(`Installed ${res.engine} v${res.installedVersion} (${res.binaryPath})`, res);
   }
 
+  if (action === 'engine-status') {
+    const explicitTarget = options.target ? path.resolve(options.target) : null;
+    const qaDir = explicitTarget ? resolveQaDirectory(explicitTarget, options.qaDir) : resolveQaDirectory(process.cwd(), options.qaDir);
+    const status = qaDir ? inspectGraphEngineStatus(qaDir) : inspectGlobalGraphEngineStatus({ target: explicitTarget || undefined, engine: options.engine });
+    /** @type {string[]} */
+    const nextActions = [];
+    if (!status.globalBinaryInstalled) {
+      nextActions.push(qaDir ? `Run human local CLI: npx ai-test-workbench@${WORKBENCH_VERSION} mcp install-engine --target "${path.dirname(qaDir)}" (then run "governance approve")` : `Run human local CLI: npx ai-test-workbench@${WORKBENCH_VERSION} mcp install-engine`);
+    }
+    if (!qaDir) {
+      nextActions.push(explicitTarget ? `Initialize QA workspace: npx ai-test-workbench@${WORKBENCH_VERSION} init --target "${explicitTarget}"` : `Initialize a project QA workspace: npx ai-test-workbench@${WORKBENCH_VERSION} init --target <repo>`);
+    }
+    if (!asJson) {
+      console.log(qaDir
+        ? `\n[MCP Engine Status] mode=${status.engineMode}, manifest=${status.manifestPresent}, mcpConfigured=${status.mcpServerConfigured}, globalBinaryInstalled=${status.globalBinaryInstalled}, installPolicy=${status.installPolicy}`
+        : `\n[MCP Engine Status (Global)] qaInitialized=false, presetVersion=${status.presetVersion}, globalBinaryInstalled=${status.globalBinaryInstalled}, binaryPath=${status.globalBinaryPath}, installPolicy=${status.installPolicy}`);
+    }
+    const summary = status.manifestError
+      ? `Engine manifest parse error: ${status.manifestError}`
+      : qaDir
+        ? `Graph engine status: mode=${status.engineMode}, manifest=${status.manifestPresent}, globalBinaryInstalled=${status.globalBinaryInstalled}, installPolicy=${status.installPolicy}`
+        : `Global graph engine status: presetVersion=${status.presetVersion}, globalBinaryInstalled=${status.globalBinaryInstalled}, qaInitialized=false, installPolicy=${status.installPolicy}`;
+    return emitCommandResult(buildCommandResult({ tool: 'mcp', outcome: status.manifestError ? 'fail' : 'pass', ok: !status.manifestError, exitCode: status.manifestError ? 1 : 0, summary, data: status, nextRecommendedActions: nextActions }), { asJson });
+  }
+
+  if (!['doctor', 'add'].includes(action)) {
+    return failMcp(64, `Unknown mcp action "${action}". Use: presets | add | doctor | engine-status | install-engine | serve`, {
+      blockerKind: 'USAGE_ERROR', recoverySteps: ['Use one of: presets | add | doctor | engine-status | install-engine | serve.'],
+    });
+  }
   if (!options.target) {
-    return failMcp(64, lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option');
+    return failMcp(64, lang === 'zh' ? '缺少 --target 参数' : 'Missing --target option', {
+      blockerKind: 'USAGE_ERROR',
+      recoverySteps: [lang === 'zh' ? `请传入 --target <业务仓库路径>，例如: npx ai-test-workbench@${WORKBENCH_VERSION} mcp ${action} --target <repo>` : `Pass --target <repo-path>, e.g.: npx ai-test-workbench@${WORKBENCH_VERSION} mcp ${action} --target <repo>`],
+    });
   }
-
-  const qaDir = resolveQaDirectory(options.target, options.qaDir);
+  const resolvedTarget = path.resolve(options.target);
+  const qaDir = resolveQaDirectory(resolvedTarget, options.qaDir);
   if (!qaDir) {
-    return failMcp(1, lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`);
+    return failMcp(1, lang === 'zh' ? `未找到 QA 目录: ${options.target}` : `QA directory not found: ${options.target}`, {
+      blockerKind: 'WORKSPACE_NOT_INITIALIZED',
+      recoverySteps: [lang === 'zh' ? `请先初始化 QA 工作区: npx ai-test-workbench@${WORKBENCH_VERSION} init --target "${resolvedTarget}"` : `Initialize QA workspace first: npx ai-test-workbench@${WORKBENCH_VERSION} init --target "${resolvedTarget}"`],
+      nextRecommendedActions: [`Run "aitw init --target ${resolvedTarget}" or call aitest_bootstrap(target) before "aitw mcp ${action}".`],
+    });
   }
 
   const mcpJsonPath = path.join(qaDir, '.mcp.json');
@@ -307,136 +343,54 @@ export async function runMcpCommand(options = {}) {
 
   if (action === 'doctor') {
     const doctorRes = runMcpDoctorReadOnly(qaDir, { ignoreLock: Boolean(options.lock) });
-    if (doctorRes.error || !doctorRes.audit) {
-      return failMcp(1, doctorRes.error || 'Failed to parse .mcp.json');
-    }
+    if (doctorRes.error || !doctorRes.audit) return failMcp(1, doctorRes.error || 'Failed to parse .mcp.json');
     const audit = doctorRes.audit;
-
     if (options.lock && audit.ok) {
       fs.mkdirSync(path.dirname(mcpLockPath), { recursive: true });
-      fs.writeFileSync(
-        mcpLockPath,
-        JSON.stringify(
-          {
-            schemaVersion: SCHEMA_VERSIONS.mcpLock,
-            lockedAt: new Date().toISOString(),
-            hashes: audit.descriptorHashes,
-          },
-          null,
-          2
-        ) + '\n',
-        'utf8'
-      );
+      fs.writeFileSync(mcpLockPath, JSON.stringify({ schemaVersion: SCHEMA_VERSIONS.mcpLock, lockedAt: new Date().toISOString(), hashes: audit.descriptorHashes }, null, 2) + '\n', 'utf8');
     }
-
     const exitCode = audit.ok ? 0 : 2;
     if (!options.json) {
-      console.log(
-        lang === 'zh'
-          ? `\n[MCP Doctor] 已审计 ${audit.checkedServers.length} 个 MCP 服务配置 (.mcp.json + .codex/config.toml)`
-          : `\n[MCP Doctor] Audited ${audit.checkedServers.length} MCP server(s) in .mcp.json + .codex/config.toml`
-      );
+      console.log(lang === 'zh' ? `\n[MCP Doctor] 已审计 ${audit.checkedServers.length} 个 MCP 服务配置 (.mcp.json + .codex/config.toml)` : `\n[MCP Doctor] Audited ${audit.checkedServers.length} MCP server(s) in .mcp.json + .codex/config.toml`);
       for (const w of audit.warnings) console.warn(`  [WARN] ${w}`);
       for (const iss of audit.issues) console.error(`  [FAIL] ${iss}`);
       if (audit.ok) console.log('  [OK] All MCP configurations enforce supply-chain, read-only & secret hygiene guardrails.');
     }
-    return emitCommandResult(
-      buildCommandResult({
-        tool: 'mcp',
-        outcome: audit.ok ? 'pass' : 'blocked',
-        ok: audit.ok,
-        exitCode,
-        summary: audit.ok
-          ? `MCP doctor audited ${audit.checkedServers.length} server(s): OK`
-          : audit.issues[0] || `MCP doctor blocked (${audit.issues.length} issue(s))`,
-        data: { ...audit, mcpLockPath: fs.existsSync(mcpLockPath) ? mcpLockPath : null },
-      }),
-      { asJson: Boolean(options.json) }
-    );
+    return emitCommandResult(buildCommandResult({
+      tool: 'mcp', outcome: audit.ok ? 'pass' : 'blocked', ok: audit.ok, exitCode,
+      summary: audit.ok ? `MCP doctor audited ${audit.checkedServers.length} server(s): OK` : audit.issues[0] || `MCP doctor blocked (${audit.issues.length} issue(s))`,
+      data: { ...audit, mcpLockPath: fs.existsSync(mcpLockPath) ? mcpLockPath : null },
+    }), { asJson: Boolean(options.json) });
   }
 
-  if (action === 'engine-status') {
-    const status = inspectGraphEngineStatus(qaDir);
-    if (!asJson) {
-      console.log(
-        lang === 'zh'
-          ? `\n[MCP Engine Status] mode=${status.engineMode}, manifest=${status.manifestPresent}, mcpConfigured=${status.mcpServerConfigured}, installPolicy=${status.installPolicy}`
-          : `\n[MCP Engine Status] mode=${status.engineMode}, manifest=${status.manifestPresent}, mcpConfigured=${status.mcpServerConfigured}, installPolicy=${status.installPolicy}`
-      );
-    }
-    return emitCommandResult(
-      buildCommandResult({
-        tool: 'mcp',
-        outcome: status.manifestError ? 'fail' : 'pass',
-        ok: !status.manifestError,
-        exitCode: status.manifestError ? 1 : 0,
-        summary: status.manifestError
-          ? `Engine manifest parse error: ${status.manifestError}`
-          : `Graph engine status: mode=${status.engineMode}, manifest=${status.manifestPresent}, installPolicy=${status.installPolicy}`,
-        data: status,
-      }),
-      { asJson }
-    );
+  /** @type {string[]} */
+  let selected = [];
+  if (options.servers || /** @type {any} */ (options).preset) {
+    selected = String(options.servers || /** @type {any} */ (options).preset).split(',').map((s) => s.trim()).filter(Boolean);
+  } else {
+    const profileName = (options.profile || 'full-link').toLowerCase();
+    if (!PROFILES_BY_NAME[profileName]) return failMcp(64, `Unknown MCP profile "${profileName}". Valid: ${Object.keys(MCP_PROFILES).join(', ')}`);
+    selected = PROFILES_BY_NAME[profileName];
   }
+  const unknown = selected.filter((s) => !PRESETS_BY_NAME[s]);
+  if (unknown.length > 0) return failMcp(64, `Unknown MCP preset(s): ${unknown.join(', ')}. Valid: ${Object.keys(MCP_PRESETS).join(', ')}`);
 
-  if (action === 'add') {
-    /** @type {string[]} */
-    let selected = [];
-    if (options.servers || /** @type {any} */ (options).preset) {
-      selected = String(options.servers || /** @type {any} */ (options).preset)
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-    } else {
-      const profileName = (options.profile || 'full-link').toLowerCase();
-      if (!PROFILES_BY_NAME[profileName]) {
-        return failMcp(64, `Unknown MCP profile "${profileName}". Valid: ${Object.keys(MCP_PROFILES).join(', ')}`);
-      }
-      selected = PROFILES_BY_NAME[profileName];
-    }
-
-    const unknown = selected.filter((s) => !PRESETS_BY_NAME[s]);
-    if (unknown.length > 0) {
-      return failMcp(64, `Unknown MCP preset(s): ${unknown.join(', ')}. Valid: ${Object.keys(MCP_PRESETS).join(', ')}`);
-    }
-
-    const codeMapConfig = loadAndValidateAitestConfigFile(qaDir).config.codeMap || null;
-    const mergeOpts = { codeMapConfig };
-    const curJson = fs.existsSync(mcpJsonPath) ? JSON.parse(fs.readFileSync(mcpJsonPath, 'utf8')) : {};
-    const jsonMerge = mergeMcpServersIntoJson(curJson, selected, mergeOpts);
-    const curToml = fs.existsSync(codexTomlPath) ? fs.readFileSync(codexTomlPath, 'utf8') : '';
-    const tomlMerge = mergeMcpServersIntoCodexToml(curToml, selected, mergeOpts);
-    const envExamplePath = path.join(qaDir, '.env.mcp.example');
-
-    if (!options.dryRun) {
-      fs.writeFileSync(mcpJsonPath, JSON.stringify(jsonMerge.config, null, 2) + '\n', 'utf8');
-      fs.mkdirSync(path.dirname(codexTomlPath), { recursive: true });
-      fs.writeFileSync(codexTomlPath, tomlMerge.content, 'utf8');
-      fs.writeFileSync(envExamplePath, buildMcpEnvTemplate(selected), 'utf8');
-    }
-
-    if (!options.json) {
-      console.log(
-        lang === 'zh'
-          ? `\n[MCP Hub] 已配置 ${selected.length} 项全链路系统 MCP (新增 ${jsonMerge.added.length} / 保留 ${jsonMerge.kept.length})`
-          : `\n[MCP Hub] Configured ${selected.length} full-link system MCP(s) (added ${jsonMerge.added.length}, kept ${jsonMerge.kept.length})`
-      );
-      console.log(`  .mcp.json        : ${mcpJsonPath}`);
-      console.log(`  .codex/config    : ${codexTomlPath}`);
-      console.log(`  .env.mcp.example : ${envExamplePath}`);
-    }
-    return emitCommandResult(
-      buildCommandResult({
-        tool: 'mcp',
-        outcome: 'pass',
-        ok: true,
-        exitCode: 0,
-        summary: `Configured ${selected.length} MCP preset(s) (added=${jsonMerge.added.length}, kept=${jsonMerge.kept.length})`,
-        data: { mcpJsonPath, codexTomlPath, envExamplePath, added: jsonMerge.added, kept: jsonMerge.kept },
-      }),
-      { asJson: Boolean(options.json) }
-    );
+  const codeMapConfig = loadAndValidateAitestConfigFile(qaDir).config.codeMap || null;
+  const mergeOpts = { codeMapConfig };
+  const curJson = fs.existsSync(mcpJsonPath) ? JSON.parse(fs.readFileSync(mcpJsonPath, 'utf8')) : {};
+  const jsonMerge = mergeMcpServersIntoJson(curJson, selected, mergeOpts);
+  const curToml = fs.existsSync(codexTomlPath) ? fs.readFileSync(codexTomlPath, 'utf8') : '';
+  const tomlMerge = mergeMcpServersIntoCodexToml(curToml, selected, mergeOpts);
+  const envExamplePath = path.join(qaDir, '.env.mcp.example');
+  if (!options.dryRun) {
+    fs.writeFileSync(mcpJsonPath, JSON.stringify(jsonMerge.config, null, 2) + '\n', 'utf8');
+    fs.mkdirSync(path.dirname(codexTomlPath), { recursive: true });
+    fs.writeFileSync(codexTomlPath, tomlMerge.content, 'utf8');
+    fs.writeFileSync(envExamplePath, buildMcpEnvTemplate(selected), 'utf8');
   }
-
-  return failMcp(64, `Unknown mcp action "${action}". Use: presets | add | doctor | engine-status | install-engine | serve`);
+  if (!options.json) {
+    console.log(lang === 'zh' ? `\n[MCP Hub] 已配置 ${selected.length} 项全链路系统 MCP (新增 ${jsonMerge.added.length} / 保留 ${jsonMerge.kept.length})` : `\n[MCP Hub] Configured ${selected.length} full-link system MCP(s) (added ${jsonMerge.added.length}, kept ${jsonMerge.kept.length})`);
+    console.log(`  .mcp.json        : ${mcpJsonPath}\n  .codex/config    : ${codexTomlPath}\n  .env.mcp.example : ${envExamplePath}`);
+  }
+  return passMcp(`Configured ${selected.length} MCP preset(s) (added=${jsonMerge.added.length}, kept=${jsonMerge.kept.length})`, { mcpJsonPath, codexTomlPath, envExamplePath, added: jsonMerge.added, kept: jsonMerge.kept });
 }

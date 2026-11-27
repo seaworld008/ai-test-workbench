@@ -41,6 +41,22 @@ const SKIP_COPY_NAMES = new Set([
 const FLAT_ESLINT_CONFIGS = ['eslint.config.mjs', 'eslint.config.js', 'eslint.config.ts'];
 const LEGACY_ESLINT_CONFIGS = ['.eslintrc.js', '.eslintrc.cjs', '.eslintrc.json', '.eslintrc.yml', '.eslintrc'];
 
+/** @param {ReturnType<typeof buildStackDetectContext>} ctx @returns {boolean} */
+function hasPytestConfig(ctx) {
+  if (ctx.hasFile('pytest.ini') || ctx.hasFile('conftest.py')) return true;
+  if (!ctx.hasFile('pyproject.toml') && !ctx.hasFile('requirements.txt')) return false;
+  return /\bpytest\b/i.test(`${ctx.readText('pyproject.toml')}\n${ctx.readText('requirements.txt')}`);
+}
+
+/** @param {string} dir @returns {boolean} */
+function hasDirectory(dir) {
+  try {
+    return Boolean(dir && fs.existsSync(dir) && fs.statSync(dir).isDirectory());
+  } catch {
+    return false;
+  }
+}
+
 /**
  * @param {string} repoDir
  * @returns {string[]}
@@ -50,10 +66,12 @@ export function detectProjectStack(repoDir) {
   const stacks = [...labels];
   if (ctx.deps.vitest && !stacks.includes('Vitest')) stacks.push('Vitest');
   if (ctx.deps.jest && !stacks.includes('Jest')) stacks.push('Jest');
+  if (hasPytestConfig(ctx) && !stacks.includes('Pytest')) stacks.push('Pytest');
   for (const sub of siblingRepos) {
     const subCtx = buildStackDetectContext(sub);
     if (subCtx.deps.vitest && !stacks.includes('Vitest')) stacks.push('Vitest');
     if (subCtx.deps.jest && !stacks.includes('Jest')) stacks.push('Jest');
+    if (hasPytestConfig(subCtx) && !stacks.includes('Pytest')) stacks.push('Pytest');
   }
   return stacks.length > 0 ? stacks : ['Generic Web'];
 }
@@ -64,24 +82,45 @@ export function detectProjectStack(repoDir) {
  */
 export function detectHostTooling(repoDir) {
   const ctx = buildStackDetectContext(repoDir);
-  const lockfile = ['pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb', 'package-lock.json'].find((f) => ctx.hasFile(f)) || null;
-  const eslintConfigs = [...FLAT_ESLINT_CONFIGS, ...LEGACY_ESLINT_CONFIGS].filter((f) => ctx.hasFile(f));
-  const mavenModules = ctx.hasFile('pom.xml') ? extractMavenModules(ctx.readText('pom.xml')) : [];
+  const lockfileNames = ['pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb', 'package-lock.json'];
   const siblingRepos = detectSiblingRepoDirs(repoDir);
-  const vueVersion = ctx.deps.vue ? (isVue2Project(ctx) ? 'vue2' : 'vue3') : null;
-  const uiLibrary = ctx.deps['element-ui'] ? 'element-ui' : ctx.deps['element-plus'] ? 'element-plus' : null;
+  const subContexts = siblingRepos.map((sub) => buildStackDetectContext(sub));
+  const allContexts = [ctx, ...subContexts];
+
+  const lockfile =
+    lockfileNames.find((f) => ctx.hasFile(f)) ||
+    subContexts.map((sc) => lockfileNames.find((f) => sc.hasFile(f)) || null).find(Boolean) ||
+    null;
+  const rootHasJsPm = ctx.hasFile('package.json') || lockfileNames.some((f) => ctx.hasFile(f));
+  const pmFromSub = !rootHasJsPm
+    ? subContexts.find((sc) => sc.hasFile('package.json') || lockfileNames.some((f) => sc.hasFile(f)))?.pm.name
+    : undefined;
+  const packageManager = pmFromSub || ctx.pm.name;
+
+  const eslintConfigs = [...FLAT_ESLINT_CONFIGS, ...LEGACY_ESLINT_CONFIGS].filter((f) => ctx.hasFile(f));
+  const mavenModules = allContexts
+    .flatMap((c) => (c.hasFile('pom.xml') ? extractMavenModules(c.readText('pom.xml')) : []));
+  const vueCtx = allContexts.find((c) => Boolean(c.deps.vue)) || null;
+  const vueVersion = vueCtx ? (isVue2Project(vueCtx) ? 'vue2' : 'vue3') : null;
+  const uiLibrary =
+    allContexts.map((c) => (c.deps['element-ui'] ? 'element-ui' : c.deps['element-plus'] ? 'element-plus' : null)).find(Boolean) ||
+    null;
+
   return {
-    packageManager: ctx.pm.name,
+    packageManager,
     lockfile,
     eslintConfigs,
     hasEslintIgnore: ctx.hasFile('.eslintignore'),
     hasTsConfig: ctx.hasFile('tsconfig.json'),
     hasJsConfig: ctx.hasFile('jsconfig.json'),
-    hasExistingTestsDir: Boolean(repoDir && fs.existsSync(path.join(repoDir, 'tests')) && fs.statSync(path.join(repoDir, 'tests')).isDirectory()),
+    hasExistingTestsDir: Boolean(
+      (repoDir && hasDirectory(path.join(repoDir, 'tests'))) ||
+        siblingRepos.some((sub) => hasDirectory(path.join(sub, 'tests')))
+    ),
     vueVersion,
     uiLibrary,
-    usesVueCli: Boolean(ctx.deps['@vue/cli-service']),
-    mavenModules,
+    usesVueCli: allContexts.some((c) => Boolean(c.deps['@vue/cli-service'])),
+    mavenModules: [...new Set(mavenModules)],
     siblingRepos: siblingRepos.map((d) => path.basename(d)),
   };
 }

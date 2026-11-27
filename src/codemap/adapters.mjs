@@ -40,11 +40,13 @@ import {
   stripJavaComments,
 } from './spring-prefix-resolver.mjs';
 import { parseStaticImports, stripJsComments } from './vue-extractor.mjs';
+import { extractExportedUrlPrefixHelpers, resolveCrossFilePrefixHelperCalls } from './vue-api-extractor.mjs';
 import {
   extractAxiosWrapperInfo,
   extractCrudFactoryApiCalls,
   extractCrudFactoryDefinition,
   extractGlobalVueComponents,
+  extractLocalJsStringConsts,
   extractVueTemplateComponents,
   resolveChainedAxiosPrefixes,
   resolveVueTemplateRefs,
@@ -67,7 +69,7 @@ export {
 };
 
 const VIEW_FILE_RE = /^(?:src\/)?(?:views|pages)\/.+\.(?:vue|tsx|jsx|svelte|astro)$/i;
-const FRONTEND_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.vue', '.svelte', '.astro']);
+const FRONTEND_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte', '.astro']);
 const SPRING_PREFIX_HINT_RE = /(?:WebConfiguration|WebAutoConfiguration|WebMvcConfig|WebProperties|configurePathMatch|PathMatchConfigurer|addPathPrefix|@ConfigurationProperties)/;
 const RPC_SIGNAL_HINT_RE = /@DubboService\b|@DubboReference\b|@RocketMQMessageListener\b|@XxlJob\b|\.(?:syncSend|asyncSend|sendOneWay|convertAndSend|syncSendOrderly|asyncSendOrderly)\s*\(/;
 const MAX_FILE_BYTES = 256 * 1024;
@@ -129,13 +131,10 @@ export function extractFrontendData(filePath, relFile, text, repoDir, fileIndex)
   /** @type {Array<import('./registry.mjs').FrontendApiCall & { rawPath?: string, clientFile?: string, clientPrefix?: string, generatedBy?: string }>} */
   const apiCalls = [];
   /** @type {string[]} */
-  const imports = [];
-  /** @type {string[]} */
-  const axiosPrefixes = [];
+  const imports = [], axiosPrefixes = [];
   /** @type {Record<string, string[]>} */
   const namedImports = {};
   const ctx = { filePath, relFile, ext: path.extname(relFile).toLowerCase(), text, repoDir, fileIndex };
-
   for (const adapter of getCodeMapAdapters().frontend) {
     const out = adapter.extract(ctx);
     if (!out) continue;
@@ -146,9 +145,7 @@ export function extractFrontendData(filePath, relFile, text, repoDir, fileIndex)
     if (out.axiosPrefixes?.length) axiosPrefixes.push(...out.axiosPrefixes);
     const outNamed = /** @type {any} */ (out).namedImports;
     if (outNamed && typeof outNamed === 'object') {
-      for (const [k, v] of Object.entries(outNamed)) {
-        namedImports[k] = [...new Set([...(namedImports[k] || []), ...(Array.isArray(v) ? v : [])])];
-      }
+      for (const [k, v] of Object.entries(outNamed)) namedImports[k] = [...new Set([...(namedImports[k] || []), ...(Array.isArray(v) ? v : [])])];
     }
   }
   return { routes, brokenImports, apiCalls, imports: [...new Set(imports)], axiosPrefixes: [...new Set(axiosPrefixes)], namedImports };
@@ -212,6 +209,12 @@ function scanSingleRepo(repoDir, maxScanFiles, repoPrefix) {
   const javaCallBuffers = [];
   /** @type {Array<{ relFile: string, stripped: string }>} */
   const rpcSignalBuffers = [];
+  /** @type {Record<string, Record<string, string>>} */
+  const urlPrefixHelpersByFile = {};
+  /** @type {Record<string, Record<string, string>>} */
+  const exportedConstsByFile = {};
+  /** @type {Array<{ filePath: string, bareRel: string, relFile: string, ext: string, imports: string[] }>} */
+  const feImportCandidates = [];
 
   for (const filePath of walked.files) {
     let stat;
@@ -265,6 +268,20 @@ function scanSingleRepo(repoDir, maxScanFiles, repoPrefix) {
       for (const g of extractGlobalVueComponents({ filePath, relFile: bareRel, text, repoDir, fileIndex, resolveImportCandidate })) {
         part.globalComponents.push({ ...g, file: applyPrefix(repoPrefix, g.file), registeredIn: relFile });
       }
+      if (ext !== '.vue' && ext !== '.svelte' && ext !== '.astro') {
+        const strippedJs = stripJsComments(text), localConsts = extractLocalJsStringConsts(strippedJs);
+        if (/\bexport\b/.test(strippedJs)) {
+          /** @type {Record<string, string>} */
+          const expConsts = {};
+          for (const cm of strippedJs.matchAll(/\bexport\s+(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g)) {
+            if (Object.hasOwn(localConsts, cm[1])) expConsts[cm[1]] = localConsts[cm[1]];
+          }
+          if (Object.keys(expConsts).length > 0) exportedConstsByFile[bareRel] = expConsts;
+        }
+        const expHelpers = extractExportedUrlPrefixHelpers(strippedJs, localConsts);
+        if (Object.keys(expHelpers).length > 0) urlPrefixHelpersByFile[bareRel] = expHelpers;
+      }
+      if (fe.imports.length > 0 || ext === '.cjs') feImportCandidates.push({ filePath, bareRel, relFile, ext, imports: fe.imports });
       if (ext === '.vue') {
         const tpl = extractVueTemplateComponents(text);
         if (tpl.templateTags.length > 0) {
@@ -290,25 +307,18 @@ function scanSingleRepo(repoDir, maxScanFiles, repoPrefix) {
     if (be.javaMeta) part.javaFileInfos[relFile] = { ...be.javaMeta, relFile };
     if (be.mybatisMapper) part.mybatisMappers.push({ ...be.mybatisMapper, file: relFile });
   }
-
   const chainedPrefixes = resolveChainedAxiosPrefixes(wrapperInfoByFile);
   part.axiosPrefixes = [...new Set(Object.values(chainedPrefixes))];
-  for (const caller of crudCallerFiles) {
-    part.frontendApiCalls.push(...extractCrudFactoryApiCalls(caller.relFile, caller.text, crudFactoryDefs));
-  }
+  resolveCrossFilePrefixHelperCalls({ frontendApiCalls: part.frontendApiCalls, feImportCandidates, urlPrefixHelpersByFile, exportedConstsByFile, repoDir, fileIndex, repoPrefix, resolveImportCandidate });
+  for (const caller of crudCallerFiles) part.frontendApiCalls.push(...extractCrudFactoryApiCalls(caller.relFile, caller.text, crudFactoryDefs));
   for (const [f, imps] of Object.entries(part.frontendImports)) {
     const matched = [...new Set(imps.map((imp) => chainedPrefixes[imp]).filter(Boolean))];
     if (matched.length === 1) part.axiosPrefixByFile[f] = matched[0];
   }
   const factoryPref = crudFactoryDefs[0]?.clientFile ? chainedPrefixes[crudFactoryDefs[0].clientFile] : '';
-  if (factoryPref) {
-    for (const caller of crudCallerFiles) {
-      if (!part.axiosPrefixByFile[caller.relFile]) part.axiosPrefixByFile[caller.relFile] = factoryPref;
-    }
-  }
+  if (factoryPref) for (const caller of crudCallerFiles) if (!part.axiosPrefixByFile[caller.relFile]) part.axiosPrefixByFile[caller.relFile] = factoryPref;
   for (const call of part.frontendApiCalls) {
-    const callPrefix = (call.clientFile && chainedPrefixes[call.clientFile]) || part.axiosPrefixByFile[call.file] || '';
-    const rawPath = call.rawPath || call.path;
+    const callPrefix = (call.clientFile && chainedPrefixes[call.clientFile]) || part.axiosPrefixByFile[call.file] || '', rawPath = call.rawPath || call.path;
     call.rawPath = rawPath;
     if (callPrefix) {
       call.clientPrefix = callPrefix;

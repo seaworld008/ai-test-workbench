@@ -1,6 +1,6 @@
-# Version & Compatibility Matrix (v6.6.0)
+# Version & Compatibility Matrix (v6.7.0)
 
-> [简体中文 (默认)](./VERSION.md) · [English README](./README.en.md) · **Workbench & Gate Kernel Version**: `6.6.0` (single source: `src/core/version.mjs`) · **Verified Date**: `2026-11-27`
+> [简体中文 (默认)](./VERSION.md) · [English README](./README.en.md) · **Workbench & Gate Kernel Version**: `6.7.0` (single source: `src/core/version.mjs`) · **Verified Date**: `2026-11-27`
 
 ## 1. Runtime & Engine Requirements
 
@@ -18,9 +18,9 @@
 
 | Artifact | Schema Version | Module |
 |---|---|---|
-| **Gate Kernel** | `6.6.0` | Authoritative `src/kernel/gate-kernel.mjs` (18 pluggable rules `AITEST-G101..G118` + governance-locked declarative `qa/support/project-rules.json`, sealing `.aitest/mcp.lock` and `.aitest/engine-manifest.json`, one-way vendor mirror `templates/playwright-qa/support/gate-kernel.mjs`, drift-checked by `doctor` & `check:vendor`) |
-| **Living Code Map** | `v5` (`schemaVersion: 5`) | `src/codemap/sync.mjs`, `src/codemap/v5-fusion.mjs`, `src/codemap/providers/` (L0 zero-dep full-stack extractors + L1 pinned `codebase-memory-mcp@0.12.1` sidecar + L2 anti-corruption fusion; automatic v4 -> v5 migration) |
-| **Graph Impact Index** | `v1` (`pipe-sharded-v1`) | `src/impact/graph-index.mjs`, `src/impact/graph-index-codec.mjs`, `src/impact/global-infra-guard.mjs` (`knowledge/graph-impact-index.json` 16-shard `<20ms` lazy hydration + `>65` high-fan-in fail-closed sentinel + Global Infra Guard) |
+| **Gate Kernel** | `6.7.0` | Authoritative `src/kernel/gate-kernel.mjs` (18 pluggable rules `AITEST-G101..G118` + governance-locked declarative `qa/support/project-rules.json`, sealing `.aitest/mcp.lock` and `.aitest/engine-manifest.json`, one-way vendor mirror `templates/playwright-qa/support/gate-kernel.mjs`, drift-checked by `doctor` & `check:vendor`) |
+| **Living Code Map** | `v5.1` (`schemaVersion: 5`) | `src/codemap/sync.mjs`, `src/codemap/v5-fusion.mjs`, `src/codemap/python-extractor.mjs`, `src/codemap/providers/` (Polyglot monorepo discovery + Vue 3/TS generic HTTP/cross-file prefix helpers/`.cjs` + Python `FastAPI`/`Flask`/`aiohttp`/`Starlette`/`Django`/ORM + Spring/MyBatis L0 extractors + L1 pinned `codebase-memory-mcp@0.12.1` sidecar with `AITEST_DATA_DIR`/tmpdir isolation + L2 anti-corruption fusion; automatic v4 -> v5 migration) |
+| **Graph Impact Index** | `v1` (`pipe-sharded-v1` / Diff-Impact v3.1) | `src/impact/graph-index.mjs`, `src/impact/graph-index-codec.mjs`, `src/impact/global-infra-guard.mjs`, `src/impact/scanner.mjs`, `src/impact/graph.mjs` (Shared-`.git` monorepo diff remapping + Python `.py` reverse-import graph + `knowledge/graph-impact-index.json` 16-shard `<20ms` lazy hydration + `>65` high-fan-in fail-closed sentinel + Global Infra Guard) |
 | **8-Pillar MCP Hub** | `v1` (`.aitest/mcp.lock`) | `src/mcp-hub/catalog.mjs`, `src/mcp-hub/auditor.mjs` (8 pillars adding `code-intelligence`; `mcp doctor` verifies native sidecar `--ui=false` & binary SHA-256) |
 | **Differential Parity Oracle** | `v1` | `src/kernel/diff-oracle.mjs` / `src/parity/` (5-checkpoint `CP1..CP5`, `shape-only` zero-plaintext fingerprints `fp_<12hex>`, and zero-dep SSE reassembly `src/core/stream-sse.mjs`) |
 | **Memory Loop & Seam Card** | `v1` | `src/memory/` / `src/learn.mjs` / `src/verdict/seam-card.mjs` (sealed `qa/known-blockers.json`, staging-only `learn-proposals.{json,md}`, and Human Seam Gatekeeper Card) |

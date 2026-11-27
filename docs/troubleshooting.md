@@ -5,8 +5,8 @@
 | 故障现象 | 首先检查 | 解决原则 |
 |---|---|---|
 | 浏览器缺失或启动失败 | `cd qa && npx playwright --version`、`npx playwright install chromium` | 保持锁定版本与浏览器缓存一致，禁止关闭 TLS 校验 |
-| Windows PowerShell 报 `.cmd` `EINVAL` 或执行策略错误 | `node -v`、`npx ai-test-workbench@6.6.0 doctor` | CLI 直接通过 `process.execPath` 调度 `cli.js`，全程 `shell: false` |
-| Windows Defender / EDR 拦截 `codebase-memory-mcp.exe` 或报祖先目录 NTFS ACL 校验失败 | `npx ai-test-workbench@6.6.0 mcp engine-status`、`npx ai-test-workbench@6.6.0 doctor` | 侧车安装于 `%LOCALAPPDATA%\aitw\bin\cbm\<ver>\`（绝不在 `.aitest/` 内），按安全策略加白；受限祖先 ACL 会自动回退 `%SystemDrive%\aitw-{rt,cbm}` 并用 `icacls` 设仅当前用户可写（或指定 `AITEST_CBM_RUNTIME_DIR` / `AITEST_CBM_CACHE_DIR`） |
+| Windows PowerShell 报 `.cmd` `EINVAL` 或执行策略错误 | `node -v`、`npx ai-test-workbench@6.7.0 doctor` | CLI 直接通过 `process.execPath` 调度 `cli.js`，全程 `shell: false` |
+| Windows Defender / EDR 拦截 `codebase-memory-mcp.exe` 或报祖先目录 NTFS ACL 校验失败 | `npx ai-test-workbench@6.7.0 mcp engine-status`、`npx ai-test-workbench@6.7.0 doctor` | 侧车安装于 `%LOCALAPPDATA%\aitw\bin\cbm\<ver>\`（绝不在 `.aitest/` 内），按安全策略加白；受限祖先 ACL 会自动回退 `%SystemDrive%\aitw-{rt,cbm}` 并用 `icacls` 设仅当前用户可写（亦可通过 `AITEST_DATA_DIR` 或 `AITEST_CBM_BIN_DIR` / `AITEST_CBM_RUNTIME_DIR` / `AITEST_CBM_CACHE_DIR` 迁移到指定目录） |
 | WSL 已安装但 Windows 提示找不到浏览器 | `which node` vs `where.exe node` | Windows 原生与 WSL 拥有独立的 Node 与 `ms-playwright` 缓存，须分别安装 |
 | `init` 报 `qa/` 冲突阻断（退出码 `2`） | `<repo>/qa` 下存在非 Playwright 文件 | 传 `--qa-dir e2e-qa` 在独立目录初始化，绝不强覆原有文件 |
 | `update-agents` 退出码 `2` 并提示 `CONFLICT` | `*.aitest-new` 与 `qa/.aitest/agents-manifest.json` | 保留你的手改定义，人工对比合并 `*.aitest-new` 或明确加 `--force` |
